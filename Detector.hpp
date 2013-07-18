@@ -26,10 +26,10 @@
 
 #include <fstream>
 #include <deque>
-#include "Util.hpp"
 #include "SlidingWindow.hpp"
 #include "Transform.hpp"
 #include "UTF8.hpp"
+#include "Util.hpp"
 
 // Detects blocks and data type from input data
 

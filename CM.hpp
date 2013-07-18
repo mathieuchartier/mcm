@@ -415,7 +415,7 @@ public:
 	
 	// Mixers
 	size_t mixer_mask;
-#define USE_MMX
+//#define USE_MMX
 #ifdef USE_MMX
 	typedef MMXMixer<inputs, 15, 1> CMMixer;
 #else
@@ -786,6 +786,7 @@ public:
 				bit = ent.getDecodedBit(p, shift);
 			} else {
 				bit = (c >> i) & 1;
+				ent.encode(stream, bit, p, shift);
 			}
 
 #if defined(USE_MMX)
@@ -816,8 +817,6 @@ public:
 			// Encode the bit / decode at the last second.
 			if (decode) {
 				ent.Normalize(stream);
-			} else {
-				ent.encode(stream, bit, p, shift);
 			}
 
 			nibble_ctx <<= 1;

@@ -28,7 +28,6 @@
 #include "Util.hpp"
 #include "Compress.hpp"
 
-// Very basic logistic mixer.
 template <typename T, const size_t weights, const size_t fp_shift = 16, const size_t wshift = 7>
 class Mixer {
 public:
@@ -138,7 +137,6 @@ private:
 	}
 };
 
-// Very basic logistic mixer.
 template <const size_t weights, const size_t fp_shift = 16, const size_t wshift = 7>
 class MMXMixer {
 public:
