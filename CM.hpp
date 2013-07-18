@@ -46,7 +46,10 @@ public:
 	static const bool fast_mode = true;
 	static const bool statistics = false;
 	static const bool use_prefetch = true;
-	
+	static const bool fixed_probs = false;
+	static const bool use_huffman = true;
+	static const size_t huffman_len_limit = 8;
+
 	// Archive header.
 	class ArchiveHeader {
 	public:
@@ -105,8 +108,8 @@ public:
 	
 	//typedef slowBitModel<unsigned short, shift> StationaryModel;
 	typedef safeBitModel<unsigned short, shift, 5, 15> BitModel;
-	typedef fastBitModel<unsigned int, shift, 9, 30> StationaryModel;
-	typedef fastBitModel<unsigned int, shift, 5, 30> HPStationaryModel;
+	typedef fastBitModel<int, shift, 9, 30> StationaryModel;
+	typedef fastBitModel<int, shift, 5, 30> HPStationaryModel;
 
 	class WordModel {
 	public:
@@ -254,7 +257,7 @@ public:
 		typedef HPStationaryModel Model;
 
 	private:
-		static const size_t bits_per_char = 8;
+		static const size_t bits_per_char = huffman_len_limit;
 		static const size_t num_length_models = ((max_match - min_match + 2 + 2 * mm_round) >> mm_shift) * bits_per_char;
 		Model models[(256 >> char_shift) * num_length_models], *model_base; // Bits expected 0 x 8, 1 x 8.
 
@@ -468,9 +471,6 @@ public:
 #endif
 	PredModel preds[(size_t)kProfileCount][inputs][256];
 	
-	// SSE
-	typedef fastBitModel<unsigned int, shift, 6, 24> SSEM;
-	
 	static const size_t eof_char = 126;
 	
 	forceinline size_t hash_lookup(hash_t hash, bool prefetch_addr = use_prefetch) {
@@ -480,36 +480,6 @@ public:
 			prefetch(hash_table + (ret & (size_t)~(kCacheLineSize - 1)));
 		}
 		return ret;
-	}
-
-	// Do not access element 0, it contains the key !!!!!.
-	forceinline byte* nibble_hash_line(hash_t hash) {
-		//hash += hash << 7;
-		size_t key = hash >> (8 * (sizeof(size_t) - 1));
-		//static const size_t cache_line_bits = _bitSize<kCacheLineSize - 1>;
-		// Align to a nibble inside some cache line.
-		hash <<= 4;
-		hash &= hash_mask;
-		size_t ptr = (size_t)&hash_table[hash];
-		auto& st0 = *(byte*)ptr;
-		if (st0 == key) {
-			return &st0;
-		}
-		auto& st1 = *(byte*)(ptr ^ (1 << 4));
-		if (st1 == key) {
-			return &st1; 
-		}
-		auto& st2 = *(byte*)(ptr ^ (1 << 5));
-		if (st2 == key) {
-			return &st2; 
-		}
-		// Last option, should we zero the memory? hmmm.
-		auto& st3 = *(byte*)(ptr ^ (3 << 4));
-		if (st3 != key) {
-			st3 = key;
-			memset(&st3 + 1, 0, 15);
-		}
-		return &st3;
 	}
 
 	void setMemUsage(size_t usage) {
@@ -572,13 +542,16 @@ public:
 		for (size_t i = 0;i < (size_t)kProfileCount; ++i) {
 			for (size_t j = 0; j < inputs;++j) {
 				for (size_t k = 0; k < num_states; ++k) {
-					preds[i][j][k].init();
-					//preds[i][j][k].setP(max_value - sm.p(k));
+					auto& pr = preds[i][j][k];
+					pr.init();
 #ifdef USE_ST_PRED
-					// preds[i][j][k].setP(initial_probs[j][k], table);
-					preds[i][j][k].setP(initial_probs[j][k]);
+					pr.setP(initial_probs[j][k]);
 #else
-					preds[i][j][k].setP(initial_probs[j][k]);
+					if (fixed_probs) {
+						pr.setP(table.st(initial_probs[j][k]));
+					} else {
+						pr.setP(initial_probs[j][k]);
+					}
 #endif
 				}
 			}
@@ -610,27 +583,14 @@ public:
 		return ret;
 	}
 
-	forceinline byte* order0nibble(size_t ctx) {
-		return &order0[ctx << 4]; // 
-	}
-
-	forceinline byte* order1nibble(size_t p0, size_t ctx) {
-		return &order1[((1 + p0) << 8) + (ctx << 4)]; // 
-	}
-
-	// Ctx 0 = first nibble,
-	// Ctx = 1 .. 16 = second nibble.
-	static forceinline hash_t hashCtx(size_t ctx) {
-		return ctx * 123456791;
-	}
-
 	forceinline CMMixer* getProfileMixers(DataProfile profile) {
 		return &mixers[static_cast<size_t>(profile) * (mixer_mask + 1)];
 	}
 
 	void calcMixerBase() {
 		size_t p0 = (byte)buffer[buffer.getPos() - 1];
-		size_t mixer_ctx = p0 >> 4;
+		size_t p1 = (byte)buffer[buffer.getPos() - 2];
+		size_t mixer_ctx = p1 >> 4;
 		size_t mm_len = match_model.getLength();
 		mixer_ctx <<= 3;
 		if (mm_len) {
@@ -647,10 +607,9 @@ public:
 			auto wlen = word_model.getLength();
 			mixer_ctx |= (wlen > 2);
 		}
-		mixer_base = getProfileMixers(profile) + (mixer_ctx << 8);
+		mixer_base = getProfileMixers(profile) + (mixer_ctx << 8) + p0;
 	}
 
-	template <const bool fixed_probs>
 	forceinline byte nextState(byte t, size_t bit, size_t smi = 0) {
 		if (!fixed_probs) {
 #ifdef USE_ST_PRED
@@ -662,20 +621,19 @@ public:
 		return state_trans[t][bit];
 	}
 	
-	template <const bool fixed_probs>
 	forceinline int getP(byte state, size_t smi, const short* no_alias st) const {
-		if (!fixed_probs) {
+		if (fixed_probs) {
+			return preds[0][smi][state].getP();
+		} else {
 #ifdef USE_ST_PRED
 			return preds[0][smi][state].getSTP();
 #else
 			return st[preds[0][smi][state].getP()];
 #endif
-		} else {
-			return state_p[state];
 		}
 	}
 
-	template <const bool decode, const bool fixed_probs, typename TStream>
+	template <const bool decode, typename TStream>
 	size_t processByte(TStream& stream, size_t c = 0) {
 		size_t base_contexts[inputs]; // Base contexts
 
@@ -753,29 +711,29 @@ public:
 			if (inputs > 7) { s7 = &ht[base_contexts[7] ^ ctx]; }
 			if (inputs > 0 && !mm_p) { s0 = &ht[base_contexts[0] ^ ctx]; }
 
-			CMMixer* cur_mixer = &mixer_base[mixer_ctx_base >> 0];
+			CMMixer* cur_mixer = mixer_base;
 
 #if defined(USE_MMX)
 			__m128i wa = _mm_cvtsi32_si128(ushort((inputs > 0) ? (mm_p ? mm_p : getP<fixed_probs>(*s0, 0, st)) : 0));
 			__m128i wb = _mm_cvtsi32_si128((inputs > 1) ? (int(getP<fixed_probs>(*s1, 1, st)) << 16) : 0);
-			if (inputs > 2) wa = _mm_insert_epi16(wa, getP<fixed_probs>(*s2, 2, st), 2);
-			if (inputs > 3) wb = _mm_insert_epi16(wb, getP<fixed_probs>(*s3, 3, st), 3);
-			if (inputs > 4) wa = _mm_insert_epi16(wa, getP<fixed_probs>(*s4, 4, st), 4);
-			if (inputs > 5) wb = _mm_insert_epi16(wb, getP<fixed_probs>(*s5, 5, st), 5);
-			if (inputs > 6) wa = _mm_insert_epi16(wa, getP<fixed_probs>(*s6, 6, st), 6);
-			if (inputs > 7) wb = _mm_insert_epi16(wb, getP<fixed_probs>(*s7, 7, st), 7);
+			if (inputs > 2) wa = _mm_insert_epi16(wa, getP(*s2, 2, st), 2);
+			if (inputs > 3) wb = _mm_insert_epi16(wb, getP(*s3, 3, st), 3);
+			if (inputs > 4) wa = _mm_insert_epi16(wa, getP(*s4, 4, st), 4);
+			if (inputs > 5) wb = _mm_insert_epi16(wb, getP(*s5, 5, st), 5);
+			if (inputs > 6) wa = _mm_insert_epi16(wa, getP(*s6, 6, st), 6);
+			if (inputs > 7) wb = _mm_insert_epi16(wb, getP(*s7, 7, st), 7);
 			__m128i wp = _mm_or_si128(wa, wb);
 			int stp = cur_mixer->p(wp);
 			size_t p = table.sq(stp); // Mix probabilities.
 #else
-			int p0 = (inputs > 0) ? (mm_p ? mm_p : getP<fixed_probs>(*s0, 0, st)) : 0;
-			int p1 = (inputs > 1) ? getP<fixed_probs>(*s1, 1, st) : 0;
-			int p2 = (inputs > 2) ? getP<fixed_probs>(*s2, 2, st) : 0;
-			int p3 = (inputs > 3) ? getP<fixed_probs>(*s3, 3, st) : 0;
-			int p4 = (inputs > 4) ? getP<fixed_probs>(*s4, 4, st) : 0;
-			int p5 = (inputs > 5) ? getP<fixed_probs>(*s5, 5, st) : 0;
-			int p6 = (inputs > 6) ? getP<fixed_probs>(*s6, 6, st) : 0;
-			int p7 = (inputs > 7) ? getP<fixed_probs>(*s7, 7, st) : 0;
+			int p0 = (inputs > 0) ? (mm_p ? mm_p : getP(*s0, 0, st)) : 0;
+			int p1 = (inputs > 1) ? getP(*s1, 1, st) : 0;
+			int p2 = (inputs > 2) ? getP(*s2, 2, st) : 0;
+			int p3 = (inputs > 3) ? getP(*s3, 3, st) : 0;
+			int p4 = (inputs > 4) ? getP(*s4, 4, st) : 0;
+			int p5 = (inputs > 5) ? getP(*s5, 5, st) : 0;
+			int p6 = (inputs > 6) ? getP(*s6, 6, st) : 0;
+			int p7 = (inputs > 7) ? getP(*s7, 7, st) : 0;
 
 			int stp = cur_mixer->p(p0, p1, p2, p3, p4, p5, p6, p7);
 			size_t p = table.sq(stp); // Mix probabilities.
@@ -801,14 +759,14 @@ public:
 				++mixer_skip[(size_t)ret];
 			}
 
-			if (inputs > 0 && !mm_p) *s0 = nextState<fixed_probs>(*s0, bit, 0);
-			if (inputs > 1) *s1 = nextState<fixed_probs>(*s1, bit, 1);
-			if (inputs > 2) *s2 = nextState<fixed_probs>(*s2, bit, 2);
-			if (inputs > 3) *s3 = nextState<fixed_probs>(*s3, bit, 3);
-			if (inputs > 4) *s4 = nextState<fixed_probs>(*s4, bit, 4);
-			if (inputs > 5) *s5 = nextState<fixed_probs>(*s5, bit, 5);
-			if (inputs > 6) *s6 = nextState<fixed_probs>(*s6, bit, 6);
-			if (inputs > 7) *s7 = nextState<fixed_probs>(*s7, bit, 7);
+			if (inputs > 0 && !mm_p) *s0 = nextState(*s0, bit, 0);
+			if (inputs > 1) *s1 = nextState(*s1, bit, 1);
+			if (inputs > 2) *s2 = nextState(*s2, bit, 2);
+			if (inputs > 3) *s3 = nextState(*s3, bit, 3);
+			if (inputs > 4) *s4 = nextState(*s4, bit, 4);
+			if (inputs > 5) *s5 = nextState(*s5, bit, 5);
+			if (inputs > 6) *s6 = nextState(*s6, bit, 6);
+			if (inputs > 7) *s7 = nextState(*s7, bit, 7);
 
 			if (!UNLIKELY(match_model.updateBit(bit, ctx))) {
 				//calcMixerBase();
@@ -882,6 +840,11 @@ public:
 
 	template <typename TOut, typename TIn>
 	size_t Compress(TOut& sout, TIn& sin) {
+		Huffman h;
+		if (use_huffman) {
+
+		}
+
 		Detector detector;
 		detector.init();
 
@@ -925,7 +888,7 @@ public:
 					c = eof_char;
 				}
 
-				processByte<false, false>(sout, c);
+				processByte<false>(sout, c);
 				update(c);
 
 				if (UNLIKELY(c == eof_char)) {
@@ -1039,7 +1002,7 @@ public:
 			transform.setTransform(Transform::kTTAdd1);
 
 			for (;;) {
-				size_t c = processByte<true, false>(sin);
+				size_t c = processByte<true>(sin);
 				update(c);
 
 				if (c == eof_char) {

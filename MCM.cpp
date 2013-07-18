@@ -27,11 +27,13 @@
 #include <sstream>
 #include <fstream>
 
-#include "Stream.hpp"
 #include "CM.hpp"
 #include "Filter.hpp"
+#include "Huffman.hpp"
+#include "Stream.hpp"
 
 FilterCompressor<CM<6>, IdentityFilterFactory> comp;
+//FilterCompressor<HuffmanComp, IdentityFilterFactory> comp;
 
 std::string errstr(int err) {
 #ifdef WIN32

@@ -45,6 +45,10 @@ public:
 		return stream.eof();
 	}
 
+	inline void restart() {
+		stream.restart();
+	}
+
 	inline size_t getTotal() const {
 		return stream.getTotal();
 	}

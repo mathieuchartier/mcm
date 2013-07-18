@@ -131,10 +131,10 @@ public:
 
 	typedef std::map<size_t, size_t> StateReMap;
 	typedef std::vector<std::pair<size_t, size_t> > StateVec;
-	void optimizeStates() {
+	void optimizeStates(bool add_new_start_state = true) {
 		StateReMap sm;
 		StateVec new_states;
-		if (true) {
+		if (add_new_start_state) {
 			// Add an extra 0 state which you cannot return to?
 			new_states.push_back(std::make_pair(size_t(1), size_t(1)));
 		}
@@ -142,7 +142,6 @@ public:
 		for (size_t i = 0; i < 256; ++i) {
 			states[i].t[0] = states[i].t[1] = 0;
 		}
-		std::cout << "states: " << new_states.size() << std::endl;
 		for (size_t i = 0; i < new_states.size(); ++i) {
 			states[i].t[0] = new_states[i].first;
 			states[i].t[1] = new_states[i].second;
@@ -152,7 +151,7 @@ public:
 			states[0].t[1] = states[1].t[1];
 		}
 		if (false) {
-			std::ofstream fstate_derp("derp.txt");
+			std::ofstream fstate_derp("states.txt");
 			for (size_t i = 0;i < new_states.size();++i) {
 				fstate_derp << "{" << (size_t)states[i].t[0] << "," << (size_t)states[i].t[1] << "},";
 			}
