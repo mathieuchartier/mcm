@@ -31,6 +31,7 @@
 #include "Compress.hpp"
 #include "Entropy.hpp"
 #include "Log.hpp"
+#include "MatchModel.hpp"
 #include "Mixer.hpp"
 #include "Model.hpp"
 #include "Range.hpp"
@@ -43,7 +44,6 @@ public:
 	static const size_t nibble_spread = 16; //65537;
 	static const short version = 4;
 
-	static const bool fast_mode = true;
 	static const bool statistics = false;
 	static const bool use_prefetch = true;
 	static const bool fixed_probs = false;
@@ -246,165 +246,7 @@ public:
 
 	Range7 ent;
 	
-	class MatchModel {
-	public:
-		static const size_t min_match = 6; // TODO: Tweak this??????
-		static const size_t small_match = 8;
-		static const size_t max_match = 80;
-		static const size_t char_shift = 2;
-		static const size_t mm_shift = 2;
-		static const size_t mm_round = (1 << mm_shift) - 1;
-		typedef HPStationaryModel Model;
-
-	private:
-		static const size_t bits_per_char = huffman_len_limit;
-		static const size_t num_length_models = ((max_match - min_match + 2 + 2 * mm_round) >> mm_shift) * bits_per_char;
-		Model models[(256 >> char_shift) * num_length_models], *model_base; // Bits expected 0 x 8, 1 x 8.
-
-		// Current minimum match
-		size_t cur_min_match;
-
-		// Current match.
-		size_t pos, len, bit_index;
-
-		// Hash table
-		size_t hash_mask;
-		MemMap hash_storage;
-		size_t* hash_table;
-		Model* cur_mdl;
-		size_t expected_char, prev_char;
-
-		// Hashes
-		hash_t h0, h1, h2, h3;
-
-		forceinline Model* getMdl() {
-			assert(len <= max_match);
-			return model_base + bits_per_char * ((len - min_match) >> 2) + bit_index;
-		}
-	public:
-		void resize(size_t size) {
-			hash_mask = size - 1;
-			// Check power of 2.
-			assert((hash_mask & (hash_mask + 1)) == 0);
-			hash_storage.resize((hash_mask + 1) * sizeof(size_t));
-			hash_table = (size_t*)hash_storage.getData();
-		}
-		
-		forceinline int getP(SSTable& table, const short* no_alias st) {
-			if (!len) return 0;
-			cur_mdl = getMdl();
-			int p = st[cur_mdl->getP()];
-			int bit = (expected_char >> bit_index) & 1;
-			return bit ? -p : p;
-		}
-
-		void init() {
-			h0 = 0x99721245;
-			h1 = 0xDFED1353;
-			h2 = 0x22354235;
-			h3 = 0x67777349;
-			cur_min_match = min_match;
-			expected_char = 256;
-			pos = len = 0;
-			for (auto& m : models) m.init();
-			for (size_t c = 0;c < (256 >> char_shift);++c) {
-				setPrevChar(c << char_shift);
-				for (size_t i = 0;i < num_length_models;++i) {
-					size_t index = i / bits_per_char;
-					size_t len = min_match + (index << mm_shift);
-					model_base[i].setP((max_value / 2) / len); 
-				}
-			}
-			setPrevChar(254);
-		}
-
-		forceinline size_t getLength() const {
-			return len;
-		}
-
-		forceinline void resetMatch() {
-			len = 0;
-		}
-
-		forceinline void setPrevChar(size_t c) {
-			prev_char = c;
-			size_t base = prev_char >> char_shift;
-			//base &= ~1;
-			model_base = &models[base * num_length_models];
-		}
-			
-		void search(SlidingWindow2<byte>& buffer, size_t spos) {
-			// Reverse match.
-			size_t blast = buffer.getPos() - 1;
-			size_t len = sizeof(size_t);
-			if (LIKELY(*(size_t*)&buffer[spos - len] == *(size_t*)&buffer[blast - len])) {
-				for (; buffer[spos - len] == buffer[blast - len] && len < max_match; ++len);
-				if (len >= cur_min_match && len > getLength()) {
-					// Update our match.
-					this->pos = spos;
-					this->len = len;
-				}
-			}
-		}
-
-		forceinline void setHash(hash_t new_h1, size_t new_min_match = min_match) {
-			h0 = new_h1;
-			// cur_min_match = new_min_match;
-			assert(cur_min_match >= min_match);
-		}
-
-		void update(SlidingWindow2<byte>& buffer) {
-			const auto blast = buffer.getPos() - 1;
-			auto bmask = buffer.getMask();
-			setPrevChar(buffer(blast & bmask));
-
-			// Reset bit index.
-			bit_index = bits_per_char - 1;
-
-			// Update hashes.
-			h3 = hashFunc(prev_char, h2); // order n + 2
-			h2 = hashFunc(prev_char, h1); // order n + 1
-			h1 = hashFunc(prev_char, h0); // order n
-
-			// Update the existing match.
-			if (!len) {
-				auto& b1 = hash_table[h1 & hash_mask];
-				if (!((b1 ^ h1) & ~bmask))
-					search(buffer, b1);
-				if (len < small_match) {
-					auto& b2 = hash_table[h3 & hash_mask];
-					if (!((b2 ^ h3) & ~bmask))
-						search(buffer, b2);
-					if (!fast_mode && len < small_match) {
-						auto& b3 = hash_table[h2 & hash_mask];
-						if (!((b3 ^ h2) & ~bmask))
-							search(buffer, b3);
-						b3 = (blast & bmask) | (h2 & ~bmask);
-					} else 
-						b2 = (blast & bmask) | (h3 & ~bmask);
-				} else
-					b1 = (blast & bmask) | (h1 & ~bmask);
-			} else {
-				len += len < max_match;
-				++pos;
-			}
-
-			if (len) {
-				expected_char = buffer(pos + 1 & bmask);
-			}
-		}
-
-		forceinline bool updateBit(size_t bit, size_t ctx) {
-			if (len) {
-				size_t diff = ((expected_char >> bit_index) & 1) ^ bit;
-				cur_mdl->update(diff);
-				--bit_index;
-				len &= -(1 ^ diff);
-				return !diff;
-			}
-			return true;
-		}
-	} match_model;
+	MatchModel<HPStationaryModel> match_model;
 
 	// Hash table
 	size_t hash_mask;
@@ -696,7 +538,7 @@ public:
 			const auto ctx = ctx_add + nibble_ctx;
 
 			// Get match model prediction.
-			int mm_p = match_model.getP(table, st);
+			int mm_p = match_model.getP(st);
 
 			byte
 				*no_alias s0 = nullptr, *no_alias s1 = nullptr, *no_alias s2 = nullptr, *no_alias s3 = nullptr, 
@@ -711,7 +553,7 @@ public:
 			if (inputs > 7) { s7 = &ht[base_contexts[7] ^ ctx]; }
 			if (inputs > 0 && !mm_p) { s0 = &ht[base_contexts[0] ^ ctx]; }
 
-			CMMixer* cur_mixer = mixer_base;
+			CMMixer* cur_mixer = &mixer_base[0];
 
 #if defined(USE_MMX)
 			__m128i wa = _mm_cvtsi32_si128(ushort((inputs > 0) ? (mm_p ? mm_p : getP<fixed_probs>(*s0, 0, st)) : 0));
