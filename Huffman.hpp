@@ -139,7 +139,7 @@ public:
 	}
 
 	// TODO: Optimize, fix memory leaks.
-	// Based off of example from introduction to data compression.
+	// Based off of example from Introduction to Data Compression.
 	HuffTree* buildTreePackageMerge(size_t* frequencies, size_t count = 256, size_t max_depth = 16) {
 #if 0
 		// Example from book.
