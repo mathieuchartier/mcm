@@ -14,7 +14,7 @@ public:
 	static const size_t mm_round = (1 << mm_shift) - 1;
 	static const size_t max_value = 1 << 12;
 private:
-	static const size_t bits_per_char = 8;
+	static const size_t bits_per_char = 16;
 	static const size_t num_length_models = ((max_match - min_match + 2 + 2 * mm_round) >> mm_shift) * bits_per_char;
 	Model models[(256 >> char_shift) * num_length_models], *model_base; // Bits expected 0 x 8, 1 x 8.
 

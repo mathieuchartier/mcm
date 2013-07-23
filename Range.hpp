@@ -144,6 +144,15 @@ public:
 		return result;
 	}
 
+	template <typename TIn>
+	uint DecodeDirectBit(TIn& sin) {
+		Range >>= 1;
+		size_t t = (Code - Range) >> 31;
+		Code -= Range & (t - 1);
+		Normalize(sin);
+		return t ^ 1;
+	}
+
 	template <typename TOut>
 	inline void Encode(TOut& Out, size_t start, size_t size, size_t total) {
 		assert(size > 0);
@@ -159,8 +168,7 @@ public:
 	}
 
 	template <typename TIn>
-	inline void Decode(TIn& In, uint start, uint size)
-	{
+	inline void Decode(TIn& In, uint start, uint size) {
 		Code -= start * Range;
 		Range *= size;
 		Normalize(In);
