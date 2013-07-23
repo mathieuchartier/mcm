@@ -44,6 +44,41 @@ public:
 		}
 	};
 
+	template <const size_t length_limit = 16>
+	class DeCode {
+		// IsLeaf bitmap.
+		static const size_t limit = 1 << (length_limit + 1);
+		static const size_t bpw = sizeof(size_t) * 8;
+		size_t bitmap[limit / bpw];
+		byte decode[limit];
+	public:
+		forceinline void setBit(size_t index) {
+			bitmap[index / bpw] |= 1 << (index & (bpw - 1));
+		}
+
+		forceinline size_t getBit(size_t index) {
+			return (bitmap[index / bpw] >> (index & (bpw - 1))) & 1;
+		}
+
+		forceinline bool isLeaf(size_t ctx) {
+			return getBit(ctx) != 0;
+		}
+
+		forceinline byte getCode(size_t ctx) {
+			return decode[ctx];
+		}
+
+		void build(Code* codes, size_t alphabet_size) {
+			for (auto& b : bitmap) b = 0;
+			for (auto& b : decode) b = 0;
+			for (size_t i = 0; i < alphabet_size; ++i) {
+				size_t new_code = codes[i].value | (1 << codes[i].length);
+				setBit(new_code);
+				decode[new_code] = i;
+			}
+		}
+	};
+
 	template <typename T>
 	class Tree {
 	public:
@@ -95,7 +130,7 @@ public:
 			}
 		}
 
-		uint64 getCost(size_t bits = 0) {
+		uint64 getCost(size_t bits = 0) const {
 			if (isLeaf())
 				return bits * weight;
 			else
@@ -114,6 +149,10 @@ public:
 		~Tree() {
 			delete a;
 			delete b;
+		}
+
+		void printRatio(const char* name) const {
+			std::cout << "Huffman tree " << name << ": " << getWeight() << " -> " << getCost() / 8 << std::endl;
 		}
 	};
 
@@ -348,11 +387,11 @@ public:
 		Huffman huff;
 		// Build length limited tree with package merge algorithm.
 		auto* tree = huff.buildTreePackageMerge(&freq[0], alphabet_size, max_length);
-		std::cout << "Huffman tree LL(16): " << tree->getWeight() << " -> " << tree->getCost() / 8 << std::endl;
+		tree->printRatio("LL(16)");
 
 		if (false ){
 			auto* treeO = huff.buildTreeOptimal(&freq[0], alphabet_size);
-			std::cout << "Huffman tree optimal: " << treeO->getWeight() << " -> " << treeO->getCost() / 8 << std::endl;
+			treeO->printRatio("optimal");
 		}
 		
 		ProgressMeter meter;
@@ -395,22 +434,16 @@ public:
 		tree->getCodes(codes);
 
 		// Build inverse.
-		const auto inverse_size = size_t(1 << (max_length + 1));
-		std::vector<byte> inverse(inverse_size, 0);
-		std::vector<bool> is_leaf(inverse_size, false);
-		for (size_t i = 0; i < alphabet_size; ++i) {
-			size_t new_code = codes[i].value | (1 << codes[i].length);
-			is_leaf[new_code] = true;
-			inverse[new_code] = i;
-		}
+		Huffman::DeCode<max_length> decoder;
+		decoder.build(&codes[0], alphabet_size);
+
 		std::cout << std::endl;
 		for (size_t i = 0; i < length; ++i) {
 			size_t cur_code = 1;
 			do {
-				cur_code <<= 1;
-				cur_code |= ent.DecodeDirectBits(sin, 1);
-			} while (!is_leaf[cur_code]);
-			sout.write(inverse[cur_code]);
+				cur_code = (cur_code << 1) | ent.DecodeDirectBit(sin);
+			} while (!decoder.isLeaf(cur_code));
+			sout.write(decoder.getCode(cur_code));
 			meter.addBytePrint(sin.getTotal());
 		}
 		std::cout << std::endl;

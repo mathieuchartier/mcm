@@ -30,6 +30,7 @@
 #include "Detector.hpp"
 #include "Compress.hpp"
 #include "Entropy.hpp"
+#include "Huffman.hpp"
 #include "Log.hpp"
 #include "MatchModel.hpp"
 #include "Memory.hpp"
@@ -48,8 +49,6 @@ public:
 	static const bool statistics = false;
 	static const bool use_prefetch = true;
 	static const bool fixed_probs = false;
-	static const bool use_huffman = true;
-	static const size_t huffman_len_limit = 8;
 
 	// Archive header.
 	class ArchiveHeader {
@@ -120,6 +119,7 @@ public:
 
 	// Hash table
 	size_t hash_mask;
+	size_t hash_alloc_size;
 	MemMap hash_storage;
 	byte *hash_table;
 
@@ -143,13 +143,6 @@ public:
 	hash_t base_hashes[inputs];
 	size_t owhash; // Order of sizeof(size_t) hash.
 
-	// Match table
-	size_t* match_table;
-	size_t match_mask;
-	static const size_t match_base_hash = 0x54DE33FF;
-	static const size_t match_ctx_offset = 256;
-	std::vector<size_t> match_storage;
-
 	// Rotating buffer.
 	SlidingWindow2<byte> buffer;
 
@@ -162,6 +155,12 @@ public:
 	static const size_t num_states = 256;
 	short state_p[num_states];
 	byte state_trans[num_states][2];
+
+	// Huffman preprocessing.
+	static const bool use_huffman = true;
+	static const size_t huffman_len_limit = 16;
+	Huffman::Code huff_codes[256];
+	Huffman::DeCode<huffman_len_limit> huff_decoder;
 
 	// End of block signal.
 	BitModel end_of_block_mdl;
@@ -211,8 +210,8 @@ public:
 		sm.build();
 		
 		hash_mask = ((2 * MB) << archive_header.mem_usage) / sizeof(hash_table[0]) - 1;
-		
-		hash_storage.resize(hash_mask + o0size + o1size + kPageSize); // Add extra space for ctx.
+		hash_alloc_size = hash_mask + o0size + o1size + kPageSize + (1 << huffman_len_limit);
+		hash_storage.resize(hash_alloc_size); // Add extra space for ctx.
 		order0 = reinterpret_cast<byte*>(hash_storage.getData());
 		order1 = order0 + o0size;
 		hash_table = order0; // Here is where the real hash table starts
@@ -389,24 +388,14 @@ public:
 		byte* no_alias ht = hash_table;
 
 		const short* no_alias st = table.getStretchPtr();
-		size_t ctx_add = 0, mixer_add = 0, nibble_ctx = 1;
-		for (size_t i = 7; int(i) >= 0; --i) {
-			if (i == 3) {
-				// Move on to second nibble.
-				if (decode) {
-					c = (nibble_ctx ^ 16) << 4;
-				}
-				nibble_ctx -= 15;
-				// Unaligned ctx.
-				mixer_add = 15 * nibble_ctx;
-				// Aligned ctx.
-				ctx_add = nibble_spread * nibble_ctx;
-				// Go to the next nibble.
-				nibble_ctx = 1;
-			}
-			const auto mixer_ctx_base = mixer_add + nibble_ctx;
-			const auto ctx = ctx_add + nibble_ctx;
-
+		size_t ctx = 1;
+		size_t bit_index = 0, code = 0;
+		if (!decode) {
+			bit_index = huff_codes[c].length - 1;
+			assert(bit_index < huffman_len_limit);
+			code = huff_codes[c].value;
+		}
+		for (;;) {
 			// Get match model prediction.
 			int mm_p = match_model.getP(st);
 
@@ -422,6 +411,13 @@ public:
 			if (inputs > 6) { s6 = &ht[base_contexts[6] ^ ctx]; }
 			if (inputs > 7) { s7 = &ht[base_contexts[7] ^ ctx]; }
 			if (inputs > 0 && !mm_p) { s0 = &ht[base_contexts[0] ^ ctx]; }
+
+			if (s0 != nullptr) assert(s0 >= ht && s0 <= ht + hash_alloc_size);
+			assert(s1 >= ht && s1 <= ht + hash_alloc_size);
+			assert(s2 >= ht && s2 <= ht + hash_alloc_size);
+			assert(s3 >= ht && s3 <= ht + hash_alloc_size);
+			assert(s4 >= ht && s4 <= ht + hash_alloc_size);
+			assert(s5 >= ht && s5 <= ht + hash_alloc_size);
 
 			CMMixer* cur_mixer = &mixer_base[0];
 
@@ -455,7 +451,7 @@ public:
 			if (decode) { 
 				bit = ent.getDecodedBit(p, shift);
 			} else {
-				bit = (c >> i) & 1;
+				bit = (code >> bit_index) & 1;
 				ent.encode(stream, bit, p, shift);
 			}
 
@@ -482,17 +478,23 @@ public:
 
 			match_model.updateBit(bit);
 
+			ctx <<= 1;
+			ctx |= bit;
+
 			// Encode the bit / decode at the last second.
 			if (decode) {
 				ent.Normalize(stream);
+				if (huff_decoder.isLeaf(ctx)) {
+					break;
+				}
+			} else {
+				if (!bit_index) break;
+				--bit_index;
 			}
-
-			nibble_ctx <<= 1;
-			nibble_ctx |= bit;
 		}
 
 		if (decode) {
-			c |= nibble_ctx ^ 16;
+			c = huff_decoder.getCode(ctx);
 		}
 
 		return c;
@@ -532,7 +534,9 @@ public:
 			match_model.update(buffer);
 			if (match_model.getLength()) {
 				size_t expected_char = match_model.getExpectedChar(buffer);
-				match_model.updateExpectedCode(expected_char, 8);
+				size_t expected_bits = use_huffman ? huff_codes[expected_char].length : 8;
+				if (use_huffman) expected_char = huff_codes[expected_char].value;
+				match_model.updateExpectedCode(expected_char, expected_bits);
 			}
 		} else {
 			match_model.resetMatch();
@@ -554,25 +558,39 @@ public:
 
 	template <typename TOut, typename TIn>
 	size_t Compress(TOut& sout, TIn& sin) {
-		Huffman h;
-		if (use_huffman) {
-
-		}
-
+		ProgressMeter meter;
 		Detector detector;
 		detector.init();
 
 		// Compression profiles.
-		std::vector<size_t> profile_counts((size_t)kProfileCount, 0);
-		std::vector<size_t> profile_len((size_t)kProfileCount, 0);
+		std::vector<size_t>
+			profile_counts((size_t)kProfileCount, 0),
+			profile_len((size_t)kProfileCount, 0);
 
 		// Start by writing out archive header.
 		archive_header.write(sout);
-
-		ProgressMeter meter;
-		detector.fill(sin);
 		init();
 		ent.init();
+
+		Huffman h;
+		if (use_huffman) {
+			clock_t start = clock();
+			size_t freqs[256];
+			std::cout << "Building huffman tree" << std::endl;
+			for (auto& f : freqs) f = 0;
+			for (;;) {
+				int c = sin.read();
+				if (c == EOF) break;
+				++freqs[c];
+			}
+			auto* tree = h.buildTreePackageMerge(freqs, 256, huffman_len_limit);
+			tree->getCodes(&huff_codes[0]);
+			h.writeTree(ent, sout, tree, 256, huffman_len_limit);
+			sin.restart();
+			std::cout << "Building huffman tree took: " << clock() - start << " MS" << std::endl;
+		}
+
+		detector.fill(sin);
 		for (;;) {
 			if (!detector.size()) break;
 
@@ -708,6 +726,16 @@ public:
 		ProgressMeter meter(false);
 		init();
 		ent.initDecoder(sin);
+
+		if (use_huffman) {
+			Huffman h;
+			auto* tree = h.readTree(ent, sin, 256, huffman_len_limit);
+			tree->printRatio("LL");
+			tree->getCodes(&huff_codes[0]);
+			huff_decoder.build(huff_codes, 256);
+			delete tree;
+		}
+
 		for (;;) {
 			SubBlockHeader block;
 			readSubBlock(sin, block);
