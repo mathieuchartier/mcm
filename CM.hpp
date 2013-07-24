@@ -159,9 +159,8 @@ public:
 	// Huffman preprocessing.
 	static const bool use_huffman = true;
 	static const size_t huffman_len_limit = 16;
-	Huffman::Code huff_codes[256];
-	Huffman::DeCode<huffman_len_limit> huff_decoder;
-
+	Huffman huff;
+	
 	// End of block signal.
 	BitModel end_of_block_mdl;
 	DataProfile profile;
@@ -301,7 +300,7 @@ public:
 	void calcMixerBase() {
 		size_t p0 = (byte)buffer[buffer.getPos() - 1];
 		size_t p1 = (byte)buffer[buffer.getPos() - 2];
-		size_t mixer_ctx = p1 >> 4;
+		size_t mixer_ctx = p0 >> 4;
 		size_t mm_len = match_model.getLength();
 		mixer_ctx <<= 3;
 		if (mm_len) {
@@ -318,7 +317,7 @@ public:
 			auto wlen = word_model.getLength();
 			mixer_ctx |= (wlen > 2);
 		}
-		mixer_base = getProfileMixers(profile) + (mixer_ctx << 8) + p0;
+		mixer_base = getProfileMixers(profile) + (mixer_ctx << 8);
 	}
 
 	forceinline byte nextState(byte t, size_t bit, size_t smi = 0) {
@@ -388,16 +387,17 @@ public:
 		byte* no_alias ht = hash_table;
 
 		const short* no_alias st = table.getStretchPtr();
-		size_t ctx = 1;
+		size_t ctx = 1, huff_state = huff.start_state;
 		size_t bit_index = 0, code = 0;
 		if (!decode) {
-			bit_index = huff_codes[c].length - 1;
-			assert(bit_index < huffman_len_limit);
-			code = huff_codes[c].value;
+			const auto& huff_code = huff.getCode(c);
+			bit_index = huff_code.length - 1;
+			code = huff_code.value;
 		}
 		for (;;) {
 			// Get match model prediction.
 			int mm_p = match_model.getP(st);
+			ctx = huff_state;
 
 			byte
 				*no_alias s0 = nullptr, *no_alias s1 = nullptr, *no_alias s2 = nullptr, *no_alias s3 = nullptr, 
@@ -419,7 +419,7 @@ public:
 			assert(s4 >= ht && s4 <= ht + hash_alloc_size);
 			assert(s5 >= ht && s5 <= ht + hash_alloc_size);
 
-			CMMixer* cur_mixer = &mixer_base[0];
+			CMMixer* cur_mixer = &mixer_base[ctx];
 
 #if defined(USE_MMX)
 			__m128i wa = _mm_cvtsi32_si128(ushort((inputs > 0) ? (mm_p ? mm_p : getP<fixed_probs>(*s0, 0, st)) : 0));
@@ -478,13 +478,15 @@ public:
 
 			match_model.updateBit(bit);
 
-			ctx <<= 1;
-			ctx |= bit;
+			//if (!use_huffman) {
+				ctx = (ctx << 1) | bit;
+			//}
 
 			// Encode the bit / decode at the last second.
+			huff_state = huff.state_trans[huff_state][bit];
 			if (decode) {
 				ent.Normalize(stream);
-				if (huff_decoder.isLeaf(ctx)) {
+				if (huff.isLeaf(huff_state)) {
 					break;
 				}
 			} else {
@@ -494,7 +496,7 @@ public:
 		}
 
 		if (decode) {
-			c = huff_decoder.getCode(ctx);
+			c = huff.getChar(huff_state);
 		}
 
 		return c;
@@ -534,8 +536,8 @@ public:
 			match_model.update(buffer);
 			if (match_model.getLength()) {
 				size_t expected_char = match_model.getExpectedChar(buffer);
-				size_t expected_bits = use_huffman ? huff_codes[expected_char].length : 8;
-				if (use_huffman) expected_char = huff_codes[expected_char].value;
+				size_t expected_bits = use_huffman ? huff.getCode(expected_char).length : 8;
+				if (use_huffman) expected_char = huff.getCode(expected_char).value;
 				match_model.updateExpectedCode(expected_char, expected_bits);
 			}
 		} else {
@@ -556,6 +558,11 @@ public:
 		block_profile_models[(size_t)profile].encode(ent, sout, (size_t)block.profile);
 	}
 
+	void BuildHuffCodes(Huffman::Tree<size_t>* tree) {
+		// Get the compression codes.
+		tree->getCodes(&huff_codes[0]);
+	}
+
 	template <typename TOut, typename TIn>
 	size_t Compress(TOut& sout, TIn& sin) {
 		ProgressMeter meter;
@@ -572,7 +579,6 @@ public:
 		init();
 		ent.init();
 
-		Huffman h;
 		if (use_huffman) {
 			clock_t start = clock();
 			size_t freqs[256];
@@ -583,9 +589,10 @@ public:
 				if (c == EOF) break;
 				++freqs[c];
 			}
-			auto* tree = h.buildTreePackageMerge(freqs, 256, huffman_len_limit);
-			tree->getCodes(&huff_codes[0]);
-			h.writeTree(ent, sout, tree, 256, huffman_len_limit);
+			auto* tree = Huffman::buildTreePackageMerge(freqs, 256, huffman_len_limit);
+			tree->printRatio("LL");
+			Huffman::writeTree(ent, sout, tree, 256, huffman_len_limit);
+			huff.build(tree);
 			sin.restart();
 			std::cout << "Building huffman tree took: " << clock() - start << " MS" << std::endl;
 		}
@@ -728,11 +735,8 @@ public:
 		ent.initDecoder(sin);
 
 		if (use_huffman) {
-			Huffman h;
-			auto* tree = h.readTree(ent, sin, 256, huffman_len_limit);
-			tree->printRatio("LL");
-			tree->getCodes(&huff_codes[0]);
-			huff_decoder.build(huff_codes, 256);
+			auto* tree = Huffman::readTree(ent, sin, 256, huffman_len_limit);
+			huff.build(tree);
 			delete tree;
 		}
 
