@@ -44,41 +44,6 @@ public:
 		}
 	};
 
-	template <const size_t length_limit = 16>
-	class DeCode {
-		// IsLeaf bitmap.
-		static const size_t limit = 1 << (length_limit + 1);
-		static const size_t bpw = sizeof(size_t) * 8;
-		size_t bitmap[limit / bpw];
-		byte decode[limit];
-	public:
-		forceinline void setBit(size_t index) {
-			bitmap[index / bpw] |= 1 << (index & (bpw - 1));
-		}
-
-		forceinline size_t getBit(size_t index) {
-			return (bitmap[index / bpw] >> (index & (bpw - 1))) & 1;
-		}
-
-		forceinline bool isLeaf(size_t ctx) {
-			return getBit(ctx) != 0;
-		}
-
-		forceinline byte getCode(size_t ctx) {
-			return decode[ctx];
-		}
-
-		void build(Code* codes, size_t alphabet_size) {
-			for (auto& b : bitmap) b = 0;
-			for (auto& b : decode) b = 0;
-			for (size_t i = 0; i < alphabet_size; ++i) {
-				size_t new_code = codes[i].value | (1 << codes[i].length);
-				setBit(new_code);
-				decode[new_code] = i;
-			}
-		}
-	};
-
 	template <typename T>
 	class Tree {
 	public:
@@ -98,7 +63,7 @@ public:
 			return weight;
 		}
 
-		void getCodes(Code* codes, size_t bits = 0, size_t length = 0) {
+		void getCodes(Code* codes, size_t bits = 0, size_t length = 0) const {
 			assert(codes != nullptr);
 			if (isLeaf()) {
 				codes[value].value = bits;
@@ -167,7 +132,66 @@ public:
 
 	typedef std::multiset<HuffTree*, TreeComparator> TreeSet;
 public:
-	HuffTree* buildTreeOptimal(size_t* frequencies, size_t count = 256) {
+	// TODO, not hardcode the size in??
+	ushort state_trans[256][2];
+	Code codes[256];
+	
+	static const ushort start_state = 0;
+
+	forceinline static bool isLeaf(ushort state) {
+		return (state & 0x100) != 0;
+	}
+
+	forceinline static size_t getChar(ushort state) {
+		assert(isLeaf(state));
+		return state ^ 0x100;
+	}
+
+	forceinline const Code& getCode(size_t index) const {
+		return codes[index];
+	}
+
+	template <typename T>
+	void build(const Tree<T>* tree, size_t alphabet_size = 256) {
+		typedef const Tree<T> TTree;
+		tree->getCodes(codes);
+
+		std::vector<TTree*> work;
+		work.push_back(tree);
+
+		std::map<TTree*, size_t> tree_map;
+		size_t cur_state = start_state, cur_state_leaf = cur_state + 0x100;
+
+		// Calculate tree -> state map.
+		// TODO: Improve layout to maximize number of cache misses to 2 per byte.
+		do {
+			std::vector<TTree*> temp;
+			for (size_t i = 0; i < work.size(); ++i) {
+				auto* cur_tree = work[i];
+				if (cur_tree->isLeaf()) {
+					tree_map[cur_tree] = cur_tree->value | 0x100;
+				} else {
+					tree_map[cur_tree] = cur_state++;
+					temp.push_back(cur_tree->a);
+					temp.push_back(cur_tree->b);
+				}
+			}
+			work.swap(temp);
+		} while (!work.empty());
+
+		// Calculate transitions.
+		for (auto it : tree_map) {
+			auto* t = it.first;
+			if (!isLeaf(tree_map[t])) {
+				state_trans[tree_map[t]][0] = tree_map[t->a];
+				state_trans[tree_map[t]][1] = tree_map[t->b];
+			}
+		}
+
+		int x = 2;
+	}
+
+	static HuffTree* buildTreeOptimal(size_t* frequencies, size_t count = 256) {
 		TreeSet trees;
 		for (size_t i = 0; i < count; ++i) {
 			if (frequencies[i]) {
@@ -179,19 +203,7 @@ public:
 
 	// TODO: Optimize, fix memory leaks.
 	// Based off of example from Introduction to Data Compression.
-	HuffTree* buildTreePackageMerge(size_t* frequencies, size_t count = 256, size_t max_depth = 16) {
-#if 0
-		// Example from book.
-		count = 6;
-		max_depth = 3;
-		frequencies[0] = 5;
-		frequencies[1] = 10;
-		frequencies[2] = 15;
-		frequencies[3] = 20;
-		frequencies[4] = 20;
-		frequencies[5] = 30;
-#endif
-
+	static HuffTree* buildTreePackageMerge(size_t* frequencies, size_t count = 256, size_t max_depth = 16) {
 		class Package {
 		public:
 			std::multiset<size_t> alphabets;
@@ -285,7 +297,7 @@ public:
 		return buildFromCodeLengths(&lengths[0], count, max_depth, &frequencies[0]);
 	}
 
-	HuffTree* buildFromCodeLengths(size_t* lengths, size_t count, size_t max_depth, size_t* freqs = nullptr) {
+	static HuffTree* buildFromCodeLengths(size_t* lengths, size_t count, size_t max_depth, size_t* freqs = nullptr) {
 		HuffTree* tree = new HuffTree(size_t(0), 0);
 		typedef std::vector<HuffTree*> TreeVec;
 		TreeVec cur_level;
@@ -316,7 +328,7 @@ public:
 	}
 
 	// Combine two smallest trees until we hit max depth.
-	HuffTree* buildTree(TreeSet& trees) {
+	static HuffTree* buildTree(TreeSet& trees) {
 		while (trees.size() > 1) {
 			auto it = trees.begin();
 			HuffTree *a = *it;
@@ -332,7 +344,7 @@ public:
 
 	// Write a huffmann tree to a stream.
 	template <typename TEnt, typename TStream>
-	void writeTree(TEnt& ent, TStream& stream, HuffTree* tree, size_t alphabet_size, size_t max_length) {
+	static void writeTree(TEnt& ent, TStream& stream, HuffTree* tree, size_t alphabet_size, size_t max_length) {
 		std::vector<size_t> lengths(alphabet_size, 0);
 		tree->getLengths(&lengths[0]);
 		// Assumes we can't have any 0 length codes.
@@ -344,7 +356,7 @@ public:
 
 	// Read a huffmann tree from a stream.
 	template <typename TEnt, typename TStream>
-	HuffTree* readTree(TEnt& ent, TStream& stream, size_t alphabet_size, size_t max_length) {
+	static HuffTree* readTree(TEnt& ent, TStream& stream, size_t alphabet_size, size_t max_length) {
 		std::vector<size_t> lengths(alphabet_size, 0);
 		for (size_t i = 0; i < alphabet_size; ++i) {
 			lengths[i] = ent.decodeDirect(stream, max_length) + 1;

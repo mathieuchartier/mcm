@@ -32,7 +32,7 @@
 #include "Huffman.hpp"
 #include "Stream.hpp"
 
-FilterCompressor<CM<6>, IdentityFilterFactory> comp;
+FilterCompressor<CM<7>, IdentityFilterFactory> comp;
 //FilterCompressor<HuffmanComp, IdentityFilterFactory> comp;
 
 std::string errstr(int err) {

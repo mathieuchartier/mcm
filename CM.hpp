@@ -44,7 +44,7 @@ template <const size_t inputs = 6>
 class CM {
 public:
 	static const size_t nibble_spread = 16; //65537;
-	static const short version = 4;
+	static const short version = 5;
 
 	static const bool statistics = false;
 	static const bool use_prefetch = true;
@@ -124,8 +124,8 @@ public:
 	byte *hash_table;
 
 	// Automatically zerored out.
-	static const size_t o0size = kPageSize;
-	static const size_t o1size = 0x10000 + kPageSize;
+	static const size_t o0size = 0x100;
+	static const size_t o1size = 0x10000;
 	byte *order0, *order1;
 	
 	// Mixers
@@ -159,9 +159,8 @@ public:
 	// Huffman preprocessing.
 	static const bool use_huffman = true;
 	static const size_t huffman_len_limit = 16;
-	Huffman::Code huff_codes[256];
-	Huffman::DeCode<huffman_len_limit> huff_decoder;
-
+	Huffman huff;
+	
 	// End of block signal.
 	BitModel end_of_block_mdl;
 	DataProfile profile;
@@ -301,7 +300,7 @@ public:
 	void calcMixerBase() {
 		size_t p0 = (byte)buffer[buffer.getPos() - 1];
 		size_t p1 = (byte)buffer[buffer.getPos() - 2];
-		size_t mixer_ctx = p1 >> 4;
+		size_t mixer_ctx = p0 >> 4;
 		size_t mm_len = match_model.getLength();
 		mixer_ctx <<= 3;
 		if (mm_len) {
@@ -318,7 +317,7 @@ public:
 			auto wlen = word_model.getLength();
 			mixer_ctx |= (wlen > 2);
 		}
-		mixer_base = getProfileMixers(profile) + (mixer_ctx << 8) + p0;
+		mixer_base = getProfileMixers(profile) + (mixer_ctx << 8);
 	}
 
 	forceinline byte nextState(byte t, size_t bit, size_t smi = 0) {
@@ -368,11 +367,10 @@ public:
 			base_contexts[start++] = hash_lookup(hashFunc(p4, hashFunc(p3, 0xD55F1ADB))); // Order 34
 		}
 
-		hash_t h = 897654123;
-		for (size_t i = 0; ; ++i) {
+		hash_t h = hashFunc(897654123, p0);
+		for (size_t i = 1; ; ++i) {
 			const auto order = i + 1;
-			size_t p0 = (byte)buffer[blast - i];
-			h = hashFunc(p0, h);
+			h = hashFunc((byte)buffer[blast - i], h);
 			if (order > 1 && order != 5) {
 				if (start < inputs)
 					base_contexts[start++] = hash_lookup(h);
@@ -388,16 +386,15 @@ public:
 		byte* no_alias ht = hash_table;
 
 		const short* no_alias st = table.getStretchPtr();
-		size_t ctx = 1;
-		size_t bit_index = 0, code = 0;
+		size_t huff_state = huff.start_state, code = 0;
 		if (!decode) {
-			bit_index = huff_codes[c].length - 1;
-			assert(bit_index < huffman_len_limit);
-			code = huff_codes[c].value;
+			const auto& huff_code = huff.getCode(c);
+			code = huff_code.value << (sizeof(size_t) * 8 - huff_code.length);
 		}
 		for (;;) {
 			// Get match model prediction.
-			int mm_p = match_model.getP(st);
+			int mm_p = 0; // match_model.getP(st);
+			size_t ctx = huff_state;
 
 			byte
 				*no_alias s0 = nullptr, *no_alias s1 = nullptr, *no_alias s2 = nullptr, *no_alias s3 = nullptr, 
@@ -419,7 +416,7 @@ public:
 			assert(s4 >= ht && s4 <= ht + hash_alloc_size);
 			assert(s5 >= ht && s5 <= ht + hash_alloc_size);
 
-			CMMixer* cur_mixer = &mixer_base[0];
+			CMMixer* cur_mixer = &mixer_base[ctx];
 
 #if defined(USE_MMX)
 			__m128i wa = _mm_cvtsi32_si128(ushort((inputs > 0) ? (mm_p ? mm_p : getP<fixed_probs>(*s0, 0, st)) : 0));
@@ -451,7 +448,8 @@ public:
 			if (decode) { 
 				bit = ent.getDecodedBit(p, shift);
 			} else {
-				bit = (code >> bit_index) & 1;
+				bit = code >> (sizeof(size_t) * 8 - 1);
+				code <<= 1;
 				ent.encode(stream, bit, p, shift);
 			}
 
@@ -478,23 +476,18 @@ public:
 
 			match_model.updateBit(bit);
 
-			ctx <<= 1;
-			ctx |= bit;
-
 			// Encode the bit / decode at the last second.
 			if (decode) {
 				ent.Normalize(stream);
-				if (huff_decoder.isLeaf(ctx)) {
-					break;
-				}
-			} else {
-				if (!bit_index) break;
-				--bit_index;
+			}
+			huff_state = huff.state_trans[huff_state][bit];
+			if (huff.isLeaf(huff_state)) {
+				break;
 			}
 		}
 
 		if (decode) {
-			c = huff_decoder.getCode(ctx);
+			c = huff.getChar(huff_state);
 		}
 
 		return c;
@@ -534,8 +527,8 @@ public:
 			match_model.update(buffer);
 			if (match_model.getLength()) {
 				size_t expected_char = match_model.getExpectedChar(buffer);
-				size_t expected_bits = use_huffman ? huff_codes[expected_char].length : 8;
-				if (use_huffman) expected_char = huff_codes[expected_char].value;
+				size_t expected_bits = use_huffman ? huff.getCode(expected_char).length : 8;
+				if (use_huffman) expected_char = huff.getCode(expected_char).value;
 				match_model.updateExpectedCode(expected_char, expected_bits);
 			}
 		} else {
@@ -556,6 +549,11 @@ public:
 		block_profile_models[(size_t)profile].encode(ent, sout, (size_t)block.profile);
 	}
 
+	void BuildHuffCodes(Huffman::Tree<size_t>* tree) {
+		// Get the compression codes.
+		tree->getCodes(&huff_codes[0]);
+	}
+
 	template <typename TOut, typename TIn>
 	size_t Compress(TOut& sout, TIn& sin) {
 		ProgressMeter meter;
@@ -572,7 +570,6 @@ public:
 		init();
 		ent.init();
 
-		Huffman h;
 		if (use_huffman) {
 			clock_t start = clock();
 			size_t freqs[256];
@@ -583,9 +580,10 @@ public:
 				if (c == EOF) break;
 				++freqs[c];
 			}
-			auto* tree = h.buildTreePackageMerge(freqs, 256, huffman_len_limit);
-			tree->getCodes(&huff_codes[0]);
-			h.writeTree(ent, sout, tree, 256, huffman_len_limit);
+			auto* tree = Huffman::buildTreePackageMerge(freqs, 256, huffman_len_limit);
+			tree->printRatio("LL");
+			Huffman::writeTree(ent, sout, tree, 256, huffman_len_limit);
+			huff.build(tree);
 			sin.restart();
 			std::cout << "Building huffman tree took: " << clock() - start << " MS" << std::endl;
 		}
@@ -728,11 +726,8 @@ public:
 		ent.initDecoder(sin);
 
 		if (use_huffman) {
-			Huffman h;
-			auto* tree = h.readTree(ent, sin, 256, huffman_len_limit);
-			tree->printRatio("LL");
-			tree->getCodes(&huff_codes[0]);
-			huff_decoder.build(huff_codes, 256);
+			auto* tree = Huffman::readTree(ent, sin, 256, huffman_len_limit);
+			huff.build(tree);
 			delete tree;
 		}
 
