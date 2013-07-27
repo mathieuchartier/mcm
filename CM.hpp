@@ -147,6 +147,7 @@ public:
 	SlidingWindow2<byte> buffer;
 
 	// Options
+	size_t opt_var;
 	bool use_word;
 	bool use_match;
 	bool use_sparse;
@@ -194,6 +195,10 @@ public:
 
 	void setMemUsage(size_t usage) {
 		archive_header.mem_usage = usage;
+	}
+
+	CM() {
+		opt_var = 0xD55F1ADB;
 	}
 
 	void init() {
@@ -276,12 +281,11 @@ public:
 		}
 	}
 
-	static forceinline hash_t hashFunc(size_t a, hash_t b) {
+	forceinline hash_t hashFunc(size_t a, hash_t b) {
 		b += a;
-		b += rotate_left(b, 10);
+		b += rotate_left(b, 9);
 		return b ^ (b >> 6);
 	}
-
 
 	forceinline size_t getOrder0() const {
 		return 0;
@@ -362,9 +366,9 @@ public:
 		}
 
 		if (use_sparse) {
-			base_contexts[start++] = hash_lookup(hashFunc(p2, hashFunc(p1, 0x98764123))); // Order 12
-			base_contexts[start++] = hash_lookup(hashFunc(p3, hashFunc(p2, 0x1DD41592))); // Order 23
-			base_contexts[start++] = hash_lookup(hashFunc(p4, hashFunc(p3, 0xD55F1ADB))); // Order 34
+			base_contexts[start++] = hash_lookup(hashFunc(p2, hashFunc(p1, 0x429702E9))); // Order 12
+			base_contexts[start++] = hash_lookup(hashFunc(p3, hashFunc(p2, 0x53204647))); // Order 23
+			base_contexts[start++] = hash_lookup(hashFunc(p4, hashFunc(p3, opt_var))); // Order 34
 		}
 
 		hash_t h = hashFunc(897654123, p0);
@@ -393,7 +397,7 @@ public:
 		}
 		for (;;) {
 			// Get match model prediction.
-			int mm_p = 0; // match_model.getP(st);
+			int mm_p = match_model.getP(st);
 			size_t ctx = huff_state;
 
 			byte

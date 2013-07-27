@@ -156,11 +156,13 @@ public:
 		typedef const Tree<T> TTree;
 		tree->getCodes(codes);
 
-		std::vector<TTree*> work;
+		std::vector<TTree*> work, todo;
 		work.push_back(tree);
 
 		std::map<TTree*, size_t> tree_map;
 		size_t cur_state = start_state, cur_state_leaf = cur_state + 0x100;
+		bool state_available[256];
+		for (auto& b : state_available) b = true;
 
 		// Calculate tree -> state map.
 		// TODO: Improve layout to maximize number of cache misses to 2 per byte.
@@ -171,7 +173,13 @@ public:
 				if (cur_tree->isLeaf()) {
 					tree_map[cur_tree] = cur_tree->value | 0x100;
 				} else {
-					tree_map[cur_tree] = cur_state++;
+					if (true || cur_state < 64) {
+						state_available[cur_state] = false;
+						tree_map[cur_tree] = cur_state++;
+					} else {
+						// Try to find a state with matching low 6 bits:
+						// todo
+					}
 					temp.push_back(cur_tree->a);
 					temp.push_back(cur_tree->b);
 				}
@@ -187,8 +195,6 @@ public:
 				state_trans[tree_map[t]][1] = tree_map[t->b];
 			}
 		}
-
-		int x = 2;
 	}
 
 	static HuffTree* buildTreeOptimal(size_t* frequencies, size_t count = 256) {

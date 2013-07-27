@@ -35,6 +35,12 @@ private:
 	// Hashes.
 	hash_t h0, h1, h2, h3;
 public:
+	size_t opt_var;
+
+	MatchModel() : opt_var(0) {
+
+	}
+
 	void resize(size_t size) {
 		hash_mask = size - 1;
 		// Check power of 2.
@@ -105,10 +111,10 @@ public:
 		assert(cur_min_match >= min_match);
 	}
 	
-	static forceinline hash_t hashFunc(size_t c, hash_t h) {
-		h += c;
-		h += rotate_left(h, 10);
-		return h ^ (h >> 6);
+	forceinline hash_t hashFunc(size_t a, hash_t b) {
+		b += a;
+		b += rotate_left(b, 9);
+		return b ^ (b >> 6);
 	}
 
 	void update(SlidingWindow2<byte>& buffer) {

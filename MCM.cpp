@@ -32,7 +32,7 @@
 #include "Huffman.hpp"
 #include "Stream.hpp"
 
-FilterCompressor<CM<7>, IdentityFilterFactory> comp;
+FilterCompressor<CM<6>, IdentityFilterFactory> comp;
 //FilterCompressor<HuffmanComp, IdentityFilterFactory> comp;
 
 std::string errstr(int err) {
@@ -116,7 +116,7 @@ int usage(const std::string& name) {
 }
 
 int main(int argc, char* argv[]) {
-	bool decompress = false, test_mode = false;
+	bool decompress = false, test_mode = false, opt_mode = false;
 	assert(argc >= 1);
 	std::string in_file, out_file, program = trim_ext(argv[0]);
 	// Parse options.
@@ -125,6 +125,7 @@ int main(int argc, char* argv[]) {
 		std::string arg = argv[i];
 		if (arg == "-d") decompress = true;
 		else if (arg == "-test") test_mode = true;
+		else if (arg == "-opt") opt_mode = true;
 		else if (arg == "-1") comp.setMemUsage(1);
 		else if (arg == "-2") comp.setMemUsage(2);
 		else if (arg == "-3") comp.setMemUsage(3);
@@ -183,7 +184,29 @@ int main(int argc, char* argv[]) {
 		}
 	} else {
 		std::cout << "Compressing to " << out_file << std::endl;
+		srand(time(NULL));
+		//comp.opt_var = (10 << 5) + 6;
+		//comp.opt_var = 19169;
+
 		auto size = comp.Compress(fout, fin);
+		size_t* opt_var = &comp.match_model.opt_var;
+		size_t best_var = *opt_var;
+		if (opt_mode) {
+			for (;*opt_var < 32 * 32;++*opt_var) {
+			//for (;;) {
+			//for (;;comp.opt_var = rand32()) {
+				fout.restart();
+				fin.restart();
+				auto new_size = comp.Compress(fout, fin);
+				if (new_size < size) {
+					std::cout << "(" << *opt_var << "): " << size << " -> " << new_size << std::endl;
+					size = new_size;
+					best_var = *opt_var;
+				}
+				std::cout << "best(" << std::hex << best_var << ")=" << std::dec << size << std::endl;
+			}
+		}
+		
 		//auto size = freqCount.Compress(fout, fin);
 		clock_t time = clock() - start;
 		std::cout << "Compression took " << time << " MS" << std::endl;

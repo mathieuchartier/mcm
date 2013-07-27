@@ -63,6 +63,10 @@ struct _bitSize {static const uint64 value = 1 + _bitSize<n / 2>::value;};
 template <>
 struct _bitSize<0> {static const uint64 value = 0;};
 
+inline size_t rand32() {
+	return rand() ^ (rand() << 16);
+}
+
 class ProgressMeter {
 	size_t count, prev_size, prev_count;
 	clock_t start;
