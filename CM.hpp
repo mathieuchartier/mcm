@@ -134,7 +134,7 @@ public:
 #ifdef USE_MMX
 	typedef MMXMixer<inputs, 15, 1> CMMixer;
 #else
-	typedef Mixer<int, inputs, 17, 1> CMMixer;
+	typedef Mixer<int, inputs+1, 17, 1> CMMixer;
 #endif
 	std::vector<CMMixer> mixers;
 	CMMixer *mixer_base;
@@ -152,7 +152,7 @@ public:
 	bool use_match;
 	bool use_sparse;
 	
-	// Fast table
+	// Fast table.
 	static const size_t num_states = 256;
 	short state_p[num_states];
 	byte state_trans[num_states][2];
@@ -198,7 +198,7 @@ public:
 	}
 
 	CM() {
-		opt_var = 0xD55F1ADB;
+		opt_var = 0;
 	}
 
 	void init() {
@@ -368,10 +368,10 @@ public:
 		if (use_sparse) {
 			base_contexts[start++] = hash_lookup(hashFunc(p2, hashFunc(p1, 0x429702E9))); // Order 12
 			base_contexts[start++] = hash_lookup(hashFunc(p3, hashFunc(p2, 0x53204647))); // Order 23
-			base_contexts[start++] = hash_lookup(hashFunc(p4, hashFunc(p3, opt_var))); // Order 34
+			base_contexts[start++] = hash_lookup(hashFunc(p4, hashFunc(p3, 0xD55F1ADB))); // Order 34
 		}
 
-		hash_t h = hashFunc(897654123, p0);
+		hash_t h = hashFunc(0x32017044, p0);
 		for (size_t i = 1; ; ++i) {
 			const auto order = i + 1;
 			h = hashFunc((byte)buffer[blast - i], h);

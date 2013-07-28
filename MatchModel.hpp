@@ -57,10 +57,7 @@ public:
 	}
 
 	void init() {
-		h0 = 0x99721245;
-		h1 = 0xDFED1353;
-		h2 = 0x22354235;
-		h3 = 0x67777349;
+		h0 = h1 = h2 = h3 = 0;
 		cur_min_match = min_match;
 		expected_code = 0;
 		pos = len = 0;

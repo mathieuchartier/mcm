@@ -185,16 +185,14 @@ int main(int argc, char* argv[]) {
 	} else {
 		std::cout << "Compressing to " << out_file << std::endl;
 		srand(time(NULL));
-		//comp.opt_var = (10 << 5) + 6;
-		//comp.opt_var = 19169;
 
 		auto size = comp.Compress(fout, fin);
-		size_t* opt_var = &comp.match_model.opt_var;
-		size_t best_var = *opt_var;
 		if (opt_mode) {
-			for (;*opt_var < 32 * 32;++*opt_var) {
+			size_t* opt_var = &comp.opt_var; //comp.match_model.opt_var;
+			size_t best_var = *opt_var;
+			//for (;*opt_var < 32 * 32;++*opt_var) {
 			//for (;;) {
-			//for (;;comp.opt_var = rand32()) {
+			for (;;comp.opt_var = rand32()) {
 				fout.restart();
 				fin.restart();
 				auto new_size = comp.Compress(fout, fin);
@@ -207,7 +205,6 @@ int main(int argc, char* argv[]) {
 			}
 		}
 		
-		//auto size = freqCount.Compress(fout, fin);
 		clock_t time = clock() - start;
 		std::cout << "Compression took " << time << " MS" << std::endl;
 		std::cout << "Rate: " << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fin.getTotal()) << " ns/B" << std::endl;
