@@ -52,8 +52,12 @@ public:
 	forceinline int getP(const short* no_alias st) {
 		if (!len) return 0;;
 		int p = st[cur_mdl->getP()];
-		int bit = expected_code >> code_bit_shift;
+		int bit = getExpectedBit();
 		return bit ? -p : p;
+	}
+
+	forceinline size_t getExpectedBit() const {
+		return expected_code >> code_bit_shift;
 	}
 
 	void init() {

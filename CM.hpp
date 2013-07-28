@@ -21,13 +21,13 @@
     along with MCM.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-
 #ifndef _CM_HPP_
 #define _CM_HPP_
 
 #include <cstdlib>
 #include <vector>
 #include "Detector.hpp"
+#include "DivTable.hpp"
 #include "Compress.hpp"
 #include "Entropy.hpp"
 #include "Huffman.hpp"
@@ -172,6 +172,9 @@ public:
 	typedef bitContextModel<BitModel, (size_t)kProfileCount+1> BlockProfileModel;
 	BlockProfileModel block_profile_models[(size_t)kProfileCount];
 
+	// Division table.
+	DivTable<short, shift, 1024> div_table;
+	
 	// SM
 //#define USE_ST_PRED
 #ifdef USE_ST_PRED
@@ -241,7 +244,7 @@ public:
 			for (size_t j = 0; j < 2; ++j) {
 				state_trans[i][j] = sm.getTransition(i, j);
 			}
-		}	
+		}
 
 		unsigned short initial_probs[][256] = {
 			{1890,1430,689,498,380,292,171,165,155,137,96,101,70,81,92,72,64,85,76,57,100,65,33,44,49,40,69,39,63,29,46,55,41,63,33,38,35,24,33,32,30,28,33,51,66,28,52,2,15,0,0,1,0,797,442,182,242,194,201,183,153,135,124,171,93,85,122,67,71,93,222,32,631,896,980,647,895,164,93,1375,693,566,497,420,414,411,357,356,319,1740,649,683,681,1717,1170,1025,892,834,835,685,1727,1259,1612,1588,1778,1999,2524,2197,2613,2781,2957,2181,1664,1735,1496,1061,913,2521,1524,1935,2155,2733,1500,1282,2906,3093,2337,3337,2392,1647,3113,2435,1885,3332,2614,3384,3394,3437,3606,3432,3669,3473,2090,1598,3186,3578,3713,3533,1936,1525,2864,3689,3624,3782,3769,2293,3974,2654,3953,2693,3088,2302,1967,2558,2865,1563,2458,1805,3255,3700,1576,2840,2649,3017,1472,2467,2018,3157,3024,2338,3011,3377,3361,3394,3515,1715,3653,2480,1370,3695,3593,2812,2561,3709,3827,3780,3787,3799,3850,3817,3773,3863,3943,1946,3922,3946,3954,3952,4089,2316,4095,2515,4087,3067,2107,4095,2986,2806,3420,2255,3818,3269,3614,2293,2541,3370,3583,3572,2147,2845,2940,2999,3591,3507,1981,3072,2950,2851,3629,3890,3891,3867,2290,3846,3637,2856,4009,3996,3989,4032,4007,4023,2937,4008,4095,2048,},
@@ -270,6 +273,11 @@ public:
 #endif
 				}
 			}
+		}
+
+		div_table.init();
+		for (size_t i = 0; i < div_table.size(); ++i) {
+			div_table[i] = table.st(div_table[i]);
 		}
 
 		setDataProfile(kBinary);
@@ -443,6 +451,8 @@ public:
 			int p5 = (inputs > 5) ? getP(*s5, 5, st) : 0;
 			int p6 = (inputs > 6) ? getP(*s6, 6, st) : 0;
 			int p7 = (inputs > 7) ? getP(*s7, 7, st) : 0;
+			p6 = div_table[match_model.getLength()];
+			if (match_model.getExpectedBit()) p6 = -p6;
 
 			int stp = cur_mixer->p(p0, p1, p2, p3, p4, p5, p6, p7);
 			size_t p = table.sq(stp); // Mix probabilities.
