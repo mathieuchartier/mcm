@@ -35,6 +35,7 @@ private:
 	// Hashes.
 	hash_t h0, h1, h2, h3;
 public:
+	typedef CyclicBuffer<byte> Buffer;
 	size_t opt_var;
 
 	MatchModel() : opt_var(0) {
@@ -92,7 +93,7 @@ public:
 		model_base = &models[base * num_length_models];
 	}
 			
-	void search(SlidingWindow2<byte>& buffer, size_t spos) {
+	void search(Buffer& buffer, size_t spos) {
 		// Reverse match.
 		size_t blast = buffer.getPos() - 1;
 		size_t len = sizeof(size_t);
@@ -118,7 +119,7 @@ public:
 		return b ^ (b >> 6);
 	}
 
-	void update(SlidingWindow2<byte>& buffer) {
+	void update(Buffer& buffer) {
 		const auto blast = buffer.getPos() - 1;
 		auto bmask = buffer.getMask();
 		setPrevChar(buffer(blast & bmask));
@@ -155,7 +156,7 @@ public:
 		}
 	}
 
-	forceinline size_t getExpectedChar(SlidingWindow2<byte>& buffer) const {
+	forceinline size_t getExpectedChar(Buffer& buffer) const {
 		return buffer[pos + 1];
 	}
 

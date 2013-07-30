@@ -32,11 +32,25 @@
 class Range7 {
 private:
 	uint Range, Code, _cacheSize;
-	uint64 Low;
+	uint64_t Low;
 	byte _cache;
-public:
+
 	static const uint TopBits = 24, TopValue = 1 << TopBits, Top = 0xFFFFFFFF;
 
+	template <typename TOut>
+	forceinline void shiftLow(TOut& sout) { //Emit the top byte 
+		if (size_t(Low) < size_t(0xFF << TopBits) || Low >> 32) {
+			byte temp = _cache;
+			do {
+				sout.write(byte(temp + byte(Low >> 32)));
+				temp = 0xFF;
+			} while(--_cacheSize);
+			_cache = byte(uint(Low >> 24));
+		}
+		++_cacheSize;
+		Low = size_t(Low << 8);
+	}
+public:
 	void init() {
 		Code = 0;
 		Low = 0;
@@ -49,7 +63,7 @@ public:
 	void IncreaseRange(TOut& out) {
 		while (Range < TopValue) {
 			Range <<= 8;
-			ShiftLow(out);
+			shiftLow(out);
 		}
 	}
 
@@ -96,7 +110,7 @@ public:
 		}
 		while (Range < TopValue) {
 			Range <<= 8;
-			ShiftLow(out);
+			shiftLow(out);
 		}
 	}
 
@@ -121,7 +135,7 @@ public:
 			Low += Range & (0 - ((value >> numBits) & 1));
 			while (Range < TopValue) {
 				Range <<= 8;
-				ShiftLow(Out);
+				shiftLow(Out);
 			}
 		}
 	}
@@ -163,7 +177,7 @@ public:
 		Range *= size;
 		while (Range < TopValue) {
 			Range <<= 8;
-			ShiftLow(Out);
+			shiftLow(Out);
 		}
 	}
 
@@ -181,7 +195,7 @@ public:
 		Low += start * Range;
 		while (Range < TopValue) {
 			Range <<= 8;
-			ShiftLow(Out);
+			shiftLow(Out);
 		}
 	}
 
@@ -203,23 +217,9 @@ public:
 	}
 
 	template <typename TOut>
-	forceinline void ShiftLow(TOut& sout) { //Emit the top byte 
-		if (size_t(Low) < size_t(0xFF000000) || Low >> 32) {
-			byte temp = _cache;
-			do {
-				sout.write(byte(temp + byte(Low >> 32)));
-				temp = 0xFF;
-			} while(--_cacheSize);
-			_cache = byte(uint(Low >> 24));
-		}
-		++_cacheSize;
-		Low = size_t(Low << 8);
-	}
-
-	template <typename TOut>
 	void flush(TOut& Out) {
 		for (uint i = 0; i < 5; i++)
-			 ShiftLow(Out);
+			 shiftLow(Out);
 	}
 
 	template <typename TIn>

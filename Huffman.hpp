@@ -52,7 +52,7 @@ public:
 		Tree *a, *b;
 
 		forceinline size_t getAlphabet() const {
-			return code;
+			return value;
 		}
 
 		forceinline bool isLeaf() const {
@@ -95,7 +95,7 @@ public:
 			}
 		}
 
-		uint64 getCost(size_t bits = 0) const {
+		uint64_t getCost(size_t bits = 0) const {
 			if (isLeaf())
 				return bits * weight;
 			else
@@ -133,16 +133,21 @@ public:
 	typedef std::multiset<HuffTree*, TreeComparator> TreeSet;
 public:
 	// TODO, not hardcode the size in??
-	ushort state_trans[256][2];
+	uint16_t state_trans[256][2];
 	Code codes[256];
 	
-	static const ushort start_state = 0;
+	static const uint16_t start_state = 0;
 
-	forceinline static bool isLeaf(ushort state) {
+	forceinline static bool isLeaf(uint16_t state) {
 		return (state & 0x100) != 0;
 	}
 
-	forceinline static size_t getChar(ushort state) {
+	forceinline size_t getTransition(uint16_t state, size_t bit) {
+		assert(state < 256);
+		return state_trans[state][bit];
+	}
+
+	forceinline static size_t getChar(uint16_t state) {
 		assert(isLeaf(state));
 		return state ^ 0x100;
 	}
@@ -161,6 +166,7 @@ public:
 
 		std::map<TTree*, size_t> tree_map;
 		size_t cur_state = start_state, cur_state_leaf = cur_state + 0x100;
+
 		bool state_available[256];
 		for (auto& b : state_available) b = true;
 
@@ -213,7 +219,7 @@ public:
 		class Package {
 		public:
 			std::multiset<size_t> alphabets;
-			int64 weight;
+			uint64_t weight;
 
 			Package() : weight(0) {
 
@@ -369,10 +375,6 @@ public:
 		}
 		return buildFromCodeLengths(&lengths[0], alphabet_size, max_length, nullptr);
 	}
-};
-
-class HuffmanComp {
-	Range7 ent;
 
 	static const size_t alphabet_size = 256;
 	static const size_t max_length = 16;
@@ -380,15 +382,11 @@ public:
 	static const size_t version = 0;
 	void setMemUsage(size_t n) {}
 
-	void init() {
-		
-	}
-
 	template <typename TOut, typename TIn>
-	size_t Compress(TOut& sout, TIn& sin) {
+	uint64_t Compress(TOut& sout, TIn& sin) {
+		Range7 ent;
 		size_t count = 0;
 		std::vector<size_t> freq(alphabet_size, 0);
-		init();
 
 		// Get frequencies
 		size_t length = 0;
@@ -402,34 +400,30 @@ public:
 		printIndexedArray("frequencies", freq);
 		sin.restart();
 
-		Huffman huff;
 		// Build length limited tree with package merge algorithm.
-		auto* tree = huff.buildTreePackageMerge(&freq[0], alphabet_size, max_length);
+		auto* tree = buildTreePackageMerge(&freq[0], alphabet_size, max_length);
 		tree->printRatio("LL(16)");
-
-		if (false ){
-			auto* treeO = huff.buildTreeOptimal(&freq[0], alphabet_size);
+		
+		if (false) {
+			auto* treeO = buildTreeOptimal(&freq[0], alphabet_size);
 			treeO->printRatio("optimal");
 		}
 		
 		ProgressMeter meter;
 		ent.init();
-		huff.writeTree(ent, sout, tree, alphabet_size, max_length);
+		writeTree(ent, sout, tree, alphabet_size, max_length);
+		build(tree);
 		std::cout << "Encoded huffmann tree in ~" << sout.getTotal() << " bytes" << std::endl;
 
 		ent.EncodeBits(sout, length, 31);
-
-		// Generate codes.
-		Huffman::Code codes[alphabet_size];
-		tree->getCodes(codes);
 
 		// Encode with huffman codes.
 		std::cout << std::endl;
 		for (;;) {
 			int c = sin.read();
 			if (c == EOF) break;
-			auto* code = &codes[c];
-			ent.EncodeBits(sout, code->value, code->length);
+			const auto& huff_code = getCode(c);
+			ent.EncodeBits(sout, huff_code.value, huff_code.length);
 			meter.addBytePrint(sout.getTotal());
 		}
 		std::cout << std::endl;
@@ -439,29 +433,23 @@ public:
 
 	template <typename TOut, typename TIn>
 	bool DeCompress(TOut& sout, TIn& sin) {
-		Huffman huff;
-
+		Range7 ent;
 		ProgressMeter meter(true);
 
 		ent.initDecoder(sin);
-		auto* tree = huff.readTree(ent, sin, alphabet_size, max_length);
+		auto* tree = readTree(ent, sin, alphabet_size, max_length);
 		size_t length = ent.DecodeDirectBits(sin, 31);
 
 		// Generate codes.
-		Huffman::Code codes[alphabet_size];
-		tree->getCodes(codes);
-
-		// Build inverse.
-		Huffman::DeCode<max_length> decoder;
-		decoder.build(&codes[0], alphabet_size);
+		build(tree);
 
 		std::cout << std::endl;
 		for (size_t i = 0; i < length; ++i) {
-			size_t cur_code = 1;
+			size_t state = 0;
 			do {
-				cur_code = (cur_code << 1) | ent.DecodeDirectBit(sin);
-			} while (!decoder.isLeaf(cur_code));
-			sout.write(decoder.getCode(cur_code));
+				state = getTransition(state, ent.DecodeDirectBit(sin));
+			} while (!isLeaf(state));
+			sout.write(getChar(state));
 			meter.addBytePrint(sin.getTotal());
 		}
 		std::cout << std::endl;

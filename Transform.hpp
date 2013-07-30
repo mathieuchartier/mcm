@@ -25,134 +25,79 @@
 #define _TRANSFORM_HPP_
 
 #include <deque>
+#include <thread>
 
+#include "BoundedQueue.hpp"
 #include "Compress.hpp"
+#include "CyclicBuffer.hpp"
 #include "Util.hpp"
 
-// Not finished.
+// Transform interface.
 class Transform {
-public:
-	enum Type {
-		// Useless, adds one and subtracts one.
-		kTTAdd1,
-		// Single byte delta.
-		kTTDelta8,
-		// Multi byte delta.
-		kTTDelta16,
-		// EXE
-		kTTExe,
-		// Transform none.
-		kTTNone,
-		// Alphabet reorder??
-	};
 protected:
-	Type transform;
+	// Seen buffer.
+	CyclicBuffer<byte> seen;
+	// Look-ahead queue.
+	BoundedQueue<byte> lookahead, output;
+	// Output queue.
+	byte *buffer;
+	size_t buffer_mask;
+	size_t transform_count, untransform_count;
+	size_t transform_pos, untransform_pos;
 
-	// Number of bytes in the buffer.
-	size_t buffer_count;
-
-	// Number of transformed bytes in the buffer.
-	size_t transformed_count;
-
-	// Smal fifo queue
-	SlidingWindow2<byte> buffer;
+	// Returns how many bytes were transformed.
+	virtual size_t attempt_transform() = 0;
 public:
-	Transform() {
-
+	void release() {
+		delete [] buffer;
+		buffer = nullptr;
 	}
 
-	forceinline size_t readBytes(size_t pos, size_t bytes = 4, bool big_endian = true) {
-		size_t w = 0;
-		if (pos + bytes >= size()) {
-			// Past the end of buffer :(
-			if(big_endian) {
-				for (size_t i = 0; i < bytes; ++i) {
-					w = (w << 8) | at(pos + i);
-				}
-			} else {
-				for (size_t i = bytes; i; --i) {
-					w = (w << 8) | at(pos + i - 1);
-				}
-			}
-		}
-		return w;
+	// Size needs to be a power of 2.
+	void init(size_t size = 512 * KB) {
+		release();
+		buffer_mask = size - 1;
+		buffer = new byte[buffer_mask + 1];
+		transform_count = untransform_count = 0;
+		transform_pos = untransform_pos = 0;
 	}
 
-	void init(size_t size = 64 * KB) {
-		buffer.resize(size);
-		buffer.fill(0);
-		buffer_count = 0;
-		transformed_count = 0;
+	void push(byte c) {
+		++untransform_count;
+		buffer[untransform_pos++ & buffer_mask] = c;
 	}
 
-	forceinline size_t size() const {
-		return buffer_count;
+	// Start of the untransformed region.
+	byte& at(size_t index) {
+		return buffer[(untransform_pos - untransform_count + index) & buffer_mask];
 	}
 
-	forceinline bool empty() const {
-		return !buffer_count;
+	forceinline byte at(size_t index) const {
+		return buffer[(untransform_pos - untransform_count + index) & buffer_mask];
 	}
 
-	forceinline bool full() const {
-		return buffer_count >= buffer.getSize();
+	void transform() {
+		auto count = attempt_transform();
+		transform_count += count;
+		untransform_count -= count;
 	}
 
-	void setTransform() {
-		transform = kTTNone;
+	bool empty() const {
+		return 0;
 	}
 
-	// Streaming mode??
-	void setTransform(Type new_transform) {
-		transform = new_transform;
-	}
-
-	void push(size_t c) {
-		++buffer_count;
-		buffer.push(c);
-	}
-
-	int popTransformed() {
-		if (transformed_count) {
-			return pop();
-		}
-		return EOF;
-	}
-
-	forceinline byte at(size_t i) const {
-		assert(i < buffer_count);
-		return buffer[buffer.getPos() - buffer_count + i];
-	}
-
-	forceinline byte& at(size_t i) {
-		assert(i < buffer_count);
-		return buffer[buffer.getPos() - buffer_count + i];
-	}
-
-	int pop() {
-		if (!transformed_count) {
-			apply_transform(false);
-		}
-		if (buffer_count == 0) {
+	int read() {
+		if (!transform_count) {
 			return EOF;
 		}
-		size_t c = buffer[buffer.getPos() - buffer_count];
-		--buffer_count;
-		return c;
+		--transform_count;
+		return buffer[transform_pos++ & buffer_mask];
 	}
-	
-	void apply_transform(bool reverse) {
-		assert(!transformed_count);
-		switch (transform) {
-		case kTTAdd1:
-			at(0) += (reverse ? -1 : 1);
-			transformed_count++;
-			break;
-		case kTTExe:
-			// E8E9
 
-			break;
-		}
+	Transform() : buffer(nullptr), buffer_mask(0) {
+
 	}
 };
+
 
 #endif

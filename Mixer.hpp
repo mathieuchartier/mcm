@@ -28,6 +28,39 @@
 #include "Util.hpp"
 #include "Compress.hpp"
 
+
+template <const size_t fp_shift = 14>
+class Mix1 {
+public:
+	static const int round = 1 << (fp_shift - 1);
+	// Each mixer has its own set of weights.
+	int w;
+	// Current learn rate.
+	int skew;
+public:
+	Mix1() {
+		init();
+	}
+
+	void init() {
+		w = (1 << fp_shift);
+		skew = 0;
+	}
+
+	// Calculate and return prediction.
+	forceinline size_t p(int pr) const {
+		return (pr * w + (skew << 12)) >> fp_shift;
+	}
+
+	// Neural network learn, assumes probs are stretched.
+	forceinline void update(int p0, int pr, size_t bit, size_t pshift = 12) {
+		int err = ((bit << pshift) - pr) * 16;
+		int round = 1 << (fp_shift - 1);
+		w += (p0 * err + round) >> fp_shift;
+		skew += ((skew << 12) + round) >> fp_shift;
+	}
+};
+
 template <typename T, const size_t weights, const size_t fp_shift = 16, const size_t wshift = 7>
 class Mixer {
 public:
@@ -210,7 +243,7 @@ public:
 			if (err > 32767) err = 32767; // Make sure we don't overflow.
 			if (err < -32768) err = -32768;
 			// I think this works, we shall see.
-			auto serr = (size_t)(ushort)(err);
+			auto serr = (size_t)(uint16_t)(err);
 			__m128i verr = _mm_shuffle_epi32(_mm_cvtsi32_si128(serr | (serr << 16)), 0);
 			// shift must be 16
 			w = _mm_adds_epi16(w, _mm_mulhi_epi16(probs, verr));

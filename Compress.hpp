@@ -57,19 +57,19 @@ void printIndexedArray(const std::string& str, const T& arr) {
 	}
 }
 
-template <const uint64 n>
-struct _bitSize {static const uint64 value = 1 + _bitSize<n / 2>::value;};
+template <const uint64_t n>
+struct _bitSize {static const uint64_t value = 1 + _bitSize<n / 2>::value;};
 
 template <>
-struct _bitSize<0> {static const uint64 value = 0;};
+struct _bitSize<0> {static const uint64_t value = 0;};
 
 inline size_t rand32() {
 	return rand() ^ (rand() << 16);
 }
 
 class ProgressMeter {
-	size_t count, prev_size, prev_count;
-	clock_t start;
+	uint64_t count, prev_size, prev_count;
+	clock_t start, prev_time;
 	bool encode;
 public:
 	ProgressMeter(bool encode = true)
@@ -77,22 +77,24 @@ public:
 		, prev_size(0)
 		, prev_count(0)
 		, encode(encode) {
-		start = clock();
+		prev_time = start = clock();
 	}
 
-	virtual ~ProgressMeter() {
-
+	forceinline uint64_t getCount() const {
+		return count;
 	}
 
-	inline size_t addByte() {
+	forceinline uint64_t addByte() {
 		return ++count;
 	}
 
-	void printRatio(size_t comp_size, const std::string& extra) {
+	// Surprisingly expensive to call...
+	void printRatio(uint64_t comp_size, const std::string& extra) {
 		_mm_empty();
-		const float cur_ratio = float(double(comp_size - prev_size) / (count - prev_count));
-		const float ratio = float(double(comp_size) / count);
-		auto time_delta = clock() - start;
+		const auto cur_ratio = double(comp_size - prev_size) / (count - prev_count);
+		const auto ratio = double(comp_size) / count;
+		auto cur_time = clock();
+		auto time_delta = cur_time - start;
 		if (!time_delta) ++time_delta;
 
 		const size_t rate = size_t(double(count / KB) / (double(time_delta) / double(CLOCKS_PER_SEC)));
@@ -101,16 +103,16 @@ public:
 			<< comp_size / KB << "KB " << rate << "KB/s ratio: " << std::setprecision(5) << std::fixed << ratio << extra.c_str() << " cratio: " << cur_ratio << "\t\r";
 		prev_size = comp_size;
 		prev_count = count;
+		prev_time = cur_time;
 	}
 
-	inline void addBytePrint(size_t total, const char* extra = "") {
-		if (!(addByte() & 0x3FFFF)) {
-			printRatio(total, extra);
+	forceinline void addBytePrint(uint64_t total, const char* extra = "") {
+		if (!(addByte() & 0xFFFF)) {
+			// 4 updates per second.
+			if (clock() - prev_time > 250) {
+				printRatio(total, extra);
+			}
 		}
-	}
-					
-	size_t getCount() const {
-		return count;
 	}
 };
 

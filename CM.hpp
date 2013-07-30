@@ -40,6 +40,11 @@
 #include "StateMap.hpp"
 #include "WordModel.hpp"
 
+// #include "APM.hpp"
+
+// Options.
+#define USE_MMX 0
+
 template <const size_t inputs = 6>
 class CM {
 public:
@@ -99,6 +104,7 @@ public:
 
 	// Statistics
 	size_t mixer_skip[2];
+	size_t skip_count;
 
 	// SS table
 	static const size_t shift = 12;
@@ -130,11 +136,10 @@ public:
 	
 	// Mixers
 	size_t mixer_mask;
-//#define USE_MMX
-#ifdef USE_MMX
+#if USE_MMX
 	typedef MMXMixer<inputs, 15, 1> CMMixer;
 #else
-	typedef Mixer<int, inputs+1, 17, 1> CMMixer;
+	typedef Mixer<int, inputs, 17, 1> CMMixer;
 #endif
 	std::vector<CMMixer> mixers;
 	CMMixer *mixer_base;
@@ -144,7 +149,7 @@ public:
 	size_t owhash; // Order of sizeof(size_t) hash.
 
 	// Rotating buffer.
-	SlidingWindow2<byte> buffer;
+	CyclicBuffer<byte> buffer;
 
 	// Options
 	size_t opt_var;
@@ -152,7 +157,7 @@ public:
 	bool use_match;
 	bool use_sparse;
 	
-	// Fast table.
+	// CM state table.
 	static const size_t num_states = 256;
 	short state_p[num_states];
 	byte state_trans[num_states][2];
@@ -213,6 +218,9 @@ public:
 			mixer.init();
 		}
 	
+		for (auto& s : mixer_skip) s = 0;
+		skip_count = 0;
+
 		NSStateMap<12> sm;
 		sm.build();
 		
@@ -314,8 +322,8 @@ public:
 		size_t p1 = (byte)buffer[buffer.getPos() - 2];
 		size_t mixer_ctx = p0 >> 4;
 		size_t mm_len = match_model.getLength();
-		mixer_ctx <<= 3;
 		if (mm_len) {
+			mixer_ctx <<= 3;
 			mixer_ctx |=
 				(mm_len >= match_model.min_match + 0) + 
 				(mm_len >= match_model.min_match + 4) + 
@@ -405,13 +413,20 @@ public:
 		}
 		for (;;) {
 			// Get match model prediction.
-			int mm_p = match_model.getP(st);
 			size_t ctx = huff_state;
+
+			// auto& isse = match_model_sse[match_model.getLength() * 2 + match_model.getExpectedBit()];
+			int mm_p = match_model.getP(st);
+			// int div_p = div_table[match_model.getLength()];
+			// if (match_model.getExpectedBit()) div_p = -div_p;
 
 			byte
 				*no_alias s0 = nullptr, *no_alias s1 = nullptr, *no_alias s2 = nullptr, *no_alias s3 = nullptr, 
 				*no_alias s4 = nullptr, *no_alias s5 = nullptr, *no_alias s6 = nullptr, *no_alias s7 = nullptr;
-			
+
+			size_t p;
+			int p0 = 0, p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0;
+			CMMixer* cur_mixer = nullptr;
 			if (inputs > 1) { s1 = &ht[base_contexts[1] ^ ctx]; }
 			if (inputs > 2) { s2 = &ht[base_contexts[2] ^ ctx]; }
 			if (inputs > 3) { s3 = &ht[base_contexts[3] ^ ctx]; }
@@ -421,16 +436,18 @@ public:
 			if (inputs > 7) { s7 = &ht[base_contexts[7] ^ ctx]; }
 			if (inputs > 0 && !mm_p) { s0 = &ht[base_contexts[0] ^ ctx]; }
 
-			if (s0 != nullptr) assert(s0 >= ht && s0 <= ht + hash_alloc_size);
+			if (s0 != nullptr) {
+				assert(s0 >= ht && s0 <= ht + hash_alloc_size);
+			}
 			assert(s1 >= ht && s1 <= ht + hash_alloc_size);
 			assert(s2 >= ht && s2 <= ht + hash_alloc_size);
 			assert(s3 >= ht && s3 <= ht + hash_alloc_size);
 			assert(s4 >= ht && s4 <= ht + hash_alloc_size);
 			assert(s5 >= ht && s5 <= ht + hash_alloc_size);
 
-			CMMixer* cur_mixer = &mixer_base[ctx];
+			cur_mixer = &mixer_base[ctx];
 
-#if defined(USE_MMX)
+#if USE_MMX
 			__m128i wa = _mm_cvtsi32_si128(ushort((inputs > 0) ? (mm_p ? mm_p : getP<fixed_probs>(*s0, 0, st)) : 0));
 			__m128i wb = _mm_cvtsi32_si128((inputs > 1) ? (int(getP<fixed_probs>(*s1, 1, st)) << 16) : 0);
 			if (inputs > 2) wa = _mm_insert_epi16(wa, getP(*s2, 2, st), 2);
@@ -443,21 +460,21 @@ public:
 			int stp = cur_mixer->p(wp);
 			size_t p = table.sq(stp); // Mix probabilities.
 #else
-			int p0 = (inputs > 0) ? (mm_p ? mm_p : getP(*s0, 0, st)) : 0;
-			int p1 = (inputs > 1) ? getP(*s1, 1, st) : 0;
-			int p2 = (inputs > 2) ? getP(*s2, 2, st) : 0;
-			int p3 = (inputs > 3) ? getP(*s3, 3, st) : 0;
-			int p4 = (inputs > 4) ? getP(*s4, 4, st) : 0;
-			int p5 = (inputs > 5) ? getP(*s5, 5, st) : 0;
-			int p6 = (inputs > 6) ? getP(*s6, 6, st) : 0;
-			int p7 = (inputs > 7) ? getP(*s7, 7, st) : 0;
-			p6 = div_table[match_model.getLength()];
-			if (match_model.getExpectedBit()) p6 = -p6;
-
-			int stp = cur_mixer->p(p0, p1, p2, p3, p4, p5, p6, p7);
-			size_t p = table.sq(stp); // Mix probabilities.
-#endif
+			if (inputs > 0) p0 = mm_p ? mm_p : getP(*s0, 0, st);
+			if (inputs > 1) p1 = getP(*s1, 1, st);
+			if (inputs > 2) p2 = getP(*s2, 2, st);
+			if (inputs > 3) p3 = getP(*s3, 3, st);
+			if (inputs > 4) p4 = getP(*s4, 4, st);
+			if (inputs > 5) p5 = getP(*s5, 5, st);
+			if (inputs > 6) p6 = getP(*s6, 6, st);
+			if (inputs > 7) p7 = getP(*s7, 7, st);
 			
+			// p6 = div_p;
+			int stp = cur_mixer->p(p0, p1, p2, p3, p4, p5, p6, p7);
+			int mixer_p = table.sq(stp); // Mix probabilities.
+#endif
+			p = mixer_p; // stp;
+
 			size_t bit;
 			if (decode) { 
 				bit = ent.getDecodedBit(p, shift);
@@ -467,10 +484,10 @@ public:
 				ent.encode(stream, bit, p, shift);
 			}
 
-#if defined(USE_MMX)
-			bool ret = cur_mixer->update(wp, p, bit);
+#if USE_MMX
+			bool ret = cur_mixer->update(wp, mixer_p, bit);
 #else
-			bool ret = cur_mixer->update(p0, p1, p2, p3, p4, p5, p6, p7, p, bit);
+			bool ret = cur_mixer->update(p0, p1, p2, p3, p4, p5, p6, p7, mixer_p, bit);
 #endif
 
 			if (statistics) {
@@ -478,7 +495,7 @@ public:
 				// should happen frequently on highly compressible files.
 				++mixer_skip[(size_t)ret];
 			}
-
+			
 			if (inputs > 0 && !mm_p) *s0 = nextState(*s0, bit, 0);
 			if (inputs > 1) *s1 = nextState(*s1, bit, 1);
 			if (inputs > 2) *s2 = nextState(*s2, bit, 2);
@@ -494,7 +511,7 @@ public:
 			if (decode) {
 				ent.Normalize(stream);
 			}
-			huff_state = huff.state_trans[huff_state][bit];
+			huff_state = huff.getTransition(huff_state, bit);
 			if (huff.isLeaf(huff_state)) {
 				break;
 			}
@@ -561,11 +578,6 @@ public:
 	void writeSubBlock(TStream& sout, const SubBlockHeader& block) {
 		block_flag_model.encode(ent, sout, block.flags);
 		block_profile_models[(size_t)profile].encode(ent, sout, (size_t)block.profile);
-	}
-
-	void BuildHuffCodes(Huffman::Tree<size_t>* tree) {
-		// Get the compression codes.
-		tree->getCodes(&huff_codes[0]);
 	}
 
 	template <typename TOut, typename TIn>
@@ -662,6 +674,7 @@ public:
 			}
 		}
 
+		std::cout << skip_count << std::endl;
 		if (statistics) {
 			// Dump weights
 			std::ofstream fout("probs.txt");
@@ -734,7 +747,6 @@ public:
 			return false;
 		}
 		
-		Transform transform;
 		ProgressMeter meter(false);
 		init();
 		ent.initDecoder(sin);
@@ -750,8 +762,7 @@ public:
 			readSubBlock(sin, block);
 			if (block.profile == kEOF) break;
 			setDataProfile(block.profile);
-			transform.setTransform(Transform::kTTAdd1);
-
+			
 			for (;;) {
 				size_t c = processByte<true>(sin);
 				update(c);

@@ -26,16 +26,18 @@
 
 #include <cassert>
 #include <cstdio>
-#include <cstring>
+#include <sstream>
+
+#include "Compress.hpp"
 
 // TODO: Fix for files over 4 GB.
 template <const size_t size>
 class BufferedStream {
 public:
-	static const size_t mask = size - 1;
+	static const uint64_t mask = size - 1;
 	typedef BufferedStream SelfType;
 	char buffer[size];
-	size_t total, eof_pos;
+	uint64_t total, eof_pos;
 private:
 	FILE* fileHandle; 
 
@@ -50,12 +52,14 @@ private:
 		fwrite(buffer, 1, static_cast<size_t>(size), fileHandle);
 	}
 public:
-	inline std::streamsize getTotal() const {return total;}
+	inline uint64_t getTotal() const {return total;}
 
 	inline bool eof() const {
-		if (total > eof_pos)
+		// return total >= eof_pos;
+		if (total >= eof_pos)
 			return true;
-		return total > eof_pos;
+		else
+			return false;
 	}
 
 	inline bool good() const {
@@ -64,48 +68,47 @@ public:
 
 	int open(const std::string& fileName, std::ios_base::open_mode mode = std::ios_base::in | std::ios_base::binary) {
 		close();
-		char openModeBuffer[32];
-		openModeBuffer[0] = '\0';
-
+		std::ostringstream oss;
+		
 		if (mode & std::ios_base::out) {
-			strcat(openModeBuffer, "w");
+			oss << "w";
 			if (mode & std::ios_base::in) {
-				strcat(openModeBuffer, "+");
+				oss << "+";
 			}
 		} else if (mode & std::ios_base::in) {
-			strcat(openModeBuffer, "r");
+			oss << "r";
 		}
 
 		if (mode & std::ios_base::binary) {
-			strcat(openModeBuffer, "b");
+			oss << "b";
 		}
 			
-		fileHandle = fopen(fileName.c_str(), openModeBuffer);
+		fileHandle = fopen(fileName.c_str(), oss.str().c_str());
 		return fileHandle != nullptr ? 0 : errno;
 	}
 
-	inline void write(size_t ch) {
-		assert(ch < 0x100);
-		size_t pos = total++;
-		buffer[pos & mask] = static_cast<char>(ch);
+	inline void write(byte ch) {
+		uint64_t pos = total++;
+		buffer[pos & mask] = ch;
 		if ((total & mask) == 0) {
 			flushWhole();
 		}
 	}
 	
 	void prefetch() {
-		size_t readCount = fread(buffer, 1, size, fileHandle);
-		eof_pos = total + readCount;
+		uint64_t readCount = fread(buffer, 1, size, fileHandle);
+		if (readCount != size) {
+			eof_pos = total + readCount;
+		}
 	}
 
 	inline int read() {
 		if (!(total & mask)) {
 			prefetch();
 		}
-		auto pos = total++;
-		if (total <= eof_pos)
-			return (int)(unsigned char)buffer[pos & mask];
-		else
+		if (LIKELY(total < eof_pos)) {
+			return (int)(byte)buffer[total++ & mask];
+		} else
 			return EOF;
 	}
 

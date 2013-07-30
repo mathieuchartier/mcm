@@ -24,6 +24,7 @@
 #ifndef _UTIL_HPP_
 #define _UTIL_HPP_
 
+#include <stdint.h>
 #include <emmintrin.h>
 #include <ostream>
 #include <string>
@@ -54,16 +55,13 @@ typedef unsigned short word;
 #define LIKELY(x) x
 #define UNLIKELY(x) x
 
-typedef __int64 int64;
-typedef unsigned __int64 uint64;
-typedef unsigned short ushort;
 typedef size_t hash_t;
 
-static const size_t KB = 1024;
-static const size_t MB = KB * KB;
-static const size_t GB = KB * MB;
-static const size_t kCacheLineSize = 64; // Sandy bridge.
-static const size_t kPageSize = 4 * KB;
+static const uint64_t KB = 1024;
+static const uint64_t MB = KB * KB;
+static const uint64_t GB = KB * MB;
+static const uint64_t kCacheLineSize = 64; // Sandy bridge.
+static const uint64_t kPageSize = 4 * KB;
 
 enum DataProfile {
 	kText,

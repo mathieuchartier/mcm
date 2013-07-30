@@ -29,63 +29,10 @@
 #include "Compress.hpp"
 
 template <typename T>
-class SlidingWindow {
-	size_t pos, size, total;
-public:
-	std::vector<T> data;
-
-	inline size_t getPos() const {return pos;}
-	inline size_t getTotal() const {return total;}
-	inline size_t getSize() const {return size;}
-
-	inline size_t prev(size_t pos, size_t count) const {
-		assert(count <= size);
-		return (pos >= count ? pos : pos + size) - count;
-	}
-
-	inline size_t next(size_t pos, size_t count) const {
-		pos += count;
-		return pos >= size ? pos - size : pos;
-	}
-
-	SlidingWindow()	{
-		restart();
-	}
-
-	void restart() {
-		pos = total = 0;
-	}
-
-	inline void push(const T& copy) {
-		total++;
-		data[pos] = copy;
-		if (++pos >= size) pos -= size;
-	}
-
-	inline T operator [] (size_t offset) const {
-		return data[offset % size];
-	}
-
-	inline T operator () (size_t offset) const {
-		return data[offset];
-	}
-
-	inline void clear() {
-		pos = size = total = 0;
-		data.clear();
-	}
-
-	void resize(size_t newSize) {
-		clear();
-		size = newSize;
-		data.resize(size);
-		std::fill(data.begin(), data.end(), 0);
-	}
-};
-
-template <typename T>
-class SlidingWindow2 {
-	size_t pos, mask;
+class CyclicBuffer {
+	size_t pos;
+protected:
+	size_t mask, count, alloc_size;
 public:
 	T *storage, *data;
 
@@ -102,24 +49,32 @@ public:
 		return (pos + count) & mask;
 	}
 
+	// Maximum size.
 	forceinline size_t getSize() const {
 		return mask + 1;
 	}
 
-	SlidingWindow2() : storage(NULL), mask(0) {
+	// Current nubmer of items inside of the buffer.
+	forceinline size_t getCount() const {
+		return count;
+	}
+
+	CyclicBuffer() : storage(NULL), mask(0) {
 		
 	}
 
-	virtual ~SlidingWindow2() {
-		clear();
+	virtual ~CyclicBuffer() {
+		release();
 	}
 
-	void restart() {
+	virtual void restart() {
 		pos = 0;
+		count = 0;
 	}
 
 	forceinline void push(T val) {
 		data[pos++ & mask] = val;
+		++count;
 	}
 
 	forceinline T& operator [] (size_t offset) {
@@ -134,17 +89,18 @@ public:
 		return data[offset];
 	}
 
-	inline void clear() {
-		pos = 0;
+	virtual void release() {
+		pos = alloc_size = 0;
 		mask = static_cast<size_t>(-1);
 		delete [] storage;
 		storage = data = nullptr;
 	}
 
 	void fill(T d) {
-		std::fill(data, data + getSize(), d);
+		std::fill(storage, storage + getSize(), d);
 	}
 
+	// Can be used for LZ77.
 	void copyStartToEndOfBuffer(size_t count) {
 		size_t size = getSize();
 		for (size_t i = 0;i < count;++i) {
@@ -152,6 +108,7 @@ public:
 		}
 	}
 
+	// Can be used for LZ77.
 	void copyEndToStartOfBuffer(size_t count) {
 		size_t size = getSize();
 		for (size_t i = 0;i < count;++i) {
@@ -164,7 +121,7 @@ public:
 		assert((newSize & newSize - 1) == 0);
 		delete [] storage;
 		mask = newSize - 1;
-		const auto alloc_size = newSize + padding * 2;
+		alloc_size = newSize + padding * 2;
 		storage = new T[alloc_size];
 		std::fill(storage, storage + alloc_size, 0);
 		data = storage + padding;

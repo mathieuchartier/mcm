@@ -71,7 +71,7 @@ public:
 	}
 
 	template <typename TOut, typename TIn>
-	size_t Compress(TOut& sout, TIn& sin) {
+	uint64_t Compress(TOut& sout, TIn& sin) {
 		auto fin = Filter::Make(sin);
 		return Compressor::Compress(sout, fin);
 	}

@@ -22,6 +22,7 @@
 */
 
 #include <stdio.h>
+#include <string.h>
 #include <string>
 #include <ctime>
 #include <sstream>
@@ -30,10 +31,12 @@
 #include "CM.hpp"
 #include "Filter.hpp"
 #include "Huffman.hpp"
+#include "LZ.hpp"
 #include "Stream.hpp"
 
 FilterCompressor<CM<6>, IdentityFilterFactory> comp;
-//FilterCompressor<HuffmanComp, IdentityFilterFactory> comp;
+//FilterCompressor<LZW<false>, IdentityFilterFactory> comp;
+//FilterCompressor<Huffman, IdentityFilterFactory> comp;
 
 std::string errstr(int err) {
 #ifdef WIN32
@@ -81,7 +84,7 @@ public:
 	void summary() {
 		fin.get();
 		if (!fin.eof()) {
-			std::cerr << "ERROR: Output truncated!!!" << std::endl;
+			std::cerr << "ERROR: Output truncated at byte " << fin.tellg() << std::endl;
 		} else {
 			if (differences) {
 				std::cerr << "ERROR: Total differences: " << differences << std::endl;
@@ -108,7 +111,11 @@ int usage(const std::string& name) {
 		<< "mcm file compressor v0." << comp.version << ", (c)2013 Google Inc" << std::endl
 		<< "Caution: Use only for testing!!" << std::endl
 		<< "Usage: " << name << " [options] <infile> <outfile>" << std::endl
-		<< "Options: -d for decompress, -1 ... -9 specifies ~8mb ... ~1500mb memory, " << std::endl
+		<< "Options: -d for decompress" << std::endl
+		<< "-1 ... -9 specifies ~32mb ... ~1500mb memory, " << std::endl
+		<< "-test tests the file after compression is done" << std::endl
+		<< "-b <mb> specifies block size in MB" << std::endl
+		<< "-t <threads> the number of threads to use (decompression requires the same number of threads" << std::endl
 		<< "Exaples:" << std::endl
 		<< "Compress: " << name << " -9 enwik8 enwik8.mcm" << std::endl
 		<< "Decompress: " << name << " -d enwik8.mcm enwik8.ref" << std::endl;
@@ -116,7 +123,9 @@ int usage(const std::string& name) {
 }
 
 int main(int argc, char* argv[]) {
-	bool decompress = false, test_mode = false, opt_mode = false;
+	bool decompress = false, test_mode = false, opt_mode = false, mem_mode = false;
+	uint64_t block_size = MB * MB;
+	size_t threads = 1;
 	assert(argc >= 1);
 	std::string in_file, out_file, program = trim_ext(argv[0]);
 	// Parse options.
@@ -135,6 +144,26 @@ int main(int argc, char* argv[]) {
 		else if (arg == "-7") comp.setMemUsage(7);
 		else if (arg == "-8") comp.setMemUsage(8);
 		else if (arg == "-9") comp.setMemUsage(9);
+		else if (arg == "-b") {
+			if  (i + 1 >= argc) {
+				return usage(program);
+			}
+			std::istringstream iss(argv[++i]);
+			iss >> block_size;
+			block_size *= MB;
+			if (!iss.good()) {
+				return usage(program);
+			}
+		} else if (arg == "-t") {
+			if  (i + 1 >= argc) {
+				return usage(program);
+			}
+			std::istringstream iss(argv[++i]);
+			iss >> threads;
+			if (threads == 0 || !iss.good()) {
+				return usage(program);
+			}
+		} else if (arg == "-mem") mem_mode = true;
 		else if (arg.length() && arg[0] == '-') {
 			std::cerr << "Unknown option " << arg << std::endl;
 			return 1;
@@ -151,7 +180,11 @@ int main(int argc, char* argv[]) {
 	if (i < argc) {
 		out_file = argv[i++];
 	} else {
-		out_file = in_file + ".mcm";
+		if (decompress) {
+			out_file = in_file + ".decomp";
+		} else {
+			out_file = in_file + ".mcm";
+		}
 	}
 
 	if (in_file.empty() || out_file.empty()) {
@@ -184,9 +217,9 @@ int main(int argc, char* argv[]) {
 		}
 	} else {
 		std::cout << "Compressing to " << out_file << std::endl;
-		srand(time(NULL));
-
 		auto size = comp.Compress(fout, fin);
+#if 0
+		srand(static_cast<unsigned int>(time(NULL)));
 		if (opt_mode) {
 			size_t* opt_var = &comp.opt_var; //comp.match_model.opt_var;
 			size_t best_var = *opt_var;
@@ -204,7 +237,7 @@ int main(int argc, char* argv[]) {
 				std::cout << "best(" << std::hex << best_var << ")=" << std::dec << size << std::endl;
 			}
 		}
-		
+#endif	
 		clock_t time = clock() - start;
 		std::cout << "Compression took " << time << " MS" << std::endl;
 		std::cout << "Rate: " << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fin.getTotal()) << " ns/B" << std::endl;
