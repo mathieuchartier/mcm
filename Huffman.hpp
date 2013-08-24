@@ -160,13 +160,11 @@ public:
 	void build(const Tree<T>* tree, size_t alphabet_size = 256) {
 		typedef const Tree<T> TTree;
 		tree->getCodes(codes);
-
 		std::vector<TTree*> work, todo;
 		work.push_back(tree);
 
 		std::map<TTree*, size_t> tree_map;
 		size_t cur_state = start_state, cur_state_leaf = cur_state + 0x100;
-
 		bool state_available[256];
 		for (auto& b : state_available) b = true;
 

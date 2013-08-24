@@ -414,11 +414,7 @@ public:
 		for (;;) {
 			// Get match model prediction.
 			size_t ctx = huff_state;
-
-			// auto& isse = match_model_sse[match_model.getLength() * 2 + match_model.getExpectedBit()];
 			int mm_p = match_model.getP(st);
-			// int div_p = div_table[match_model.getLength()];
-			// if (match_model.getExpectedBit()) div_p = -div_p;
 
 			byte
 				*no_alias s0 = nullptr, *no_alias s1 = nullptr, *no_alias s2 = nullptr, *no_alias s3 = nullptr, 
