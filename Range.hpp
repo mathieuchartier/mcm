@@ -24,7 +24,7 @@
 #ifndef _RANGE_HPP_
 #define _RANGE_HPP_
 
-#include "Compress.hpp"
+#include "Compressor.hpp"
 #include <assert.h>
 #include "Model.hpp"
 

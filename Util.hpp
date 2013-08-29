@@ -26,6 +26,7 @@
 
 #include <stdint.h>
 #include <emmintrin.h>
+#include <iostream>
 #include <ostream>
 #include <string>
 
@@ -118,5 +119,50 @@ struct shuffle {
 		value = (D << 6) | (C << 4) | (B << 2) | A,
 	};
 };
+
+forceinline bool is_power_2(size_t n) {
+	return (n & (n - 1)) == 0;
+}
+
+forceinline uint bitSize(uint Value) {
+	uint Total = 0;
+	for (;Value;Value >>= 1, Total++);
+	return Total;
+}
+
+template <typename T>
+void printIndexedArray(const std::string& str, const T& arr) {
+	size_t index = 0;
+	std::cout << str << std::endl;
+	for (const auto& it : arr) {
+		if (it) {
+			std::cout << index << ":" << it << std::endl;
+		}
+		index++;
+	}
+}
+
+template <const uint64_t n>
+struct _bitSize {static const uint64_t value = 1 + _bitSize<n / 2>::value;};
+
+template <>
+struct _bitSize<0> {static const uint64_t value = 0;};
+
+inline size_t rand32() {
+	return rand() ^ (rand() << 16);
+}
+
+class Closure {
+public:
+	virtual void run() = 0;
+};
+
+template <typename Container>
+void deleteValues(Container& container) {
+	for (auto* p : container) {
+		delete p;
+	}
+	container.clear();
+}
 
 #endif
