@@ -26,7 +26,7 @@
 #pragma once
 
 #include <cassert>
-#include "Compress.hpp"
+#include "Util.hpp"
 
 template <typename T>
 class CyclicBuffer {

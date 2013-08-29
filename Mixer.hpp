@@ -26,7 +26,7 @@
 
 #include <emmintrin.h>
 #include "Util.hpp"
-#include "Compress.hpp"
+#include "Compressor.hpp"
 
 
 template <const size_t fp_shift = 14>

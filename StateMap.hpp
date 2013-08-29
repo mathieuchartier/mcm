@@ -24,7 +24,7 @@
 #ifndef _STATE_MAP_HPP_
 #define _STATE_MAP_HPP_
 
-#include "Compress.hpp"
+#include "Compressor.hpp"
 
 // Non stationary state map.
 template <const int pshift = 12>

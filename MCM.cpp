@@ -28,11 +28,12 @@
 #include <sstream>
 #include <fstream>
 
+#include "Archive.hpp"
 #include "CM.hpp"
 #include "Filter.hpp"
 #include "Huffman.hpp"
 #include "LZ.hpp"
-#include "Stream.hpp"
+#include "File.hpp"
 
 FilterCompressor<CM<6>, IdentityFilterFactory> comp;
 //FilterCompressor<LZW<false>, IdentityFilterFactory> comp;
@@ -194,7 +195,7 @@ int main(int argc, char* argv[]) {
 	}
 
 	int err = 0;
-	BufferedStream<4 * KB> fin, fout;
+	BufferedFileStream<4 * KB> fin, fout;
 	if (err = fin.open(in_file, std::ios_base::binary | std::ios_base::in)) {
 		std::cerr << "Error opening: " << in_file << " (" << errstr(err) << ")" << std::endl;
 		return 1;

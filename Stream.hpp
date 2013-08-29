@@ -1,146 +1,121 @@
-/*	MCM file compressor
+#ifndef STREAM_HPP_
+#define STREAM_HPP_
 
-	Copyright (C) 2013, Google Inc.
-	Authors: Mathieu Chartier
+#include "Util.hpp"
 
-	LICENSE
-
-    This file is part of the MCM file compressor.
-
-    MCM is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    MCM is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with MCM.  If not, see <http://www.gnu.org/licenses/>.
-*/
-
-#ifndef _FILE_STREAM_HPP_
-#define _FILE_STREAM_HPP_
-
-#include <cassert>
-#include <cstdio>
-#include <sstream>
-
-#include "Compress.hpp"
-
-// TODO: Fix for files over 4 GB.
-template <const size_t size>
-class BufferedStream {
+class ReadStream {
 public:
-	static const uint64_t mask = size - 1;
-	typedef BufferedStream SelfType;
-	char buffer[size];
-	uint64_t total, eof_pos;
-private:
-	FILE* fileHandle; 
-
-	void flush() {
-		if ((total & mask) != 0) {
-			fwrite(buffer, 1, static_cast<size_t>(total & mask), fileHandle);
-		}
-	}
-
-	void flushWhole() {
-		assert((total & mask) == 0);
-		fwrite(buffer, 1, static_cast<size_t>(size), fileHandle);
-	}
-public:
-	inline uint64_t getTotal() const {return total;}
-
-	inline bool eof() const {
-		// return total >= eof_pos;
-		if (total >= eof_pos)
-			return true;
-		else
-			return false;
-	}
-
-	inline bool good() const {
-		return !eof();
-	}
-
-	int open(const std::string& fileName, std::ios_base::open_mode mode = std::ios_base::in | std::ios_base::binary) {
-		close();
-		std::ostringstream oss;
-		
-		if (mode & std::ios_base::out) {
-			oss << "w";
-			if (mode & std::ios_base::in) {
-				oss << "+";
+    virtual int get() = 0;
+    virtual size_t read(byte* buf, size_t n) {
+		size_t count;
+		for (count = 0; count < n; ++count) {
+			auto c = get();
+			if (c == EOF) {
+				break;
 			}
-		} else if (mode & std::ios_base::in) {
-			oss << "r";
+			buf[count] = c;
 		}
+		return count;
+	}
+    virtual ~ReadStream() {}
+};
 
-		if (mode & std::ios_base::binary) {
-			oss << "b";
+class WriteStream {
+public:
+    virtual void put(int c) = 0;
+    virtual void write(const byte* buf, size_t n) {
+		for (;n; --n) {
+			put(*(buf++));
 		}
-			
-		fileHandle = fopen(fileName.c_str(), oss.str().c_str());
-		return fileHandle != nullptr ? 0 : errno;
+	}
+    virtual ~WriteStream() {}
+};
+
+template <const size_t buffer_size>
+class BufferedStreamReader {
+public:
+	Closure* buffer_event;
+	ReadStream* stream;
+	size_t buffer_count, buffer_pos;
+	byte buffer[buffer_size];
+	
+	BufferedStreamReader(ReadStream* stream) {
+		init(stream);
 	}
 
-	inline void write(byte ch) {
-		uint64_t pos = total++;
-		buffer[pos & mask] = ch;
-		if ((total & mask) == 0) {
-			flushWhole();
+	virtual ~BufferedStreamReader() {
+
+	}
+
+	void setEvent(Closure* event) {
+		buffer_event = event;
+	}
+
+	void init(ReadStream* new_stream) {
+		buffer_event = nullptr;
+		stream = new_stream;
+		buffer_pos = 0;
+		buffer_count = 0;
+	}
+
+	forceinline int get() {
+		if (UNLIKELY(buffer_pos >= buffer_count)) {
+			buffer_pos = 0;
+			buffer_count = stream->read(buffer, buffer_size);
+			if (UNLIKELY(!buffer_count)) {
+				return EOF;
+			}
+			buffer_event->run();
 		}
+		return buffer[buffer_pos++];
+	}
+};
+
+
+template <const size_t buffer_size>
+class BufferedStreamWriter {
+public:
+	Closure* flush_event;
+	WriteStream* stream;
+	size_t buffer_pos;
+	byte buffer[buffer_size];
+
+	BufferedStreamWriter(WriteStream* stream) {
+		init(stream);
 	}
 	
-	void prefetch() {
-		uint64_t readCount = fread(buffer, 1, size, fileHandle);
-		if (readCount != size) {
-			eof_pos = total + readCount;
-		}
+	virtual ~BufferedStreamWriter() {
+		assert(!buffer_pos);
 	}
 
-	inline int read() {
-		if (!(total & mask)) {
-			prefetch();
-		}
-		if (LIKELY(total < eof_pos)) {
-			return (int)(byte)buffer[total++ & mask];
-		} else
-			return EOF;
+	void setEvent(Closure* event) {
+		flush_event = event;
 	}
 
-	// Go back to the start of the file.
-	void restart() {
-		total = 0;
-		eof_pos = (size_t)-1;
-		rewind(fileHandle);
-	}
-
-	void close() {
-		if (fileHandle) {
-			flush();
-			fclose(fileHandle);
-			fileHandle = 0;
-			total = 0;
-		}
+	Closure* getEvent() {
+		return flush_event;
 	}
 		
-	void reset() {
-		fileHandle = nullptr;
-		total = 0;
-		eof_pos = (size_t)-1;
+	void init(WriteStream* new_stream) {
+		stream = new_stream;
+		buffer_pos = 0;
+		flush_event = nullptr;
 	}
 
-	BufferedStream() {
-		reset();
+	void flush() {
+		stream->write(buffer, buffer_pos);
+		buffer_pos = 0;
+		if(flush_event != nullptr) {
+			flush_event->run();
+		}
 	}
 
-	virtual ~BufferedStream() {
-		close();
-	} 
+	forceinline void put(byte c) {
+		if (UNLIKELY(buffer_pos > buffer_size)) {
+			flush();
+		}
+		buffer[buffer_pos] = c;
+	}
 };
 
 #endif

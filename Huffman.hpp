@@ -28,7 +28,7 @@
 #include <cassert>
 #include <set>
 
-#include "Compress.hpp"
+#include "Compressor.hpp"
 #include "Range.hpp"
 
 class Huffman {
@@ -313,9 +313,9 @@ public:
 		TreeVec cur_level;
 		cur_level.push_back(tree);
 		for (size_t i = 0; i <= max_depth; ++i) {
-			if (cur_level.empty()) break;
 			for (size_t j = 0; j < count; ++j) {
 				if (lengths[j] == i) {
+					if (cur_level.empty()) break;
 					auto* tree = cur_level.back();
 					cur_level.pop_back();
 					tree->value = j;

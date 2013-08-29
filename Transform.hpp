@@ -28,7 +28,6 @@
 #include <thread>
 
 #include "BoundedQueue.hpp"
-#include "Compress.hpp"
 #include "CyclicBuffer.hpp"
 #include "Util.hpp"
 

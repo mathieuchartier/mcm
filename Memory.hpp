@@ -24,7 +24,7 @@
 #ifndef _MEMORY_HPP_
 #define _MEMORY_HPP_
 
-#include "Compress.hpp"
+#include "Util.hpp"
 
 class MemMap {
 	void* storage;

@@ -28,7 +28,6 @@
 #include <vector>
 #include "Detector.hpp"
 #include "DivTable.hpp"
-#include "Compress.hpp"
 #include "Entropy.hpp"
 #include "Huffman.hpp"
 #include "Log.hpp"
@@ -38,6 +37,7 @@
 #include "Model.hpp"
 #include "Range.hpp"
 #include "StateMap.hpp"
+#include "Util.hpp"
 #include "WordModel.hpp"
 
 // #include "APM.hpp"
@@ -139,7 +139,7 @@ public:
 #if USE_MMX
 	typedef MMXMixer<inputs, 15, 1> CMMixer;
 #else
-	typedef Mixer<int, inputs, 17, 1> CMMixer;
+	typedef Mixer<int, inputs + 1, 17, 1> CMMixer;
 #endif
 	std::vector<CMMixer> mixers;
 	CMMixer *mixer_base;
@@ -430,7 +430,7 @@ public:
 			if (inputs > 5) { s5 = &ht[base_contexts[5] ^ ctx]; }
 			if (inputs > 6) { s6 = &ht[base_contexts[6] ^ ctx]; }
 			if (inputs > 7) { s7 = &ht[base_contexts[7] ^ ctx]; }
-			if (inputs > 0 && !mm_p) { s0 = &ht[base_contexts[0] ^ ctx]; }
+			if (inputs > 0) { s0 = &ht[base_contexts[0] ^ ctx]; }
 
 			if (s0 != nullptr) {
 				assert(s0 >= ht && s0 <= ht + hash_alloc_size);
@@ -456,7 +456,7 @@ public:
 			int stp = cur_mixer->p(wp);
 			size_t p = table.sq(stp); // Mix probabilities.
 #else
-			if (inputs > 0) p0 = mm_p ? mm_p : getP(*s0, 0, st);
+			if (inputs > 0) p0 = getP(*s0, 0, st);
 			if (inputs > 1) p1 = getP(*s1, 1, st);
 			if (inputs > 2) p2 = getP(*s2, 2, st);
 			if (inputs > 3) p3 = getP(*s3, 3, st);
@@ -464,7 +464,9 @@ public:
 			if (inputs > 5) p5 = getP(*s5, 5, st);
 			if (inputs > 6) p6 = getP(*s6, 6, st);
 			if (inputs > 7) p7 = getP(*s7, 7, st);
-			
+			p6 = mm_p; // match_model.getLength() * 12;
+			//if (match_model.getExpectedBit()) p6 = -p6;
+
 			// p6 = div_p;
 			int stp = cur_mixer->p(p0, p1, p2, p3, p4, p5, p6, p7);
 			int mixer_p = table.sq(stp); // Mix probabilities.
@@ -492,7 +494,7 @@ public:
 				++mixer_skip[(size_t)ret];
 			}
 			
-			if (inputs > 0 && !mm_p) *s0 = nextState(*s0, bit, 0);
+			if (inputs > 0) *s0 = nextState(*s0, bit, 0);
 			if (inputs > 1) *s1 = nextState(*s1, bit, 1);
 			if (inputs > 2) *s2 = nextState(*s2, bit, 2);
 			if (inputs > 3) *s3 = nextState(*s3, bit, 3);
@@ -610,6 +612,11 @@ public:
 			std::cout << "Building huffman tree took: " << clock() - start << " MS" << std::endl;
 		}
 
+		size_t freqs[kProfileCount][256];
+		for (size_t i = 0; i < kProfileCount; ++i) {
+			for (auto& c : freqs[i]) c = 0;
+		}
+
 		detector.fill(sin);
 		for (;;) {
 			if (!detector.size()) break;
@@ -640,6 +647,7 @@ public:
 					c = eof_char;
 				}
 
+				freqs[block.profile][(byte)c]++;
 				processByte<false>(sout, c);
 				update(c);
 
@@ -663,12 +671,19 @@ public:
 		ent.flush(sout);
 		
 		// TODO: Put in statistics??
+		uint64_t total = 0;
 		for (size_t i = 0; i < kProfileCount; ++i) {
 			auto cnt = profile_counts[i];
 			if (cnt) {
 				std::cout << (DataProfile)i << " : " << cnt << "(" << profile_len[i] / KB << "KB)" << std::endl;
 			}
+			Huffman h2;
+			auto* tree = h2.buildTreePackageMerge(freqs[i]);
+			tree->printRatio("Tree");
+			total += tree->getCost() / 8;
+			//delete tree;
 		}
+		std::cout << "Total huffman: " << total << std::endl;
 
 		std::cout << skip_count << std::endl;
 		if (statistics) {

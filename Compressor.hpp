@@ -33,39 +33,9 @@
 #include <ctime>
 #include <iomanip>
 #include <malloc.h>
+
+#include "Stream.hpp"
 #include "Util.hpp"
-
-forceinline bool is_power_2(size_t n) {
-	return (n & (n - 1)) == 0;
-}
-
-forceinline uint bitSize(uint Value) {
-	uint Total = 0;
-	for (;Value;Value >>= 1, Total++);
-	return Total;
-}
-
-template <typename T>
-void printIndexedArray(const std::string& str, const T& arr) {
-	size_t index = 0;
-	std::cout << str << std::endl;
-	for (const auto& it : arr) {
-		if (it) {
-			std::cout << index << ":" << it << std::endl;
-		}
-		index++;
-	}
-}
-
-template <const uint64_t n>
-struct _bitSize {static const uint64_t value = 1 + _bitSize<n / 2>::value;};
-
-template <>
-struct _bitSize<0> {static const uint64_t value = 0;};
-
-inline size_t rand32() {
-	return rand() ^ (rand() << 16);
-}
 
 class ProgressMeter {
 	uint64_t count, prev_size, prev_count;
@@ -113,6 +83,54 @@ public:
 				printRatio(total, extra);
 			}
 		}
+	}
+};
+
+class Compressor {
+public:
+	class Factory {
+	public:
+		virtual Compressor* create() = 0;
+	};
+
+	template <typename CompressorType>
+	class FactoryOf : public Compressor::Factory {
+		virtual Compressor* create() {
+			return new CompressorType();
+		}
+	};
+
+	virtual void compress(ReadStream* in, WriteStream* out) = 0;
+	virtual void decompress(ReadStream* in, WriteStream* out) = 0;
+};
+
+// Simple uncompressed compressor.
+class Store : public Compressor {
+public:
+	virtual void compress(ReadStream* in, WriteStream* out) {
+		BufferedStreamReader<16 * KB> sin(in);
+		BufferedStreamWriter<16 * KB> sout(out);
+		for (;;) {
+			int c = sin.get();
+			if (c == EOF) {
+				break;
+			}
+			sout.put(c);
+		}
+		sout.flush();
+	}
+
+	virtual void decompress(ReadStream* in, WriteStream* out) {
+		BufferedStreamReader<16 * KB> sin(in);
+		BufferedStreamWriter<16 * KB> sout(out);
+		for (;;) {
+			int c = sin.get();
+			if (c == EOF) {
+				break;
+			}
+			sout.put(c);
+		}
+		sout.flush();
 	}
 };
 
