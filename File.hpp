@@ -88,7 +88,7 @@ public:
 		handle = fopen(fileName.c_str(), oss.str().c_str());
 		return handle != nullptr ? 0 : errno;
 	}
-	
+
 	forceinline size_t read(byte* buffer, size_t bytes) {
 		return fread(buffer, 1, bytes, handle);
 	}
