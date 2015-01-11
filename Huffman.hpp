@@ -455,4 +455,15 @@ public:
 	}
 };
 
+class HuffmanStatic : public MemoryCompressor {
+	static const size_t kCodeBits = 16;
+	static const size_t kAlphabetSize = 256;
+public:
+	virtual size_t getMaxExpansion(size_t in_size) {
+		return in_size * 6 / 5 + (kCodeBits * 256 / kBitsPerByte + 100);
+	}
+	virtual size_t compressBytes(byte* in, byte* out, size_t count);
+	virtual void decompressBytes(byte* in, byte* out, size_t count);
+};
+
 #endif

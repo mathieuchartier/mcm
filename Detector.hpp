@@ -67,7 +67,7 @@ public:
 	template <typename TIn>
 	void fill(TIn& sin) {
 		while (buffer.size() < 128 * KB) {
-			int c = sin.read();
+			int c = sin.get();
 			if (c == EOF) break;
 			buffer.push_back(c);
 		}
@@ -133,7 +133,7 @@ public:
 
 		if (false) {
 			profile_length = size();
-			return profile = kText;
+			return profile = kBinary;
 		}
 
 		const auto total = size();
@@ -142,7 +142,7 @@ public:
 		for (;i < total;++i) {
 			auto c = buffer[i];
 			decoder.update(c);
-			if (decoder.err() || is_forbidden[(byte)c]) {
+			if (decoder.err() || is_forbidden[static_cast<byte>(c)]) {
 				break; // Error state?
 			}
 			if (decoder.done()) {

@@ -45,14 +45,24 @@
 // Options.
 #define USE_MMX 0
 
+// Map from state -> probability.
+class ProbMap {
+private:
+	struct Prob {
+		uint16_t count[2];
+		uint16_t st_p;
+		uint16_t p;
+	};
+	Prob probs[256];
+};
+
 template <const size_t inputs = 6>
-class CM {
+class CM : public Compressor {
 public:
-	static const size_t nibble_spread = 16; //65537;
 	static const short version = 5;
 
 	static const bool statistics = false;
-	static const bool use_prefetch = true;
+	static const bool use_prefetch = false;
 	static const bool fixed_probs = false;
 
 	// Archive header.
@@ -72,18 +82,22 @@ public:
 
 		template <typename TIn>
 		void read(TIn& sin) {
-			for (auto& c : magic) c = sin.read();
-			version = sin.read();
-			version = (version << 8) | sin.read();
-			mem_usage = (byte)sin.read();
+			for (auto& c : magic) {
+				c = sin.get();
+			}
+			version = sin.get();
+			version = (version << 8) | sin.get();
+			mem_usage = (byte)sin.get();
 		}
 
 		template <typename TOut>
 		void write(TOut& sout) {
-			for (auto& c : magic) sout.write(c);
-			sout.write(version >> 8);
-			sout.write(version & 0xFF);
-			sout.write(mem_usage);
+			for (auto& c : magic) {
+				sout.put(c);
+			}
+			sout.put(version >> 8);
+			sout.put(version & 0xFF);
+			sout.put(mem_usage);
 		}
 	} archive_header;
 
@@ -115,7 +129,7 @@ public:
 	//typedef slowBitModel<unsigned short, shift> StationaryModel;
 	typedef safeBitModel<unsigned short, shift, 5, 15> BitModel;
 	typedef fastBitModel<int, shift, 9, 30> StationaryModel;
-	typedef fastBitModel<int, shift, 5, 30> HPStationaryModel;
+	typedef fastBitModel<int, shift, 9, 30> HPStationaryModel;
 
 	WordModel word_model;
 
@@ -167,6 +181,10 @@ public:
 	static const size_t huffman_len_limit = 16;
 	Huffman huff;
 	
+	// Debug
+	size_t match_count_;
+	size_t non_match_count_;
+
 	// End of block signal.
 	BitModel end_of_block_mdl;
 	DataProfile profile;
@@ -180,14 +198,13 @@ public:
 	// Division table.
 	DivTable<short, shift, 1024> div_table;
 	
+	static const size_t kMaxWordMdl = 20;
+	static const size_t kMaxMatchMdl = 80;
+	int word_w[kMaxWordMdl][kMaxMatchMdl];
+	int match_w[kMaxWordMdl][kMaxMatchMdl];
+
 	// SM
-//#define USE_ST_PRED
-#ifdef USE_ST_PRED
-	// typedef fastBitSTModel<int, 16, 5> PredModel;
-	typedef fastBitSTAModel<int, 12, 10, 30> PredModel;
-#else
 	typedef StationaryModel PredModel;
-#endif
 	PredModel preds[(size_t)kProfileCount][inputs][256];
 	
 	static const size_t eof_char = 126;
@@ -209,7 +226,17 @@ public:
 		opt_var = 0;
 	}
 
+	void setOpt(size_t var) {
+		opt_var = var;
+		word_model.setOpt(var);
+	}
+
 	void init() {
+		for (size_t i = 0; i < kMaxWordMdl; ++i) {
+			for (size_t j = 0; j < kMaxMatchMdl; ++j) {
+				word_w[i][j] = match_w[i][j] = 1000;
+			}
+		}
 		table.build();
 
 		mixer_mask = 0xFFFF;
@@ -233,8 +260,7 @@ public:
 
 		word_model.init();
 
-		buffer.resize((MB / 4) << archive_header.mem_usage);
-		buffer.fill(0);
+		buffer.resize((MB / 4) << archive_header.mem_usage, sizeof(uint32_t));
 
 		// Models.
 		end_of_block_mdl.init();
@@ -265,20 +291,16 @@ public:
 			{1890,1430,689,498,380,292,171,165,155,137,96,101,70,81,92,72,64,85,76,57,100,65,33,44,49,40,69,39,63,29,46,55,41,63,33,38,35,24,33,32,30,28,33,51,66,28,52,2,15,0,0,1,0,797,442,182,242,194,201,183,153,135,124,171,93,85,122,67,71,93,222,32,631,896,980,647,895,164,93,1375,693,566,497,420,414,411,357,356,319,1740,649,683,681,1717,1170,1025,892,834,835,685,1727,1259,1612,1588,1778,1999,2524,2197,2613,2781,2957,2181,1664,1735,1496,1061,913,2521,1524,1935,2155,2733,1500,1282,2906,3093,2337,3337,2392,1647,3113,2435,1885,3332,2614,3384,3394,3437,3606,3432,3669,3473,2090,1598,3186,3578,3713,3533,1936,1525,2864,3689,3624,3782,3769,2293,3974,2654,3953,2693,3088,2302,1967,2558,2865,1563,2458,1805,3255,3700,1576,2840,2649,3017,1472,2467,2018,3157,3024,2338,3011,3377,3361,3394,3515,1715,3653,2480,1370,3695,3593,2812,2561,3709,3827,3780,3787,3799,3850,3817,3773,3863,3943,1946,3922,3946,3954,3952,4089,2316,4095,2515,4087,3067,2107,4095,2986,2806,3420,2255,3818,3269,3614,2293,2541,3370,3583,3572,2147,2845,2940,2999,3591,3507,1981,3072,2950,2851,3629,3890,3891,3867,2290,3846,3637,2856,4009,3996,3989,4032,4007,4023,2937,4008,4095,2048,},
 		};
 
-		for (size_t i = 0;i < (size_t)kProfileCount; ++i) {
+		for (size_t i = 0;i < static_cast<size_t>(kProfileCount); ++i) {
 			for (size_t j = 0; j < inputs;++j) {
 				for (size_t k = 0; k < num_states; ++k) {
 					auto& pr = preds[i][j][k];
 					pr.init();
-#ifdef USE_ST_PRED
-					pr.setP(initial_probs[j][k]);
-#else
 					if (fixed_probs) {
 						pr.setP(table.st(initial_probs[j][k]));
 					} else {
 						pr.setP(initial_probs[j][k]);
 					}
-#endif
 				}
 			}
 		}
@@ -318,35 +340,38 @@ public:
 	}
 
 	void calcMixerBase() {
-		size_t p0 = (byte)buffer[buffer.getPos() - 1];
-		size_t p1 = (byte)buffer[buffer.getPos() - 2];
-		size_t mixer_ctx = p0 >> 4;
-		size_t mm_len = match_model.getLength();
+		const size_t p0 = static_cast<uint8_t>(buffer[buffer.getPos() - 1]);
+		const size_t p1 = static_cast<uint8_t>(buffer[buffer.getPos() - 2]);
+		size_t mixer_ctx = p0 >> 5;
+		const size_t mm_len = match_model.getLength();
+		mixer_ctx <<= 2;
 		if (mm_len) {
-			mixer_ctx <<= 3;
-			mixer_ctx |=
-				(mm_len >= match_model.min_match + 0) + 
-				(mm_len >= match_model.min_match + 4) + 
-				(mm_len >= match_model.min_match + 8) + 
-				(mm_len >= match_model.min_match + 16) + 
-				(mm_len >= match_model.min_match + 32) + 
-				(mm_len >= match_model.min_match + 50);
+			mixer_ctx |= 1 + 
+				(mm_len >= match_model.min_match + 3) + 
+				(mm_len >= match_model.min_match + 7) + 
+				//(mm_len >= match_model.min_match + 8) + 
+				//(mm_len >= match_model.min_match + 16) + 
+				//(mm_len >= match_model.min_match + 32) + 
+				//(mm_len >= match_model.min_match + 50) +
+				0;
 		}
-		mixer_ctx <<= 1;
+		mixer_ctx <<= 3;
 		if (use_word) {
 			auto wlen = word_model.getLength();
-			mixer_ctx |= (wlen > 2);
+			mixer_ctx |=
+				(wlen >= 1) +
+				(wlen >= 2) +
+				(wlen >= 3) +
+				(wlen >= 4) +
+				(wlen >= 7) +
+				0;
 		}
 		mixer_base = getProfileMixers(profile) + (mixer_ctx << 8);
 	}
 
 	forceinline byte nextState(byte t, size_t bit, size_t smi = 0) {
 		if (!fixed_probs) {
-#ifdef USE_ST_PRED
-			preds[0][smi][t].update(bit, table);
-#else
 			preds[0][smi][t].update(bit);
-#endif
 		}
 		return state_trans[t][bit];
 	}
@@ -355,11 +380,7 @@ public:
 		if (fixed_probs) {
 			return preds[0][smi][state].getP();
 		} else {
-#ifdef USE_ST_PRED
-			return preds[0][smi][state].getSTP();
-#else
 			return st[preds[0][smi][state].getP()];
-#endif
 		}
 	}
 
@@ -367,40 +388,49 @@ public:
 	size_t processByte(TStream& stream, size_t c = 0) {
 		size_t base_contexts[inputs]; // Base contexts
 
-		const size_t blast = buffer.getPos() - 1; // Last seen char
+		const size_t bpos = buffer.getPos();
+		const size_t blast = bpos - 1; // Last seen char
 		const size_t
-			p0 = (byte)(owhash >> 0),
-			p1 = (byte)(owhash >> 8),
-			p2 = (byte)(owhash >> 16),
-			p3 = (byte)(owhash >> 24),
-			p4 = (byte)buffer[blast - 4];
+			p0 = static_cast<byte>(owhash >> 0),
+			p1 = static_cast<byte>(owhash >> 8),
+			p2 = static_cast<byte>(owhash >> 16),
+			p3 = static_cast<byte>(owhash >> 24),
+			p4 = static_cast<byte>(buffer[blast - 4]);
+		check(buffer[blast] == p0);
 
 		size_t start = 0;
+		// base_contexts[start++] = getOrder0();
 		base_contexts[start++] = getOrder1(p0); // Order 1
-		if (use_word) {
+		if (use_word && start < inputs) {
 			base_contexts[start++] = hash_lookup(word_model.getHash(), false); // Word model
 		}
-
 		if (use_sparse) {
-			base_contexts[start++] = hash_lookup(hashFunc(p2, hashFunc(p1, 0x429702E9))); // Order 12
-			base_contexts[start++] = hash_lookup(hashFunc(p3, hashFunc(p2, 0x53204647))); // Order 23
-			base_contexts[start++] = hash_lookup(hashFunc(p4, hashFunc(p3, 0xD55F1ADB))); // Order 34
+			base_contexts[start++] = hash_lookup(hashFunc(p2, hashFunc(p1, 0x37220B98))); // Order 12
+			base_contexts[start++] = hash_lookup(hashFunc(p3, hashFunc(p2, 0x651A833E))); // Order 23
+			base_contexts[start++] = hash_lookup(hashFunc(p4, hashFunc(p3, 0x4B1BEC1D))); // Order 34
 		}
-
 		hash_t h = hashFunc(0x32017044, p0);
-		for (size_t i = 1; ; ++i) {
-			const auto order = i + 1;
-			h = hashFunc((byte)buffer[blast - i], h);
-			if (order > 1 && order != 5) {
-				if (start < inputs)
-					base_contexts[start++] = hash_lookup(h);
-				else {
-					match_model.setHash(h);
-					break;
-				}
+		size_t order = 2;  // Start at order 2.
+		for (;;) {
+			h = hashFunc(buffer[bpos - order], h);
+			if (start >= inputs) {
+				break;
+			}
+			if (order != 5) {
+				base_contexts[start++] = hash_lookup(h);
+			}
+			order++;
+		}
+		match_model.setHash(h);
+		calcMixerBase();
+
+		if (statistics && !decode && match_model.getLength() > 6) {
+			if (match_model.getExpectedChar(buffer) == c) {
+				++match_count_;
+			} else {
+				++non_match_count_;
 			}
 		}
-		calcMixerBase();
 
 		// Maximize performance!
 		byte* no_alias ht = hash_table;
@@ -415,7 +445,7 @@ public:
 			// Get match model prediction.
 			size_t ctx = huff_state;
 			int mm_p = match_model.getP(st);
-
+	
 			byte
 				*no_alias s0 = nullptr, *no_alias s1 = nullptr, *no_alias s2 = nullptr, *no_alias s3 = nullptr, 
 				*no_alias s4 = nullptr, *no_alias s5 = nullptr, *no_alias s6 = nullptr, *no_alias s7 = nullptr;
@@ -444,8 +474,8 @@ public:
 			cur_mixer = &mixer_base[ctx];
 
 #if USE_MMX
-			__m128i wa = _mm_cvtsi32_si128(ushort((inputs > 0) ? (mm_p ? mm_p : getP<fixed_probs>(*s0, 0, st)) : 0));
-			__m128i wb = _mm_cvtsi32_si128((inputs > 1) ? (int(getP<fixed_probs>(*s1, 1, st)) << 16) : 0);
+			__m128i wa = _mm_cvtsi32_si128(static_cast<unsigned short>(((inputs > 0) ? (mm_p ? mm_p : getP(*s0, 0, st)) : 0)));
+			__m128i wb = _mm_cvtsi32_si128((inputs > 1) ? (int(getP(*s1, 1, st)) << 16) : 0);
 			if (inputs > 2) wa = _mm_insert_epi16(wa, getP(*s2, 2, st), 2);
 			if (inputs > 3) wb = _mm_insert_epi16(wb, getP(*s3, 3, st), 3);
 			if (inputs > 4) wa = _mm_insert_epi16(wa, getP(*s4, 4, st), 4);
@@ -454,7 +484,7 @@ public:
 			if (inputs > 7) wb = _mm_insert_epi16(wb, getP(*s7, 7, st), 7);
 			__m128i wp = _mm_or_si128(wa, wb);
 			int stp = cur_mixer->p(wp);
-			size_t p = table.sq(stp); // Mix probabilities.
+			int mixer_p = table.sq(stp); // Mix probabilities.
 #else
 			if (inputs > 0) p0 = getP(*s0, 0, st);
 			if (inputs > 1) p1 = getP(*s1, 1, st);
@@ -464,10 +494,8 @@ public:
 			if (inputs > 5) p5 = getP(*s5, 5, st);
 			if (inputs > 6) p6 = getP(*s6, 6, st);
 			if (inputs > 7) p7 = getP(*s7, 7, st);
-			p6 = mm_p; // match_model.getLength() * 12;
-			//if (match_model.getExpectedBit()) p6 = -p6;
+			p6 = mm_p;
 
-			// p6 = div_p;
 			int stp = cur_mixer->p(p0, p1, p2, p3, p4, p5, p6, p7);
 			int mixer_p = table.sq(stp); // Mix probabilities.
 #endif
@@ -563,7 +591,7 @@ public:
 		} else {
 			match_model.resetMatch();
 		}
-		owhash = (owhash << 8) | (size_t)(byte)c;
+		owhash = (owhash << 8) | static_cast<byte>(c);
 	}
 
 	template <typename TStream>
@@ -578,45 +606,44 @@ public:
 		block_profile_models[(size_t)profile].encode(ent, sout, (size_t)block.profile);
 	}
 
-	template <typename TOut, typename TIn>
-	size_t Compress(TOut& sout, TIn& sin) {
-		ProgressMeter meter;
+	void compress(Stream* in_stream, Stream* out_stream) {
+		BufferedStreamReader<4 * KB> sin(in_stream);
+		BufferedStreamWriter<4 * KB> sout(out_stream);
+		assert(in_stream != nullptr);
+		assert(out_stream != nullptr);
 		Detector detector;
 		detector.init();
 
+		match_count_ = non_match_count_ = 0;
+
 		// Compression profiles.
-		std::vector<size_t>
-			profile_counts((size_t)kProfileCount, 0),
-			profile_len((size_t)kProfileCount, 0);
+		std::vector<size_t> profile_counts((size_t)kProfileCount, 0);
+		std::vector<size_t> profile_len((size_t)kProfileCount, 0);
 
 		// Start by writing out archive header.
 		archive_header.write(sout);
 		init();
 		ent.init();
 
-		if (use_huffman) {
+		// TODO: Disable if entropy is too high?
+		if (use_huffman)  {
 			clock_t start = clock();
-			size_t freqs[256];
+			size_t freqs[256] = { 1 };
 			std::cout << "Building huffman tree" << std::endl;
-			for (auto& f : freqs) f = 0;
-			for (;;) {
-				int c = sin.read();
-				if (c == EOF) break;
-				++freqs[c];
+			if (false) {
+				for (;;) {
+					int c = sin.get();
+					if (c == EOF) break;
+					++freqs[c];
+				}
 			}
 			auto* tree = Huffman::buildTreePackageMerge(freqs, 256, huffman_len_limit);
 			tree->printRatio("LL");
 			Huffman::writeTree(ent, sout, tree, 256, huffman_len_limit);
-			huff.build(tree);
-			sin.restart();
+			huff.build(tree);	
 			std::cout << "Building huffman tree took: " << clock() - start << " MS" << std::endl;
 		}
-
-		size_t freqs[kProfileCount][256];
-		for (size_t i = 0; i < kProfileCount; ++i) {
-			for (auto& c : freqs[i]) c = 0;
-		}
-
+		size_t freqs[kProfileCount][256] = { 0 };
 		detector.fill(sin);
 		for (;;) {
 			if (!detector.size()) break;
@@ -633,31 +660,24 @@ public:
 			size_t block_size = 0;
 			for (;;++block_size) {
 				detector.fill(sin);
-
 				DataProfile new_profile = detector.detect();
-
 				bool is_end_of_block = new_profile != block.profile;
 				int c;
 				if (!is_end_of_block) {
 					c = detector.read();
 					is_end_of_block = c == EOF;
 				}
-
 				if (is_end_of_block) {
 					c = eof_char;
 				}
-
 				freqs[block.profile][(byte)c]++;
 				processByte<false>(sout, c);
 				update(c);
-
 				if (UNLIKELY(c == eof_char)) {
 					ent.encode(sout, is_end_of_block, end_of_block_mdl.getP(), shift);
 					end_of_block_mdl.update(is_end_of_block);
 					if (is_end_of_block) break;
 				}
-
-				meter.addBytePrint((size_t)sout.getTotal());
 			}
 			profile_len[(size_t)block.profile] += block_size;
 		}
@@ -677,15 +697,19 @@ public:
 			if (cnt) {
 				std::cout << (DataProfile)i << " : " << cnt << "(" << profile_len[i] / KB << "KB)" << std::endl;
 			}
-			Huffman h2;
-			auto* tree = h2.buildTreePackageMerge(freqs[i]);
-			tree->printRatio("Tree");
-			total += tree->getCost() / 8;
-			//delete tree;
+			if (false) {
+				Huffman h2;
+				auto* tree = h2.buildTreePackageMerge(freqs[i]);
+				tree->printRatio("Tree");
+				total += tree->getCost() / 8;
+			}
 		}
-		std::cout << "Total huffman: " << total << std::endl;
+		if (false) {
+			std::cout << "Total huffman: " << total << std::endl;
+		}
 
 		std::cout << skip_count << std::endl;
+		std::cout << "match " << match_count_ << " non match " << non_match_count_ << std::endl;
 		if (statistics) {
 			// Dump weights
 			std::ofstream fout("probs.txt");
@@ -695,41 +719,30 @@ public:
 				fout << "}," << std::endl;
 			}
 
-			// Print average weights so that we find out which contexts are good and which are not!
+			// Print average weights so that we find out which contexts are good and which are not.
 			for (size_t cur_p = 0; cur_p < static_cast<size_t>(kProfileCount); ++cur_p) {
 				auto cur_profile = (DataProfile)cur_p;
-				double w1[inputs] = { 0 }, w2[inputs] = { 0 };
-				size_t t1 = 0, t2 = 0;
 				CMMixer* mixers = getProfileMixers(cur_profile);
+				std::cout << "Mixer weights for profile " << cur_profile << std::endl;
 
-				for (size_t i = 0; i <= mixer_mask; ++i) {
-					auto& m = mixers[i];
-					// Only mixers which have been used at least a few times.
-					if (m.getLearn() < 15) {
-						if ((i & 0xF00) == 0) { // No match?
-							++t1;
-							for (size_t i = 0; i < inputs;++i) {
-								w1[i] += double(m.getWeight(i)) / double(1 << 16);
+				for (size_t i = 0; i < 256; ++i) {
+					double weights[inputs+2] = { 0 };
+					size_t count = 0;
+					for (size_t j = 0; j < 256; ++j) {
+						// Only mixers which have been used at least a few times.
+						auto& m = mixers[i * 256 + j];
+						if (m.getLearn() < 30) {
+							for (size_t k = 0; k < m.size(); ++k) {
+								weights[k] += double(m.getWeight(k)) / double(1 << m.shift());
 							}
-						} else {
-							++t2;
-							for (size_t i = 0; i < inputs;++i) {
-								w2[i] += double(m.getWeight(i)) / double(1 << 16);
-							}
+							++count;
 						}
 					}
-				}
-
-				std::cout << "Mixer weights for profile " << cur_profile << std::endl;
-				if (t1) {
-					std::cout << "No match weights: ";
-					for (auto& w : w1) std::cout << w / (double(t1) / double(1 << 16)) << " ";
-					std::cout << std::endl;
-				}
-				if (t2) {
-					std::cout << "Match weights: ";
-					for (auto& w : w2) std::cout << w / (double(t2) / double(1 << 16)) << " ";
-					std::cout << std::endl;
+					if (count != 0) {
+						std::cout << "Weights " << i << ":";
+						for (auto& w : weights) std::cout << w / double(count) << " ";
+						std::cout << std::endl;
+					}
 				}
 			}
 			// State count.
@@ -741,33 +754,30 @@ public:
 			std::cout << "zero " << z << " nz " << nz << std::endl;
 			std::cout << "mixer skip " << mixer_skip[0] << " " << mixer_skip[1] << std::endl;
 		}
-
-		return (size_t)sout.getTotal();
 	}
 
-	template <typename TOut, typename TIn>
-	bool DeCompress(TOut& sout, TIn& sin) {
+	void decompress(Stream* in_stream, Stream* out_stream) {
+		BufferedStreamReader<4 * KB> sin(in_stream);
+		BufferedStreamWriter<4 * KB> sout(out_stream);
+		assert(in_stream != nullptr);
+		assert(out_stream != nullptr);
 		// Read the header from the input stream.
 		archive_header.read(sin);
-
 		// Check magic && version.
 		if (archive_header.magic[0] != 'M' ||
 			archive_header.magic[1] != 'C' ||
 			archive_header.magic[2] != 'M' ||
 			archive_header.version != version) {
-			return false;
+			return; // TODO: Fatal error!
 		}
-		
 		ProgressMeter meter(false);
 		init();
 		ent.initDecoder(sin);
-
 		if (use_huffman) {
 			auto* tree = Huffman::readTree(ent, sin, 256, huffman_len_limit);
 			huff.build(tree);
 			delete tree;
 		}
-
 		for (;;) {
 			SubBlockHeader block;
 			readSubBlock(sin, block);
@@ -786,13 +796,9 @@ public:
 					}
 				}
 
-				sout.write(c);
-				meter.addBytePrint(sin.getTotal());
+				sout.put(c);
 			}
 		}
-		_mm_empty();
-		std::cout << std::endl;
-		return true;
 	}	
 };
 

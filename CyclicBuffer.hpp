@@ -122,10 +122,8 @@ public:
 		delete [] storage;
 		mask = newSize - 1;
 		alloc_size = newSize + padding * 2;
-		storage = new T[alloc_size];
-		std::fill(storage, storage + alloc_size, 0);
+		storage = new T[alloc_size]();
 		data = storage + padding;
-		fill(0);
 		restart();
 	}
 };

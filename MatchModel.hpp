@@ -6,13 +6,14 @@
 template <typename Model>
 class MatchModel {
 public:
-	static const size_t min_match = 6; // TODO: Tweak this??????
+	static const size_t min_match = 4; // TODO: Tweak this??????
 	static const size_t small_match = 8;
 	static const size_t max_match = 80;
 	static const size_t char_shift = 2;
 	static const size_t mm_shift = 2;
 	static const size_t mm_round = (1 << mm_shift) - 1;
 	static const size_t max_value = 1 << 12;
+	static const bool kMultiMatch = false;
 private:
 	static const size_t bits_per_char = 16;
 	static const size_t num_length_models = ((max_match - min_match + 2 + 2 * mm_round) >> mm_shift) * bits_per_char;
@@ -27,7 +28,7 @@ private:
 	// Hash table
 	size_t hash_mask;
 	MemMap hash_storage;
-	size_t* hash_table;
+	uint32_t* hash_table;
 	Model* cur_mdl;
 	size_t expected_code, prev_char;
 	static const size_t code_bit_shift = sizeof(size_t) * 8 - 1;
@@ -46,8 +47,8 @@ public:
 		hash_mask = size - 1;
 		// Check power of 2.
 		assert((hash_mask & (hash_mask + 1)) == 0);
-		hash_storage.resize((hash_mask + 1) * sizeof(size_t));
-		hash_table = (size_t*)hash_storage.getData();
+		hash_storage.resize((hash_mask + 1) * sizeof(uint32_t));
+		hash_table = (uint32_t*)hash_storage.getData();
 	}
 
 	forceinline int getP(const short* no_alias st) {
@@ -59,6 +60,10 @@ public:
 
 	forceinline size_t getExpectedBit() const {
 		return expected_code >> code_bit_shift;
+	}
+
+	forceinline size_t getMinMatch() const {
+		return min_match;
 	}
 
 	void init() {
@@ -96,20 +101,25 @@ public:
 	void search(Buffer& buffer, size_t spos) {
 		// Reverse match.
 		size_t blast = buffer.getPos() - 1;
-		size_t len = sizeof(size_t);
-		if (LIKELY(*(size_t*)&buffer[spos - len] == *(size_t*)&buffer[blast - len])) {
-			for (; buffer[spos - len] == buffer[blast - len] && len < max_match; ++len);
-			if (len >= cur_min_match && len > getLength()) {
-				// Update our match.
-				this->pos = spos;
-				this->len = len;
+		size_t len = sizeof(uint32_t);
+		if (*reinterpret_cast<uint32_t*>(&buffer[spos - len]) ==
+			*reinterpret_cast<uint32_t*>(&buffer[blast - len])) {
+			--spos;
+			--blast;
+			for (; len < cur_min_match; ++len) {
+				if (buffer[spos - len] != buffer[blast - len]) {
+					return;
+				}
 			}
+			for (;buffer[spos - len] == buffer[blast - len] && len < max_match; ++len);
+			// Update our match.
+			this->pos = spos + 1;
+			this->len = len;
 		}
 	}
 
-	forceinline void setHash(hash_t new_h1, size_t new_min_match = min_match) {
+	forceinline void setHash(hash_t new_h1) {
 		h0 = new_h1;
-		// cur_min_match = new_min_match;
 		assert(cur_min_match >= min_match);
 	}
 	
@@ -121,28 +131,29 @@ public:
 
 	void update(Buffer& buffer) {
 		const auto blast = buffer.getPos() - 1;
-		auto bmask = buffer.getMask();
-		setPrevChar(buffer(blast & bmask));
-
+		const auto bmask = buffer.getMask();
+		const auto last_pos = blast & bmask;
+		setPrevChar(buffer(last_pos));
 		// Update hashes.
-		h3 = hashFunc(prev_char, h2); // order n + 2
-		h2 = hashFunc(prev_char, h1); // order n + 1
+		if (kMultiMatch) {
+			h3 = hashFunc(prev_char, h2); // order n + 2
+			h2 = hashFunc(prev_char, h1); // order n + 1
+		}
 		h1 = hashFunc(prev_char, h0); // order n
-
 		// Update the existing match.
 		if (!len) {
 			auto& b1 = hash_table[h1 & hash_mask];
-			if (!((b1 ^ h1) & ~bmask)) {
+			if (((b1 ^ h1) & ~bmask) == 0) {
 				search(buffer, b1);
 			}
-			if (len < small_match) {
+			if (kMultiMatch && len < small_match) {
 				auto& b2 = hash_table[h3 & hash_mask];
-				if (!((b2 ^ h3) & ~bmask)) {
+				if (((b2 ^ h3) & ~bmask) == 0) {
 					search(buffer, b2);
 				}
-				b2 = (blast & bmask) | (h3 & ~bmask);
+				b2 = last_pos | (h3 & ~bmask);
 			} else
-				b1 = (blast & bmask) | (h1 & ~bmask);
+				b1 = last_pos | (h1 & ~bmask);
 		} else {
 			len += len < max_match;
 			++pos;

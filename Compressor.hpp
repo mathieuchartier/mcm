@@ -24,6 +24,7 @@
 #ifndef _COMPRESS_HPP_
 #define _COMPRESS_HPP_
 
+#include <cassert>
 #include <cmath>
 #include <map>
 #include <vector>
@@ -50,6 +51,10 @@ public:
 		prev_time = start = clock();
 	}
 
+	~ProgressMeter() {
+		_mm_empty();
+	}
+
 	forceinline uint64_t getCount() const {
 		return count;
 	}
@@ -60,13 +65,15 @@ public:
 
 	// Surprisingly expensive to call...
 	void printRatio(uint64_t comp_size, const std::string& extra) {
+		// Be sure to empty mmx before printing progress meter.
 		_mm_empty();
-		const auto cur_ratio = double(comp_size - prev_size) / (count - prev_count);
+		const auto cur_ratio = double(comp_size - prev_size) / double(count - prev_count);
 		const auto ratio = double(comp_size) / count;
 		auto cur_time = clock();
 		auto time_delta = cur_time - start;
-		if (!time_delta) ++time_delta;
-
+		if (!time_delta) {
+			++time_delta;
+		}
 		const size_t rate = size_t(double(count / KB) / (double(time_delta) / double(CLOCKS_PER_SEC)));
 		std::cout
 			<< count / KB << "KB " << (encode ? "->" : "<-") << " "
@@ -86,13 +93,63 @@ public:
 	}
 };
 
+class CompressionJob {
+public:
+	CompressionJob() {}
+	virtual ~CompressionJob() {}
+	double getCompressionRatio() const {
+		if (!getInBytes()) {
+			return 1;
+		}
+		return static_cast<double>(getOutBytes()) / static_cast<double>(getInBytes());
+	}
+
+	virtual bool isDone() const = 0;
+	virtual uint64_t getInBytes() const = 0;
+	virtual uint64_t getOutBytes() const = 0;
+};
+
+class MultiCompressionJob : public CompressionJob {
+public:
+	MultiCompressionJob() {}
+	virtual ~MultiCompressionJob() {}
+	void addJob(CompressionJob* job) {
+		jobs_.push_back(job);
+	}
+	virtual bool isDone() const {
+		for (CompressionJob* job : jobs_) {
+			if (!job->isDone()) {
+				return false;
+			}
+		}
+		return true;
+	}
+	virtual uint64_t getInBytes() const {
+		uint64_t sum = 0;
+		for (CompressionJob* job : jobs_) {
+			sum += job->getInBytes();
+		}
+		return sum;
+	}
+	virtual uint64_t getOutBytes() const {
+		uint64_t sum = 0;
+		for (CompressionJob* job : jobs_) {
+			sum += job->getOutBytes();
+		}
+		return sum;
+	}
+
+private:
+	std::vector<CompressionJob*> jobs_;
+};
+
+// Generic compressor interface.
 class Compressor {
 public:
 	class Factory {
 	public:
 		virtual Compressor* create() = 0;
 	};
-
 	template <typename CompressorType>
 	class FactoryOf : public Compressor::Factory {
 		virtual Compressor* create() {
@@ -100,37 +157,159 @@ public:
 		}
 	};
 
-	virtual void compress(ReadStream* in, WriteStream* out) = 0;
-	virtual void decompress(ReadStream* in, WriteStream* out) = 0;
+	// Optimization variable for brute forcing.
+	virtual void setOpt(size_t opt) {}
+	virtual size_t getOpt() const {
+		return 0;
+	}
+	virtual bool failed() {
+		return false;
+	}
+	// Compress n bytes.
+	virtual void compress(Stream* in, Stream* out) = 0;
+	// Decompress n bytes, the calls must line up. You can't do C(20)C(30)D(50)
+	virtual void decompress(Stream* in, Stream* out) = 0;
+};
+
+// In memory compressor.
+class MemoryCompressor {
+public:
+	virtual void setOpt(size_t opt) {}
+	virtual size_t getOpt() const {
+		return 0;
+	}
+	virtual size_t getMaxExpansion(size_t in_size) = 0;
+	virtual size_t compressBytes(byte* in, byte* out, size_t count) = 0;
+	virtual void decompressBytes(byte* in, byte* out, size_t count) = 0;
+};
+
+template <typename T>
+class MemoryStreamWrapper : public MemoryCompressor {
+	T compressor;
+public:
+	// Can't know.
+	virtual size_t getMaxExpansion(size_t in_size) {
+		return in_size * 3 / 2;
+	}
+
+	virtual size_t compressBytes(byte* in, byte* out, size_t count) {
+		WriteMemoryStream wms(out);
+		ReadMemoryStream rms(in, in + count);
+		compressor.compress(rms, wms);
+		return wms.tell();
+	}
+
+	virtual void decompressBytes(byte* in, byte* out, size_t count) {
+		WriteMemoryStream wms(out);
+		ReadMemoryStream rms(in, in + count);
+		compressor.decompress(rms, wms);
+	}
+};
+
+class CompressorFactories {
+public:
+	// Legacy compressors includes non legacy compresors.
+	std::vector<Compressor::Factory*> legacy_factories;
+	// Compressors.
+	std::vector<Compressor::Factory*> factories;
+
+	void addCompressor(bool is_legacy, Compressor::Factory* factory);
+	size_t findFactoryIndex(Compressor::Factory* factory) const;
+	CompressorFactories();
+	Compressor::Factory* getLegacyFactory(size_t index);
+	Compressor::Factory* getFactory(size_t index);
+	forceinline static CompressorFactories* getInstance() {
+		return instance;
+	}
+	static Compressor* makeCompressor(size_t type);
+	static void init();
+
+private:
+	static CompressorFactories* instance;
 };
 
 // Simple uncompressed compressor.
+class StoreSingleByte : public Compressor {
+public:
+	virtual void compress(Stream* in, Stream* out);
+	virtual void decompress(Stream* in, Stream* out);
+};
+
 class Store : public Compressor {
 public:
-	virtual void compress(ReadStream* in, WriteStream* out) {
-		BufferedStreamReader<16 * KB> sin(in);
-		BufferedStreamWriter<16 * KB> sout(out);
-		for (;;) {
-			int c = sin.get();
-			if (c == EOF) {
-				break;
-			}
-			sout.put(c);
-		}
-		sout.flush();
+	virtual void compress(Stream* in, Stream* out);
+	virtual void decompress(Stream* in, Stream* out);
+};
+
+
+class MemCopyCompressor : public MemoryCompressor {
+public:
+	size_t getMaxExpansion(size_t in_size);
+	size_t compressBytes(byte* in, byte* out, size_t count);
+	void decompressBytes(byte* in, byte* out, size_t count);
+};
+
+class BitStreamCompressor : public MemoryCompressor {
+	static const size_t kBits = 8;
+public:
+	size_t getMaxExpansion(size_t in_size);
+	size_t compressBytes(byte* in, byte* out, size_t count);
+	void decompressBytes(byte* in, byte* out, size_t count);
+};
+
+template <size_t kAlphabetSize = 0x100>
+class FrequencyCounter {
+	size_t frequencies_[kAlphabetSize];
+public:
+	FrequencyCounter() {
+		std::fill(frequencies_, frequencies_ + kAlphabetSize, 0U);
 	}
 
-	virtual void decompress(ReadStream* in, WriteStream* out) {
-		BufferedStreamReader<16 * KB> sin(in);
-		BufferedStreamWriter<16 * KB> sout(out);
-		for (;;) {
-			int c = sin.get();
-			if (c == EOF) {
-				break;
-			}
-			sout.put(c);
+	inline void addFrequency(size_t index) {
+		++frequencies_[index];
+	}
+
+	void normalize(size_t target) {
+		check(target != 0U);
+		uint64_t total = 0;
+		for (auto f : frequencies_) {
+			total += f;
 		}
-		sout.flush();
+		const auto factor = static_cast<double>(target) / static_cast<double>(total);
+		for (auto& f : frequencies_) {
+			auto new_val = static_cast<size_t>(double(f) * factor);
+			total += new_val - f;
+			f = new_val;
+		}
+		// Fudge the probabilities until we match.
+		int64_t delta = static_cast<int64_t>(target) - total;
+		while (delta) {
+			for (auto& f : frequencies_) {
+				if (f) {
+					if (delta > 0) {
+						++f;
+						delta--;
+					} else {
+						// Don't ever go back down to 0 since we can't necessarily represent that.
+						if (f > 1) {
+							--f;
+							delta++;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	const size_t* getFrequencies() const {
+		return frequencies_;
+	}
+
+	void count(byte* data, size_t bytes) {
+		// TODO: Vectorize.
+		for (; count; --count) {
+			addFrequency(*data++);
+		}
 	}
 };
 

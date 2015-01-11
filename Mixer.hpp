@@ -74,24 +74,32 @@ public:
 		init();
 	}
 
+	forceinline static size_t size() {
+		return weights + 1;
+	}
+
+	forceinline static size_t shift() {
+		return fp_shift;
+	}
+
 	forceinline int getLearn() const {
 		return learn;
 	}
 
 	forceinline T getWeight(size_t index) const {
-		assert(index < weights);
+		assert(index <= weights);
 		return w[index];
 	}
 
-	void init() {
-		if (weights) {
+	void init(size_t learn_rate = 366) {
+		if (weights != 0) {
 			int wdiv = weights;
 			for (auto& cw : w) {
 				cw = T((1 << fp_shift) / wdiv);
 			}
 		}
 		w[weights] = 0;
-		learn = 192;
+		learn = learn_rate;
 	}
 
 	// Calculate and return prediction.
@@ -109,14 +117,14 @@ public:
 		int p0 = 0, int p1 = 0, int p2 = 0, int p3 = 0,
 		int p4 = 0, int p5 = 0, int p6 = 0, int p7 = 0) const {
 		int ptotal = 0;
-		if (weights > 0) ptotal += p0 * int(w[0]);
-		if (weights > 1) ptotal += p1 * int(w[1]);
-		if (weights > 2) ptotal += p2 * int(w[2]);
-		if (weights > 3) ptotal += p3 * int(w[3]);
-		if (weights > 4) ptotal += p4 * int(w[4]);
-		if (weights > 5) ptotal += p5 * int(w[5]);
-		if (weights > 6) ptotal += p6 * int(w[6]);
-		if (weights > 7) ptotal += p7 * int(w[7]);
+		if (weights > 0) ptotal += p0 * static_cast<int>(w[0]);
+		if (weights > 1) ptotal += p1 * static_cast<int>(w[1]);
+		if (weights > 2) ptotal += p2 * static_cast<int>(w[2]);
+		if (weights > 3) ptotal += p3 * static_cast<int>(w[3]);
+		if (weights > 4) ptotal += p4 * static_cast<int>(w[4]);
+		if (weights > 5) ptotal += p5 * static_cast<int>(w[5]);
+		if (weights > 6) ptotal += p6 * static_cast<int>(w[6]);
+		if (weights > 7) ptotal += p7 * static_cast<int>(w[7]);
 		ptotal += w[weights] << wshift;
 		return ptotal >> fp_shift;
 	}
@@ -237,13 +245,13 @@ public:
 	forceinline bool update(__m128i probs, int pr, size_t bit, size_t pshift = 12, size_t limit = 13) {
 		int err = ((bit << pshift) - pr) * learn;
 		bool ret = false;
-		if (err < -(round >> (pshift - 1)) || err > (round >> (pshift - 1))) {
+		if (fastAbs(err) >= (round >> (pshift - 1))) {
 			err >>= 3;
 			probs = _mm_slli_epi32(probs, 3);
 			if (err > 32767) err = 32767; // Make sure we don't overflow.
 			if (err < -32768) err = -32768;
 			// I think this works, we shall see.
-			auto serr = (size_t)(uint16_t)(err);
+			auto serr = static_cast<size_t>(static_cast<uint16_t>(err));
 			__m128i verr = _mm_shuffle_epi32(_mm_cvtsi32_si128(serr | (serr << 16)), 0);
 			// shift must be 16
 			w = _mm_adds_epi16(w, _mm_mulhi_epi16(probs, verr));

@@ -19,6 +19,11 @@ public:
 	static const size_t transform_table_size = 256;
 	size_t transform[transform_table_size];
 
+	size_t opt_var;
+	void setOpt(size_t n) {
+		opt_var = n;
+	}
+
 	WordModel() { 
 		size_t index = 0;
 		for (auto& t : transform) t = transform_table_size;
@@ -85,8 +90,8 @@ public:
 	}
 
 	forceinline void reset() {
-		h1 = 0x9FD33A52;
-		h2 = 0x21724712;
+		h1 = 0x9FD33A52 * 5;
+		h2 = 0x21724712 * 15;
 		len = 0;
 	}
 
@@ -114,10 +119,11 @@ public:
 		}
 	}
 
-	static forceinline hash_t hashFunc(size_t c, hash_t h) {
+	forceinline hash_t hashFunc(size_t c, hash_t h) {
+		h *= 61;
 		h += c;
 		h += rotate_left(h, 10);
-		return h ^ (h >> 6);
+		return h ^ (h >> 5);
 	}
 
 	void updateUTF(char c) {
@@ -126,8 +132,8 @@ public:
 		if (decoder.done()) {
 			if (cur < 256) cur = transform[cur];
 			if (LIKELY(cur != transform_table_size)) {
-				h1 = (h1 + cur) * 54;
-				h2 = h1 >> 7;
+				h1 = hashFunc(cur, h1);
+				h2 = h1 * 6;
 				++len;
 			} else {
 				if (len) {

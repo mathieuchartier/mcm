@@ -42,7 +42,7 @@ private:
 		if (size_t(Low) < size_t(0xFF << TopBits) || Low >> 32) {
 			byte temp = _cache;
 			do {
-				sout.write(byte(temp + byte(Low >> 32)));
+				sout.put(byte(temp + byte(Low >> 32)));
 				temp = 0xFF;
 			} while(--_cacheSize);
 			_cache = byte(uint(Low >> 24));
@@ -81,8 +81,8 @@ public:
 
 	template <typename TOut>
 	forceinline void encode(TOut& out, size_t bit, size_t p, size_t shift) {
-		assert(p < (1 << shift));
-		assert(p != 0);
+		assert(p < (1U << shift));
+		assert(p != 0U);
 		const size_t mid = (Range >> shift) * p;
 		if (bit) {
 			Range = mid;
@@ -95,8 +95,8 @@ public:
 
 	template <typename TIn>
 	forceinline size_t decode(TIn& in, size_t p, size_t shift) {
-		assert(p < (1 << shift));
-		assert(p != 0);
+		assert(p < (1U << shift));
+		assert(p != 0U);
 		auto ret = getDecodedBit(p, shift);
 		Normalize(in);
 		return ret;
@@ -229,7 +229,7 @@ public:
 		Code = 0;
 		Range = Top;
 		for(uint i = 0;i < 5;i++)
-			Code = (Code << 8) | (In.read() & 0xFF);	
+			Code = (Code << 8) | (In.get() & 0xFF);	
 	}
 
 	inline uint GetThreshold(uint Total) {
@@ -239,7 +239,7 @@ public:
 	template <typename TIn>
 	forceinline void Normalize(TIn& In) {
 		while (Range < TopValue) {
-			Code = (Code << 8) | (In.read() & 0xFF);
+			Code = (Code << 8) | (In.get() & 0xFF);
 			Range <<= 8;
 		}
 	}

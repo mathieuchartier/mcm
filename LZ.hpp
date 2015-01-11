@@ -29,335 +29,44 @@
 #include "Model.hpp"
 #include "Range.hpp"
 
-// Standard LZW.
-template <bool use_range = true>
-class LZW {
-protected:
-	// Compression data structure, a state machine with hash table + chaining for trasitions.
-	class CompDict {
-	public:
-		class HashEntry {
-		public:
-			size_t key;
-			size_t code;
-			HashEntry* next;
-		};
-	private:
-		// Chaining.
-		hash_t hash_mask;
-		std::vector<HashEntry*> hash_table;
-		size_t code_count;
-	public:
-		void init(size_t size) {
-			hash_mask = size - 1;
-			hash_table.resize(hash_mask + 1);
-			code_count = 256;
-			for (auto& b : hash_table) b = nullptr;
-		}
-		
-		// Obtain a new entry from ??
-		HashEntry* newEntry() {
-			return new HashEntry;
-		}
-
-		forceinline size_t getCodeCount() const {
-			return code_count;
-		}
-
-		void add(hash_t hash, size_t key) {
-			size_t index = getBucketIndex(hash);
-			auto* new_bucket = newEntry();
-			new_bucket->key = key;
-			new_bucket->code = code_count++;
-			new_bucket->next = hash_table[index];
-			hash_table[index] = new_bucket;
-		}
-
-		forceinline size_t getBucketIndex(hash_t hash) const {
-			return hash & hash_mask;
-		}
-
-		HashEntry* find(hash_t hash, size_t key) {
-			auto* b = hash_table[getBucketIndex(hash)];
-			for (;b != nullptr && b->key != key; b = b->next);
-			return b;
-		}
-	};
-
-	class DeCompDict {
-	private:
-		std::vector<size_t> decomp;
-		size_t code_pos, base_add;
-	public:
-		forceinline size_t get(size_t index) const {
-			return decomp[index - 256];
-		}
-
-		forceinline void nextBase() {
-			++base_add;
-		}
-
-		forceinline size_t getLimit() const {
-			return code_pos + base_add;
-		}
-
-		forceinline size_t size() const {
-			return code_pos;
-		}
-
-		void init(size_t size) {
-			code_pos = 0;
-			base_add = 255;
-			decomp.resize(size);
-		}
-
-		void add(size_t code_char) {
-			decomp[code_pos++] = code_char;
-		}
-	};
-
-	Range7 ent;
-	size_t dict_size;
+class Match {
 public:
-	static const size_t version = 0;
-	void setMemUsage(size_t n) {}
+	forceinline Match() {
+		reset();
 
-	void init() {
-		dict_size = 1 << 16;
+	}
+	forceinline void reset() {
+		dist_ = 0;
+		length_ = 0;
+	}
+	forceinline size_t getDist() const {
+		return dist_;
+	}
+	forceinline void setDist(size_t dist) {
+		dist_ = dist;
+	}
+	forceinline size_t getLength() const {
+		return length_;
+	}
+	forceinline void setLength(size_t length) {
+		length_ = length;
 	}
 
-	forceinline hash_t hashFunc(size_t a, hash_t b) {
-		b += a;
-		b += rotate_left(b, 9);
-		return b ^ (b >> 6);
-	}
-
-	template <typename TOut, typename TIn>
-	size_t Compress(TOut& sout, TIn& sin) {
-		init();
-		if (use_range) {
-			ent.init();
-		}
-		CompDict dict;
-		dict.init(dict_size * 4);
-		// Start out at the code for the first char.
-		size_t code = sin.read();
-		size_t prev_char = code;
-		size_t ctx_char = 0, last_char = code;
-		ProgressMeter meter;
-		for (;;) {
-			size_t c = sin.read();
-			if (c == EOF) break;
-			// Attempt to find a transition.
-			size_t key = (code << 8) | c;
-			hash_t hash = hashFunc(c, hashFunc(0x7D1BACD, code));
-			auto* entry = dict.find(hash, key);
-			if (entry != nullptr) {
-				code = entry->code;
-				last_char = c;
-			} else {
-				// Output code, add new code.
-				writeCode(sout, code, dict.getCodeCount());
-				if (dict.getCodeCount() < dict_size) {
-					dict.add(hash, key);
-				}
-				last_char = code = c;
-			}
-			meter.addBytePrint(sout.getTotal());
-		}
-		writeCode(sout, code, dict.getCodeCount());
-		if (use_range) {
-			ent.flush(sout);
-		}
-		std::cout << std::endl;
-		return (size_t)sout.getTotal();
-	}
-
-	template <typename TOut, typename TIn>
-	bool DeCompress(TOut& sout, TIn& sin) {
-		DeCompDict dict;
-		dict.init(dict_size);
-		dict.nextBase();
-		init();
-		if (use_range) {
-			ent.initDecoder(sin);
-		}
-		ProgressMeter meter(false);
-		size_t prev_code = readCode(sin, 256);
-		if (!sin.eof()) {
-			sout.write(prev_code);
-			for (;;) {
-				size_t limit = dict.getLimit();
-				size_t code = readCode(sin, std::min(limit + 1, dict_size));
-				if (sin.eof()) {
-					break;
-				}
-				size_t output_code = (code == limit) ? prev_code : code;
-				// Output the code so that we can get the first char if needed.
-				byte buffer[32 * KB];
-				size_t bpos = 0;
-				while (output_code >= 256) {
-					size_t entry = dict.get(output_code);
-					buffer[bpos++] = (byte)entry;
-					output_code = entry >> 8;
-				}
-				size_t first_char = output_code;
-				buffer[bpos++] = (byte)first_char;
-				while (bpos) {
-					sout.write(buffer[--bpos]);
-					meter.addBytePrint(sin.getTotal());
-				}
-
-				if (code == limit) {
-					sout.write(first_char);
-					meter.addBytePrint(sin.getTotal());
-					dict.add((prev_code << 8) | first_char);
-				} else {
-					if (limit < dict_size) {
-						dict.add((prev_code << 8) | first_char);
-					}
-				}
-				prev_code = code;
-			}
-		}
-		std::cout << std::endl;
-		return true;
-	}
-
-	template <typename TOut>
-	void writeCode(TOut& sout, size_t code, size_t max) {
-		if (use_range) {
-			ent.encodeDirect(sout, code, max);
-		} else {
-			sout.write(code >> 8);
-			sout.write((byte)code);
-		}
-	}
-
-	template <typename TIn>
-	size_t readCode(TIn& sin, size_t max_code) {
-		if (use_range) {
-			return ent.decodeDirect(sin, max_code);
-		} else {
-			size_t code = (byte)sin.read();
-			code <<= 8;
-			code |= byte(sin.read());
-			assert(code < max_code);
-			return code;
-		}
-	}
+private:
+	size_t dist_;
+	size_t length_;
 };
 
-class RLZW : public LZW<true> {
-	static const size_t version = 0;
-	void setMemUsage(size_t n) {}
-		
-	void init() {
-		dict_size = 1 << 16;
-	}
+class MatchEncoder {
+public:
+	virtual void encodeMatch(const Match& match) = 0;
+};
 
-	forceinline hash_t hashFunc(size_t a, hash_t b) {
-		b += a;
-		b += rotate_left(b, 9);
-		return b ^ (b >> 6);
-	}
-
-	template <typename TOut, typename TIn>
-	size_t Compress(TOut& sout, TIn& sin) {
-		init();
-		ent.init();
-		CompDict dict[256], *cur_dict = nullptr;
-		for (auto& d : dict) d.init(dict_size * 4);
-		// Start out at the code for the first char.
-		size_t code = sin.read();
-		size_t prev_char = code;
-		size_t ctx_char = 0, last_char = code;
-		cur_dict = &dict[0];
-		ProgressMeter meter;
-		for (;;) {
-			size_t c = sin.read();
-			if (c == EOF) break;
-			// Attempt to find a transition.
-			size_t key = (code << 8) | c;
-			hash_t hash = hashFunc(c, hashFunc(0x7D1BACD, code));
-			auto entry = cur_dict->find(hash, key);
-			if (entry != nullptr) {
-				code = entry->code;
-				last_char = c;
-			} else {
-				// Output code, add new code.
-				ent.encodeDirect(sout, code, cur_dict->getCodeCount());
-				if (cur_dict->getCodeCount() < dict_size) {
-					cur_dict->add(hash, key);
-				}
-				//cur_dict = &dict[last_char];
-				last_char = code = c;
-			}
-			meter.addBytePrint(sout.getTotal());
-		}
-		ent.encodeDirect(sout, code, cur_dict->getCodeCount());
-		ent.flush(sout);
-		std::cout << std::endl;
-		return (size_t)sout.getTotal();
-	}
-
-	template <typename TOut, typename TIn>
-	bool DeCompress(TOut& sout, TIn& sin) {
-		DeCompDict dict[256], *cur_dict = nullptr, *prev_dict = nullptr;
-		for (auto& d : dict) {
-			d.init(dict_size);
-		}
-		init();
-		ent.initDecoder(sin);
-		ProgressMeter meter(false);
-		size_t prev_code = 0;
-		cur_dict = &dict[0];
-		for (;;) {
-			size_t limit = cur_dict->getLimit();
-			size_t code = ent.decodeDirect(sin, std::min(limit + 1, dict_size));
-			if (sin.eof()) {
-				break;
-			}
-			if (limit == 255) {
-				cur_dict->nextBase();
-				sout.write(code);
-				prev_code = code;
-				//cur_dict = &dict[code];
-				continue;
-			}
-			size_t output_code = (code == limit) ? prev_code : code;
-			// Output the code so that we can get the first char if needed.
-			byte buffer[32 * KB];
-			size_t bpos = 0;
-			while (output_code >= 256) {
-				size_t entry = cur_dict->get(output_code);
-				buffer[bpos++] = (byte)entry;
-				output_code = entry >> 8;
-			}
-			size_t first_char = output_code;
-			buffer[bpos++] = (byte)first_char;
-			while (bpos) {
-				sout.write(buffer[--bpos]);
-				meter.addBytePrint(sin.getTotal());
-			}
-
-			if (code == limit) {
-				sout.write(first_char);
-				meter.addBytePrint(sin.getTotal());
-				cur_dict->add((prev_code << 8) | first_char);
-				//cur_dict = &dict[first_char];
-			} else {
-				if (limit < dict_size) {
-					cur_dict->add((prev_code << 8) | first_char);
-				}
-				//cur_dict = &dict[buffer[0]];
-				prev_dict = cur_dict;
-			}
-			prev_code = code;
-		}
-		std::cout << std::endl;
-		return true;
-	}
+class MatchFinder {
+public:
+	virtual Match findNextMatch() = 0;
+	virtual size_t getNonMatchLen() const = 0;
+	virtual bool done() const = 0;
 };
 
 class LZ {
@@ -410,5 +119,253 @@ public:
 		return true;
 	}
 };
+
+class MemoryLZ : public MemoryCompressor {
+public:
+	// Assumes 8 bytes buffer overrun possible per run.
+	size_t getMatchLen(byte* m1, byte* m2, byte* limit1);
+};
+
+// variable order rolz.
+class VRolz {
+	static const size_t kMinMatch = 2U;
+	static const size_t kMaxMatch = 0xFU + kMinMatch;
+public:
+	template<size_t kSize>
+	class RolzTable {
+	public:
+		RolzTable() {
+			init();
+		}
+
+		void init() {
+			pos_ = 0;
+			for (auto& s : slots_) {
+				s = 0;
+			}
+		}
+
+		forceinline size_t add(size_t pos) {
+			size_t old = slots_[pos_];
+			if (++pos_ == kSize) {
+				pos_ = 0;
+			}
+			slots_[pos_] = pos;
+			return old;
+		}
+
+		forceinline size_t operator[](size_t index) {
+			return slots_[index];
+		}
+
+		forceinline size_t size() {
+			return kSize;
+		}
+
+	private:
+		size_t pos_;
+		size_t slots_[kSize];
+	};
+
+	RolzTable<16> order1[0x100];
+	RolzTable<16> order2[0x10000];
+
+	void addHash(byte* in, size_t pos, size_t prev);
+	size_t getMatchLen(byte* m1, byte* m2, size_t max_len);
+	virtual size_t getMaxExpansion(size_t in_size);
+	virtual size_t compressBytes(byte* in, byte* out, size_t count);
+	virtual void decompressBytes(byte* in, byte* out, size_t count);
+};
+
+class MemoryMatchFinder : public MatchFinder {
+public:
+	forceinline virtual bool done() const {
+		return in_ >= limit_;
+	}
+	forceinline size_t getNonMatchLen() const {
+		return non_match_len_;
+	}
+	forceinline const byte* getNonMatchPtr() const {
+		return non_match_ptr_;
+	}
+	forceinline const byte* getLimit() const {
+		return limit_;
+	}
+	void backtrack(size_t len) {
+		in_ptr_ -= len;
+	}
+	void init(byte* in, const byte* limit);
+	
+protected:
+	const byte* in_;
+	const byte* in_ptr_;
+	const byte* limit_;
+	const byte* non_match_ptr_;
+	size_t non_match_len_;
+};
+
+class GreedyMatchFinder : public MemoryMatchFinder {
+public:
+	size_t opt;
+
+	void init(byte* in, const byte* limit);
+	GreedyMatchFinder();
+	Match findNextMatch();
+	forceinline hash_t hashFunc(size_t a, hash_t b) {
+		b += a;
+		b += rotate_left(b, 6);
+		return b ^ (b >> 23);
+	}
+
+private:
+	static const size_t kMinMatch = 4;
+	static const size_t kMaxDist = 0xFFFF;
+	// This is probably not very efficient.
+	class Entry {
+	public:
+		Entry() {
+			init();
+		}
+		void init() {
+			pos_ = std::numeric_limits<size_t>::max() - kMaxDist * 2;
+			hash_ = 0;
+		}
+		forceinline static uint32_t getHash(uint32_t word, uint32_t slot) {
+			return slot | (word & ~0xFFU);
+		}
+		forceinline static uint32_t getLen(uint32_t word) {
+			return word & 0xFF;
+		}
+		forceinline static uint32_t buildWord(uint32_t h, uint32_t len) {
+			return (h & ~0xFFU) | len;
+		}
+		forceinline void setHash(uint32_t h) {
+			hash_ = h;
+		}
+
+		uint32_t pos_;
+		uint32_t hash_;
+	};
+	;
+	std::vector<Entry> hash_storage_;
+	size_t hash_mask_;
+	Entry* hash_table_;
+};
+
+class FastMatchFinder : public MemoryMatchFinder {
+public:
+	void init(byte* in, const byte* limit);
+	FastMatchFinder();
+	Match findNextMatch() {
+		non_match_ptr_ = in_ptr_;
+		const byte* match_ptr = nullptr;
+		auto lookahead = *reinterpret_cast<const uint32_t*>(in_ptr_);
+		size_t dist;
+		while (true) {
+			const size_t hash_index = (lookahead * 190807U) >> 16;
+			// const size_t hash_index = (lookahead * 2654435761U) >> 20;
+			assert(hash_index <= hash_mask_);
+			match_ptr = in_ + hash_table_[hash_index];
+			hash_table_[hash_index] = in_ptr_ - in_;
+			dist = in_ptr_ - match_ptr;
+			if (dist - kMinMatch <= kMaxDist - kMinMatch) {
+				if (*reinterpret_cast<const uint32_t*>(match_ptr) == lookahead) {
+					break;
+				}
+			}
+			lookahead = (lookahead >> 8) | (static_cast<size_t>(*(in_ptr_ + sizeof(lookahead))) << 24);
+			if (++in_ptr_ >= limit_) {
+				// assert(in_ptr_ == limit_);
+				non_match_len_ = in_ptr_ - non_match_ptr_;
+				return Match();
+			}
+		}
+		non_match_len_ = in_ptr_ - non_match_ptr_;
+		// Improve the match.
+		size_t len = sizeof(lookahead);
+		while (len < dist) {
+			typedef unsigned long ulong;
+			auto diff = *reinterpret_cast<const ulong*>(in_ptr_ + len) ^ *reinterpret_cast<const ulong*>(match_ptr + len);
+			if (UNLIKELY(diff)) {
+				ulong idx = 0;
+				_BitScanForward(&idx, diff);
+				len += idx >> 3;
+				break;
+			}
+			len += sizeof(diff);
+		}
+		len = std::min(len, dist);
+		len = std::min(len, static_cast<size_t>(limit_ - in_ptr_));
+		assert(match_ptr + len <= in_ptr_);
+		assert(in_ptr_ + len <= limit_);
+		// Verify match.
+		for (size_t i = 0; i < len; ++i) {
+			assert(in_ptr_[i] == match_ptr[i]);
+		}
+		Match match;
+		match.setDist(dist);
+		match.setLength(len);
+		in_ptr_ += len;
+		return match;
+	}
+
+private:
+	static const size_t kMaxDist = 0xFFFF;
+	static const size_t kMatchCount = 1;
+	static const size_t kMinMatch = 4;
+
+	std::vector<size_t> hash_storage_;
+	size_t hash_mask_;
+	size_t* hash_table_;
+};
+
+class LZFast : public MemoryLZ {
+public:
+	size_t opt;
+	LZFast() : opt(0) {
+	}
+	virtual void setOpt(size_t new_opt) {
+		opt = new_opt;
+	}
+	byte* flushNonMatch(byte* out_ptr, const byte* in_ptr, size_t non_match_len);
+	virtual size_t getMaxExpansion(size_t in_size);
+	virtual size_t compressBytes(byte* in, byte* out, size_t count);
+	virtual void decompressBytes(byte* in, byte* out, size_t count);
+	template<size_t pos>
+	ALWAYS_INLINE static byte* processMatch(byte matches, uint32_t lengths, byte* out, byte** in);
+
+private:
+	static const bool kCountMatches = true;
+	GreedyMatchFinder match_finder_;
+	std::vector<size_t> non_matches_;
+	// Match format:
+	// <byte> top bit = set -> match
+	// match len = low bits
+	static const size_t kMatchShift = 7;
+	static const size_t kMatchFlag = 1U << kMatchShift;
+	static const size_t kMinMatch = 4;
+	// static const size_t kMaxMatch = (0xFF ^ kMatchFlag) + kMinMatch;
+	static const size_t kMinNonMatch = 1;
+#if 1
+	static const size_t kMaxMatch = 0x7F + kMinMatch;
+	static const size_t kMaxNonMatch = 0x7F + kMinNonMatch;
+#elif 0
+	static const size_t kMaxMatch = 16; // 0xF + kMinMatch;
+	static const size_t kMaxNonMatch = 16;
+#else
+	static const size_t kMaxMatch = 16 + kMinMatch;
+	static const size_t kMaxNonMatch = 16 + kMinNonMatch;
+#endif
+	static const size_t non_match_bits = 2;
+	static const size_t extra_match_bits = 5;
+};
+
+class LZ4 : public MemoryCompressor {
+public:
+	virtual size_t getMaxExpansion(size_t in_size);
+	virtual size_t compressBytes(byte* in, byte* out, size_t count);
+	virtual void decompressBytes(byte* in, byte* out, size_t count);
+};
+
 
 #endif

@@ -21,44 +21,208 @@
     along with MCM.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef _TEXT_FILTER_HPP_
-#define _TEXT_FILTER_HPP_
+#ifndef _FILTER_HPP_
+#define _FILTER_HPP_
 
+#include <memory>
+
+#include "Stream.hpp"
 #include "Transform.hpp"
+#include "Util.hpp"
 
-template <typename Stream>
-class IdentityFilter {
-	Stream& stream;
+/*
+Filter usage:
+
+// in_stream -> filter -> out_stream
+Filter f(in_stream);
+compress(out_stream, &f);
+
+// in_stream -> filter -> out_stream
+Filter f(out_stream);
+compres(&f, in_stream);
+
+*/
+
+class Filter : public Stream {
 public:
-	
-	IdentityFilter(Stream& stream) : stream(stream) {}
-
-	inline int read() {
-		return stream.read();
-	}
-
-	inline void write(size_t c) {
-		stream.write(c);
-	}
-
-	inline bool eof() const {
-		return stream.eof();
-	}
-
-	inline void restart() {
-		stream.restart();
-	}
-
-	inline size_t getTotal() const {
-		return stream.getTotal();
-	}
 };
 
-struct IdentityFilterFactory {
-	template <typename Stream>
-	static IdentityFilter<Stream> Make(Stream& stream) {
-		return IdentityFilter<Stream>(stream);
+// Byte filter is complicated since filters are not necessarily a 1:1 mapping.
+template<size_t kInBufferSize = 16 * KB, size_t kOutBufferSize = 16 * KB>
+class ByteStreamFilter : public Filter {
+public:
+	void flush() {
+		while (in_buffer_.pos() != 0) {
+			refillWriteAndProcess();
+		}
 	}
+	explicit ByteStreamFilter(Stream* stream) : stream_(stream) { }
+	virtual int get() {
+		if (UNLIKELY(out_buffer_.remain() == 0)) { 
+			if (refillReadAndProcess() == 0) {
+				return EOF;
+			}
+		}
+		return out_buffer_.get();
+	}
+	virtual size_t read(byte* buf, size_t n) {
+		const byte* start_ptr = buf;
+		while (n != 0) {
+			size_t remain = out_buffer_.remain();
+			if (remain == 0) {
+				if ((remain = refillReadAndProcess()) == 0) {
+					break;
+				}
+			}
+			const size_t read_count = std::min(remain, n);
+			out_buffer_.read(buf, read_count);
+			buf += read_count;
+			n -= read_count;
+		}
+		return buf - start_ptr;
+	}
+	virtual void put(int c) {
+		if (in_buffer_.remain() == 0) {
+			if (refillWriteAndProcess() == 0) {
+				check(false);
+			}
+		}
+		in_buffer_.put(c);
+	}
+	virtual void write(const byte* buf, size_t n) {
+		while (n != 0) {
+			size_t remain = in_buffer_.remain();
+			if (remain == 0) {
+				remain = refillWriteAndProcess();
+				check(remain != 0);
+			}
+			const size_t len = std::min(n, remain);
+			in_buffer_.write(buf, len);
+			buf += len;
+			n -= len;
+		}
+	}
+	virtual void forwardFilter(byte* out, size_t* out_count, byte* in, size_t* in_count) = 0;
+	virtual void reverseFilter(byte* out, size_t* out_count, byte* in, size_t* in_count) = 0;
+
+private:
+	size_t refillWriteAndProcess() {
+		size_t in_pos = 0;
+		size_t out_limit = out_buffer_.capacity();
+		size_t in_limit = in_buffer_.pos() - in_pos;
+		reverseFilter(&out_buffer_[0], &out_limit, &in_buffer_[in_pos], &in_limit);
+		in_pos += in_limit;
+		stream_->write(&out_buffer_[0], out_limit);
+		in_buffer_.erase(in_pos);
+		in_buffer_.addSize(in_buffer_.reamainCapacity());
+		return in_buffer_.remain();
+	}
+	size_t refillReadAndProcess() {
+		refillRead();  // Try to refill as much of the inbuffer as possible.
+		out_buffer_.erase(out_buffer_.pos());  // Erase the characters we already read from the out buffer.
+		size_t out_limit = out_buffer_.reamainCapacity();
+		size_t in_limit = in_buffer_.pos();
+		forwardFilter(out_buffer_.end(), &out_limit, in_buffer_.begin(), &in_limit);
+		out_buffer_.addSize(out_limit);  // Add the characters we prossesed to out.
+		in_buffer_.erase(in_limit);  // Erase the caracters we processed in in.
+		return out_buffer_.size();
+	}
+	void refillRead() {
+		// Read from input until buffer is full.
+		size_t count = stream_->read(in_buffer_.end(), in_buffer_.reamainCapacity());
+		in_buffer_.addSize(count);
+		in_buffer_.addPos(count);
+	}
+
+	// In buffer, contains either transformed or untransformed.
+	StaticBuffer<uint8_t, kInBufferSize> in_buffer_;
+	// Out buffer (passed through filter or reverse filter).
+	StaticBuffer<uint8_t, kInBufferSize> out_buffer_;
+	// Proxy stream.
+	Stream* const stream_;
+};
+
+template <size_t kBlockSize = 0x10000>
+class ByteBufferFilter : public Filter {
+public:
+	ByteBufferFilter(Stream* stream) : stream_(stream), block_pos_(0), block_size_(0) {
+		block_.reset(new byte[kBlockSize]);
+		block_data_ = block_.get();
+	}
+	void flush() {
+		flushWrite();
+	}
+	virtual int get() {
+		if (UNLIKELY(block_pos_ >= block_size_)) {
+			if (refillRead() == 0) {
+				return EOF;
+			}
+		}
+		return block_data_[block_pos_++];
+	}
+    virtual size_t read(byte* buf, size_t n) {
+		byte* ptr = buf;
+		while (n != 0) {
+			size_t remain = block_size_ - block_pos_;
+			if (remain == 0) {
+				remain = refillRead();
+				if (remain == 0) {
+					break;
+				}
+			}
+			const size_t count = std::min(n, remain);
+			std::copy(block_data_ + block_pos_, block_data_ + block_pos_ + count, ptr);
+			n -= count;
+			block_pos_ += count;
+			ptr += count;
+		}
+		return ptr - buf;
+	}
+	virtual void put(int c) {
+		if (UNLIKELY(block_pos_ >= block_size_)) {
+			flushWrite();
+		}
+		block_data_[block_pos_++] = c;
+	}
+	virtual void write(const byte* buf, size_t n) {
+		while (n != 0) {
+			size_t remain = block_size_ - block_pos_;
+			if (remain == 0) {
+				remain = flushWrite();
+				dcheck(remain != 0);
+			}
+			const size_t count = std::min(n, remain);
+			std::copy(buf, buf + count, block_data_ + block_pos_);
+			block_pos_ += count;
+			buf += count;
+			n -= count;
+		}
+	}
+	virtual void forwardFilter(byte* ptr, size_t size) = 0;
+	virtual void reverseFilter(byte* ptr, size_t size) = 0;
+
+private:
+	size_t refillRead() {
+		check(block_pos_ == block_size_);
+		block_pos_ = 0;
+		block_size_ = stream_->read(block_.get(), kBlockSize);
+		forwardFilter(block_data_, block_size_);
+		return block_size_;
+	}
+	size_t flushWrite() {
+		block_size_ = kBlockSize;
+		reverseFilter(block_data_, block_pos_);
+		stream_->write(block_data_, block_pos_);
+		block_pos_ = 0;
+		return block_size_;
+	}
+
+	static const size_t kBlockSize = 0x10000;
+	Stream* const stream_;
+	std::unique_ptr<byte[]> block_;
+	byte* block_data_;
+	size_t block_size_;
+	size_t block_pos_;
 };
 
 template <typename Compressor, typename Filter>

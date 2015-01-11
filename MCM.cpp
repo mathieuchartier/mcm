@@ -21,35 +21,28 @@
     along with MCM.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include <chrono>
+#include <ctime>
+#include <fstream>
 #include <stdio.h>
 #include <string.h>
 #include <string>
-#include <ctime>
 #include <sstream>
-#include <fstream>
+#include <thread>
 
 #include "Archive.hpp"
 #include "CM.hpp"
+#include "File.hpp"
 #include "Filter.hpp"
 #include "Huffman.hpp"
 #include "LZ.hpp"
-#include "File.hpp"
+#include "Tests.hpp"
 
-FilterCompressor<CM<6>, IdentityFilterFactory> comp;
-//FilterCompressor<LZW<false>, IdentityFilterFactory> comp;
-//FilterCompressor<Huffman, IdentityFilterFactory> comp;
+CompressorFactories* CompressorFactories::instance = nullptr;
 
-std::string errstr(int err) {
-#ifdef WIN32
-	char buffer[1024];
-	strerror_s(buffer, sizeof(buffer), err);
-	return buffer;
-#else
-	return strerror(err);
-#endif
-}
+CM<6> comp;
 
-class VerifyStream {
+class VerifyStream : public WriteFileStream {
 public:
 	std::ifstream fin;
 	size_t differences, total;
@@ -64,7 +57,7 @@ public:
 		differences = total = 0;
 	}
 
-	void write(int c) {
+	void put(int c) {
 		auto ref = fin.eof() ? 256 : fin.get();
 		bool diff = ref != c;
 		if (diff) {
@@ -96,7 +89,7 @@ public:
 	}
 };
 
-std::string trim_ext(std::string str) {
+std::string trimExt(std::string str) {
 	std::streamsize start = 0, pos;
 	if ((pos = str.find_last_of('\\')) != std::string::npos) {
 		start = std::max(start, pos + 1);
@@ -107,7 +100,7 @@ std::string trim_ext(std::string str) {
 	return str.substr(static_cast<size_t>(start));
 }
 
-int usage(const std::string& name) {
+static int usage(const std::string& name) {
 	std::cout
 		<< "mcm file compressor v0." << comp.version << ", (c)2013 Google Inc" << std::endl
 		<< "Caution: Use only for testing!!" << std::endl
@@ -123,84 +116,322 @@ int usage(const std::string& name) {
 	return 0;
 }
 
-int main(int argc, char* argv[]) {
-	bool decompress = false, test_mode = false, opt_mode = false, mem_mode = false;
-	uint64_t block_size = MB * MB;
-	size_t threads = 1;
-	assert(argc >= 1);
-	std::string in_file, out_file, program = trim_ext(argv[0]);
-	// Parse options.
-	int i = 1;
-	for (;i < argc;++i) {
-		std::string arg = argv[i];
-		if (arg == "-d") decompress = true;
-		else if (arg == "-test") test_mode = true;
-		else if (arg == "-opt") opt_mode = true;
-		else if (arg == "-1") comp.setMemUsage(1);
-		else if (arg == "-2") comp.setMemUsage(2);
-		else if (arg == "-3") comp.setMemUsage(3);
-		else if (arg == "-4") comp.setMemUsage(4);
-		else if (arg == "-5") comp.setMemUsage(5);
-		else if (arg == "-6") comp.setMemUsage(6);
-		else if (arg == "-7") comp.setMemUsage(7);
-		else if (arg == "-8") comp.setMemUsage(8);
-		else if (arg == "-9") comp.setMemUsage(9);
-		else if (arg == "-b") {
-			if  (i + 1 >= argc) {
-				return usage(program);
-			}
-			std::istringstream iss(argv[++i]);
-			iss >> block_size;
-			block_size *= MB;
-			if (!iss.good()) {
-				return usage(program);
-			}
-		} else if (arg == "-t") {
-			if  (i + 1 >= argc) {
-				return usage(program);
-			}
-			std::istringstream iss(argv[++i]);
-			iss >> threads;
-			if (threads == 0 || !iss.good()) {
-				return usage(program);
-			}
-		} else if (arg == "-mem") mem_mode = true;
-		else if (arg.length() && arg[0] == '-') {
-			std::cerr << "Unknown option " << arg << std::endl;
-			return 1;
-		} else {
+void openArchive(ReadStream* stream) {
+	Archive archive;
+	// archive.open(stream);
+}
+
+// Compress a single file.
+void compressSingleFile(ReadFileStream* fin, WriteFileStream* fout, size_t blocks) {
+	// Split the file into a list of blocks.
+	File& file = fin->getFile();
+	// Seek to end and 
+	file.seek(0, SEEK_END);
+	uint64_t length = file.tell();
+	file.seek(0, SEEK_SET);
+	// Calculate block size.
+	uint64_t block_size = (length + blocks - 1) / blocks;
+	
+	Archive archive;
+}
+
+// Compress a block to a temporary file. Thread safe.
+void compressBlock() {
+	WriteFileStream out_file;
+	std::string temp_name;
+	// This is racy.
+	for (;;) {
+		std::ostringstream ss;
+		ss << "__TMP" + rand();
+		temp_name = ss.str();
+		if (!fileExists(temp_name.c_str())) {
 			break;
 		}
 	}
+	// Compress each file block into the chunk.
+
+}
+
+class Options {
+public:
+	// Block size of 0 -> file size / #threads.
+	static const uint64_t kDefaultBlockSize = 0;
+	enum Mode {
+		MODE_UNKNOWN,
+		// Compress -> Decompress -> Verify.
+		// (File or directory).
+		MODE_TEST,
+		// In memory test.
+		MODE_MEM_TEST,
+		// Add a single file.
+		MODE_ADD,
+		MODE_EXTRACT,
+		MODE_EXTRACT_ALL,
+		// Single hand mode.
+		MODE_COMPRESS,
+		MODE_DECOMPRESS,
+	};
+	Mode mode;
+	bool opt_mode;
+	Compressor* compressor;
+	size_t mem_level;
+	size_t threads;
+	uint64_t block_size;
+	FilePath archive_file;
+	std::vector<FilePath> files;
 	
-	// Read in file and outfile.
-	if (i < argc) {
-		in_file = argv[i++];
+	Options()
+		: mode(MODE_UNKNOWN)
+		, opt_mode(false)
+		, compressor(nullptr)
+		, mem_level(6)
+		, threads(1)
+		, block_size(kDefaultBlockSize) {
 	}
 
-	if (i < argc) {
-		out_file = argv[i++];
-	} else {
-		if (decompress) {
-			out_file = in_file + ".decomp";
-		} else {
-			out_file = in_file + ".mcm";
+	int parse(int argc, char* argv[]) {
+		assert(argc >= 1);
+		std::string program = trimExt(argv[0]);
+		// Parse options.
+		int i = 1;
+		for (;i < argc;++i) {
+			const std::string arg = argv[i];
+			Mode parsed_mode = MODE_UNKNOWN;
+			if (arg == "-test") parsed_mode = MODE_TEST;
+			if (arg == "-memtest") parsed_mode = MODE_MEM_TEST;
+			else if (arg == "-c") parsed_mode = MODE_COMPRESS;
+			else if (arg == "-d") parsed_mode = MODE_DECOMPRESS;
+			else if (arg == "-a") parsed_mode = MODE_ADD;
+			else if (arg == "-e") parsed_mode = MODE_EXTRACT;
+			else if (arg == "-x") parsed_mode = MODE_EXTRACT_ALL;
+			if (parsed_mode != MODE_UNKNOWN) {
+				if (mode != MODE_UNKNOWN) {
+					std::cerr << "Multiple commands specified";
+					return 2;
+				}
+				mode = parsed_mode;
+				switch (mode) {
+				case MODE_ADD:
+				case MODE_EXTRACT:
+				case MODE_EXTRACT_ALL:
+					{
+						if (++i >= argc) {
+							std::cerr << "Expected archive";
+							return 3;
+						}
+						// Archive is next.
+						archive_file = FilePath(argv[i]);
+						break;
+					}
+				}
+			} else if (arg == "-opt") {
+				opt_mode = true;
+			} else if (arg == "-1") comp.setMemUsage(1);
+			else if (arg == "-2") comp.setMemUsage(2);
+			else if (arg == "-3") comp.setMemUsage(3);
+			else if (arg == "-4") comp.setMemUsage(4);
+			else if (arg == "-5") comp.setMemUsage(5);
+			else if (arg == "-6") comp.setMemUsage(6);
+			else if (arg == "-7") comp.setMemUsage(7);
+			else if (arg == "-8") comp.setMemUsage(8);
+			else if (arg == "-9") comp.setMemUsage(9);
+			else if (arg == "-b") {
+				if  (i + 1 >= argc) {
+					return usage(program);
+				}
+				std::istringstream iss(argv[++i]);
+				iss >> block_size;
+				block_size *= MB;
+				if (!iss.good()) {
+					return usage(program);
+				}
+			} else if (!arg.empty() && arg[0] == '-') {
+				std::cerr << "Unknown option " << arg << std::endl;
+				return 4;
+			} else {
+				if (mode == MODE_ADD || mode == MODE_EXTRACT) {
+					// Read in files.
+					files.push_back(FilePath(argv[i]));
+				} else {
+					// Done parsing.
+					break;
+				}
+			}
 		}
+		const bool single_file_mode =
+			mode == MODE_COMPRESS || mode == MODE_DECOMPRESS || mode == MODE_TEST || mode == MODE_MEM_TEST;
+		if (single_file_mode) {
+			std::string in_file, out_file;
+			// Read in file and outfile.
+			if (i < argc) {
+				in_file = argv[i++];
+			}
+			if (i < argc) {
+				out_file = argv[i++];
+			} else {
+				if (mode == MODE_DECOMPRESS) {
+					out_file = in_file + ".decomp";
+				} else {
+					out_file = in_file + ".mcm";
+				}
+			}
+			if (mode == MODE_MEM_TEST) {
+				// No out file for memtest.
+				files.push_back(FilePath(in_file));
+			} else if (mode == MODE_COMPRESS || mode == MODE_TEST) {
+				archive_file = FilePath(out_file);
+				files.push_back(FilePath(in_file));
+			} else {
+				archive_file = FilePath(in_file);
+				files.push_back(FilePath(out_file));
+			}
+		}
+		return 0;
+	}
+};
+
+int main(int argc, char* argv[]) {
+	CompressorFactories::init();
+	runAllTests();
+	Options options;
+	auto ret = options.parse(argc, argv);
+	if (ret) {
+		std::cerr << "Failed to parse arguments";
+		return ret;
+	}
+	Archive archive;
+	switch (options.mode) {
+	case Options::MODE_MEM_TEST: {
+		const size_t iterations = kIsDebugBuild ? 1 : 1;
+		// Read in the whole file.
+		size_t length = 0;
+		uint64_t long_length = 0;
+		std::vector<uint64_t> lengths;
+		for (const auto& file : options.files) {
+			lengths.push_back(getFileLength(file.getName()));
+			long_length += lengths.back();
+		}
+		length = static_cast<size_t>(long_length);
+		check(length < 300 * MB);
+		auto in_buffer = new byte[length];
+		// Read in the files.
+		size_t index = 0;
+		uint64_t read_pos = 0;
+		for (const auto& file : options.files) {
+			File f;
+			f.open(file.getName(), std::ios_base::in | std::ios_base::binary);
+			size_t count = f.read(in_buffer + read_pos, static_cast<size_t>(lengths[index]));
+			check(count == lengths[index]);
+			index++;
+		}
+		// Create the memory compressor.
+		auto* compressor = new LZFast;
+		//auto* compressor = new LZ4;
+		//auto* compressor = new MemCopyCompressor;
+		auto out_buffer = new byte[compressor->getMaxExpansion(length)];
+		size_t comp_start = clock();
+		size_t comp_size;
+		static const bool opt_mode = false;
+		if (opt_mode) {
+			size_t best_size = 0xFFFFFFFF;
+			size_t best_opt = 0;
+			for (size_t opt = 0; ; ++opt) {
+				compressor->setOpt(opt);
+				comp_size = compressor->compressBytes(in_buffer, out_buffer, length);
+				std::cout << "Opt " << opt << " / " << best_opt << " =  " << comp_size << "/" << best_size << std::endl;
+				if (comp_size < best_size) {
+					best_opt = opt;
+					best_size = comp_size;
+				}
+			}
+		} else {
+			for (size_t i = 0; i < iterations; ++i) {
+				comp_size = compressor->compressBytes(in_buffer, out_buffer, length);
+			}
+		}
+
+		size_t comp_end = clock();
+		std::cout << "Compression " << length << " -> " << comp_size << " = " << float(double(length) / double(comp_size)) << " rate: "
+			<< prettySize(static_cast<uint64_t>(long_length * iterations / clockToSeconds(comp_end - comp_start))) << "/s" << std::endl;
+		memset(in_buffer, 0, length);
+		size_t decomp_start = clock();
+		static const size_t decomp_iterations = kIsDebugBuild ? 1 : iterations * 5;
+		for (size_t i = 0; i < decomp_iterations; ++i) {
+			compressor->decompressBytes(out_buffer, in_buffer, length);
+		}
+		size_t decomp_end = clock();
+		std::cout << "Decompression took: " << decomp_end - comp_end << " rate: "
+			<< prettySize(static_cast<uint64_t>(long_length * decomp_iterations / clockToSeconds(decomp_end - decomp_start))) << "/s" << std::endl;
+		index = 0;
+		for (const auto& file : options.files) {
+			File f;
+			f.open(file.getName(), std::ios_base::in | std::ios_base::binary);
+			size_t count = static_cast<size_t>(f.read(out_buffer, static_cast<size_t>(lengths[index])));
+			check(count == lengths[index]);
+			for (size_t i = 0; i < count; ++i) {
+				if (out_buffer[i] != in_buffer[i]) {
+					std::cerr << "File" << file.getName() << " doesn't match at byte " << i << std::endl;
+					check(false);
+				}
+			}
+			index++;
+		}
+		std::cout << "Decompression verified" << std::endl;
+		break;
+	}
+	case Options::MODE_TEST: {
+		// Note: Using overwrite, this is dangerous.
+		archive.open(options.archive_file, true, std::ios_base::in | std::ios_base::out);
+		// Add the files to the archive so we can compress the segments.
+		archive.addNewFileBlock(options.files);
+		assert(options.files.size() == 1U);
+		// Split the files into as many blocks as we have threads.
+		auto files = Archive::splitFiles(options.files, options.threads, 64 * KB);
+		MultiCompressionJob multi_job;
+		std::vector<Archive::Job*> jobs(files.size());
+		// Compress the files in the main thread.
+		archive.compressFiles(0, &files[0], 4);
+		break;
+	}
+	case Options::MODE_ADD: {
+		// Add a single file.
+		break;
+	}
+	case Options::MODE_COMPRESS: {
+		// Single file mode, compress to a file with no name (the only file in the archive).
+		break;
+	}
+	case Options::MODE_DECOMPRESS: {
+		// Decompress the single file in the archive to the output out.
+		break;
+	}
+	case Options::MODE_EXTRACT: {
+		// Extract a single file from multi file archive .
+		break;
+	}
+	case Options::MODE_EXTRACT_ALL: {
+		// Extract all the files in the archive.
+		break;
+	}
 	}
 
+	/* 
 	if (in_file.empty() || out_file.empty()) {
 		std::cerr << "Error, input or output files missing" << std::endl;
 		usage(program);
 		return 5;
 	}
+	*/
 
+#if 0
 	int err = 0;
-	BufferedFileStream<4 * KB> fin, fout;
-	if (err = fin.open(in_file, std::ios_base::binary | std::ios_base::in)) {
+	ReadFileStream fin;
+	WriteFileStream fout;
+	if (err = fin.open(in_files.getFiles(), std::ios_base::binary)) {
 		std::cerr << "Error opening: " << in_file << " (" << errstr(err) << ")" << std::endl;
 		return 1;
 	}
-	if (err = fout.open(out_file, std::ios_base::binary | std::ios_base::out)) {
+	if (err = fout.open(out_file, std::ios_base::binary)) {
 		std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
 		return 2;
 	}
@@ -208,41 +439,21 @@ int main(int argc, char* argv[]) {
 	clock_t start = clock();
 	if (decompress) {
 		std::cout << "DeCompressing" << std::endl;
-		bool result = comp.DeCompress(fout, fin);
-		if (!result) {
+		comp.decompress(&fin, &fout);
+		if (comp.failed()) {
 			std::cerr << "DeCompression failed, file not compressed by this version or correct version" << std::endl;
 		} else {
 			auto time = clock() - start;
 			std::cout << "DeCompression took " << time << "MS" << std::endl;
-			std::cout << "Rate: " << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fout.getTotal()) << " ns/B" << std::endl;
+			std::cout << "Rate: " << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fout.getCount()) << " ns/B" << std::endl;
 		}
 	} else {
 		std::cout << "Compressing to " << out_file << std::endl;
-		auto size = comp.Compress(fout, fin);
-#if 0
-		srand(static_cast<unsigned int>(time(NULL)));
-		if (opt_mode) {
-			size_t* opt_var = &comp.opt_var; //comp.match_model.opt_var;
-			size_t best_var = *opt_var;
-			//for (;*opt_var < 32 * 32;++*opt_var) {
-			//for (;;) {
-			for (;;comp.opt_var = rand32()) {
-				fout.restart();
-				fin.restart();
-				auto new_size = comp.Compress(fout, fin);
-				if (new_size < size) {
-					std::cout << "(" << *opt_var << "): " << size << " -> " << new_size << std::endl;
-					size = new_size;
-					best_var = *opt_var;
-				}
-				std::cout << "best(" << std::hex << best_var << ")=" << std::dec << size << std::endl;
-			}
-		}
-#endif	
+		// compressFile(&fin, &fout);
 		clock_t time = clock() - start;
 		std::cout << "Compression took " << time << " MS" << std::endl;
-		std::cout << "Rate: " << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fin.getTotal()) << " ns/B" << std::endl;
-		std::cout << "Size: " << fout.getTotal() << " bytes @ " << double(fout.getTotal()) * 8.0 / double(fin.getTotal()) << " bpc" << std::endl;
+		std::cout << "Rate: " << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fin.getCount()) << " ns/B" << std::endl;
+		std::cout << "Size: " << fout.getCount() << " bytes @ " << double(fout.getCount()) * 8.0 / double(fin.getCount()) << " bpc" << std::endl;
 
 		if (test_mode) {
 			fout.close();
@@ -256,7 +467,7 @@ int main(int argc, char* argv[]) {
 			std::cout << "Decompresing & verifying file" << std::endl;
 			VerifyStream verifyStream(in_file);
 			start = clock();
-			comp.DeCompress(verifyStream, fin);
+			comp.decompress(&fin, &verifyStream);
 			verifyStream.summary();
 			time = clock() - start;
 			std::cout << "DeCompression took " << time << " MS" << std::endl;
@@ -264,8 +475,8 @@ int main(int argc, char* argv[]) {
 			fin.close();
 		}
 	}
-
 	fout.close();
 	fin.close();
+#endif
 	return 0;
 }
