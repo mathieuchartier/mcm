@@ -33,16 +33,16 @@
 #include "Archive.hpp"
 #include "CM.hpp"
 #include "File.hpp"
-#include "Filter.hpp"
 #include "Huffman.hpp"
 #include "LZ.hpp"
 #include "Tests.hpp"
+#include "X86Binary.hpp"
 
 CompressorFactories* CompressorFactories::instance = nullptr;
 
 CM<6> comp;
 
-class VerifyStream : public WriteFileStream {
+class VerifyStream : public WriteStream {
 public:
 	std::ifstream fin;
 	size_t differences, total;
@@ -163,6 +163,8 @@ public:
 		MODE_TEST,
 		// In memory test.
 		MODE_MEM_TEST,
+		// Single file test.
+		MODE_SINGLE_TEST,
 		// Add a single file.
 		MODE_ADD,
 		MODE_EXTRACT,
@@ -198,7 +200,8 @@ public:
 			const std::string arg = argv[i];
 			Mode parsed_mode = MODE_UNKNOWN;
 			if (arg == "-test") parsed_mode = MODE_TEST;
-			if (arg == "-memtest") parsed_mode = MODE_MEM_TEST;
+			else if (arg == "-memtest") parsed_mode = MODE_MEM_TEST;
+			else if (arg == "-stest") parsed_mode = MODE_SINGLE_TEST;
 			else if (arg == "-c") parsed_mode = MODE_COMPRESS;
 			else if (arg == "-d") parsed_mode = MODE_DECOMPRESS;
 			else if (arg == "-a") parsed_mode = MODE_ADD;
@@ -226,15 +229,15 @@ public:
 				}
 			} else if (arg == "-opt") {
 				opt_mode = true;
-			} else if (arg == "-1") comp.setMemUsage(1);
-			else if (arg == "-2") comp.setMemUsage(2);
-			else if (arg == "-3") comp.setMemUsage(3);
-			else if (arg == "-4") comp.setMemUsage(4);
-			else if (arg == "-5") comp.setMemUsage(5);
-			else if (arg == "-6") comp.setMemUsage(6);
-			else if (arg == "-7") comp.setMemUsage(7);
-			else if (arg == "-8") comp.setMemUsage(8);
-			else if (arg == "-9") comp.setMemUsage(9);
+			} else if (arg == "-1") mem_level = 1;
+			else if (arg == "-2") mem_level = 2;
+			else if (arg == "-3") mem_level = 3;
+			else if (arg == "-4") mem_level = 4;
+			else if (arg == "-5") mem_level = 5;
+			else if (arg == "-6") mem_level = 6;
+			else if (arg == "-7") mem_level = 7;
+			else if (arg == "-8") mem_level = 8;
+			else if (arg == "-9") mem_level = 9;
 			else if (arg == "-b") {
 				if  (i + 1 >= argc) {
 					return usage(program);
@@ -292,7 +295,7 @@ public:
 
 int main(int argc, char* argv[]) {
 	CompressorFactories::init();
-	runAllTests();
+	// runAllTests();
 	Options options;
 	auto ret = options.parse(argc, argv);
 	if (ret) {
@@ -379,7 +382,59 @@ int main(int argc, char* argv[]) {
 		std::cout << "Decompression verified" << std::endl;
 		break;
 	}
+	case Options::MODE_SINGLE_TEST: {
+		
+	}
 	case Options::MODE_TEST: {
+		int err = 0;
+		ReadFileStream fin;
+		WriteFileStream fout;
+		auto in_file = options.files.back().getName();
+		auto out_file = options.archive_file.getName();
+		if (err = fin.open(in_file, std::ios_base::binary)) {
+			std::cerr << "Error opening: " << in_file << " (" << errstr(err) << ")" << std::endl;
+			return 1;
+		}
+		if (err = fout.open(out_file, std::ios_base::binary)) {
+			std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
+			return 2;
+		}
+
+		clock_t start = clock();
+		std::cout << "Compressing to " << out_file << std::endl;
+		CM<6> comp;
+		comp.setMemUsage(options.mem_level);
+		{
+			ProgressReadStream rms(&fin, &fout);
+			X86AdvancedFilter f(&rms);
+			comp.compress(&f, &fout);
+		}
+		clock_t time = clock() - start;
+		std::cout << "Compression " << fin.getCount() << "->" << fout.getCount() << " took " << time << "ms" << std::endl;
+		std::cout << "Rate: " << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fin.getCount()) << " ns/B" << std::endl;
+		std::cout << "Size: " << fout.getCount() << " bytes @ " << double(fout.getCount()) * 8.0 / double(fin.getCount()) << " bpc" << std::endl;
+
+		fout.close();
+		fin.close();
+
+		if (err = fin.open(out_file, std::ios_base::in | std::ios_base::binary)) {
+			std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
+			return 1;
+		}
+			
+		std::cout << "Decompresing & verifying file" << std::endl;		
+		VerifyStream verifyStream(in_file);
+		X86AdvancedFilter f(&verifyStream);
+		start = clock();
+		comp.decompress(&fin, &f);
+		f.flush();
+		verifyStream.summary();
+		time = clock() - start;
+		std::cout << "DeCompression took " << time << " MS" << std::endl;
+
+		fin.close();
+		break;
+#if 0
 		// Note: Using overwrite, this is dangerous.
 		archive.open(options.archive_file, true, std::ios_base::in | std::ios_base::out);
 		// Add the files to the archive so we can compress the segments.
@@ -392,6 +447,7 @@ int main(int argc, char* argv[]) {
 		// Compress the files in the main thread.
 		archive.compressFiles(0, &files[0], 4);
 		break;
+#endif
 	}
 	case Options::MODE_ADD: {
 		// Add a single file.
@@ -424,59 +480,7 @@ int main(int argc, char* argv[]) {
 	*/
 
 #if 0
-	int err = 0;
-	ReadFileStream fin;
-	WriteFileStream fout;
-	if (err = fin.open(in_files.getFiles(), std::ios_base::binary)) {
-		std::cerr << "Error opening: " << in_file << " (" << errstr(err) << ")" << std::endl;
-		return 1;
-	}
-	if (err = fout.open(out_file, std::ios_base::binary)) {
-		std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
-		return 2;
-	}
-
-	clock_t start = clock();
-	if (decompress) {
-		std::cout << "DeCompressing" << std::endl;
-		comp.decompress(&fin, &fout);
-		if (comp.failed()) {
-			std::cerr << "DeCompression failed, file not compressed by this version or correct version" << std::endl;
-		} else {
-			auto time = clock() - start;
-			std::cout << "DeCompression took " << time << "MS" << std::endl;
-			std::cout << "Rate: " << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fout.getCount()) << " ns/B" << std::endl;
-		}
-	} else {
-		std::cout << "Compressing to " << out_file << std::endl;
-		// compressFile(&fin, &fout);
-		clock_t time = clock() - start;
-		std::cout << "Compression took " << time << " MS" << std::endl;
-		std::cout << "Rate: " << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fin.getCount()) << " ns/B" << std::endl;
-		std::cout << "Size: " << fout.getCount() << " bytes @ " << double(fout.getCount()) * 8.0 / double(fin.getCount()) << " bpc" << std::endl;
-
-		if (test_mode) {
-			fout.close();
-			fin.close();
-
-			if (err = fin.open(out_file, std::ios_base::in | std::ios_base::binary)) {
-				std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
-				return 1;
-			}
-			
-			std::cout << "Decompresing & verifying file" << std::endl;
-			VerifyStream verifyStream(in_file);
-			start = clock();
-			comp.decompress(&fin, &verifyStream);
-			verifyStream.summary();
-			time = clock() - start;
-			std::cout << "DeCompression took " << time << " MS" << std::endl;
-
-			fin.close();
-		}
-	}
-	fout.close();
-	fin.close();
+	
 #endif
 	return 0;
 }

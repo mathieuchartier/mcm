@@ -14,6 +14,7 @@ public:
 	static const size_t mm_round = (1 << mm_shift) - 1;
 	static const size_t max_value = 1 << 12;
 	static const bool kMultiMatch = false;
+	static const bool kExtendMatch = false;
 private:
 	static const size_t bits_per_char = 16;
 	static const size_t num_length_models = ((max_match - min_match + 2 + 2 * mm_round) >> mm_shift) * bits_per_char;
@@ -106,12 +107,14 @@ public:
 			*reinterpret_cast<uint32_t*>(&buffer[blast - len])) {
 			--spos;
 			--blast;
-			for (; len < cur_min_match; ++len) {
-				if (buffer[spos - len] != buffer[blast - len]) {
-					return;
+			if (kExtendMatch) {
+				for (; len < cur_min_match; ++len) {
+					if (buffer[spos - len] != buffer[blast - len]) {
+						return;
+					}
 				}
+				for (;buffer[spos - len] == buffer[blast - len] && len < max_match; ++len);
 			}
-			for (;buffer[spos - len] == buffer[blast - len] && len < max_match; ++len);
 			// Update our match.
 			this->pos = spos + 1;
 			this->len = len;
@@ -134,7 +137,7 @@ public:
 		const auto bmask = buffer.getMask();
 		const auto last_pos = blast & bmask;
 		setPrevChar(buffer(last_pos));
-		// Update hashes.
+		// Update hashes.	
 		if (kMultiMatch) {
 			h3 = hashFunc(prev_char, h2); // order n + 2
 			h2 = hashFunc(prev_char, h1); // order n + 1

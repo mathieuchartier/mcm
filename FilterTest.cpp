@@ -356,7 +356,7 @@ void runFilterTests() {
 	//std::vector<byte> data = loadFile("ohs.doc", 5 * MB);
 	//std::vector<byte> data = loadFile("world95.txt", 4 * MB);
 	//std::vector<byte> data = loadFile("english.dic", 4 * MB);
-	//std::vector<byte> data = loadFile("enwik8.txt", 100 * MB);
+	//std::vector<byte> data = loadFile("enwik8.txt", 101 * MB );
 	//std::vector<byte> data = loadFile("fp.log", 24 * MB);
 	//std::vector<byte> data = loadFile("mso97.dll", 24 * MB);
 	//std::vector<byte> data = loadFile("acrord32.exe", 24 * MB);
@@ -366,6 +366,8 @@ void runFilterTests() {
 	//std::vector<byte> data = loadFile("include.tar", 25 * MB);
 	//std::vector<byte> data = loadFile("calgary.tar", 5 * MB);
 	//std::vector<byte> data = loadFile("mxc.tar", 60 * MB);
+	//std::vector<byte> data = loadFile("magic.txt", 60 * MB);
+	//std::vector<byte> data = loadFile("test.dll", 5 * MB);
 	// Count freqs.
 	size_t freq[256] = { 0 };
 	for (byte c : data) {
@@ -380,8 +382,8 @@ void runFilterTests() {
 	//benchFilter<FixedDeltaFilter<2, 1>>(data);
 	//benchFilter<FixedDeltaFilter<2, 2>>(data);
 	//benchFilter<FixedDeltaFilter<1, 1>>(data);
-	//benchFilter<X86AdvancedFilter>(data);
-	benchFilter<IdentityFilter>(data);
+	benchFilter<X86AdvancedFilter>(data);
+	//benchFilter<IdentityFilter>(data);
 	//benchFilter<ColorTrans>(data);
 #endif
 }

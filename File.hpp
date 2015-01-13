@@ -338,7 +338,11 @@ class WriteFileStream : public WriteStream {
 	File file;
 	uint64_t count;
 public:
+	WriteFileStream() : count(0) {
+	}
+
 	int open(const std::string& fileName, std::ios_base::open_mode mode = std::ios_base::binary) {
+		count = 0;
 		return file.open(fileName, mode | std::ios_base::out);
 	}
 	
@@ -364,6 +368,10 @@ public:
 		file.write(buf, n);
 	}
 
+	virtual uint64_t tell() const {
+		return count;
+	}
+
 	virtual ~WriteFileStream() {
 	}
 };
@@ -372,7 +380,11 @@ class ReadFileStream : public ReadStream {
 	File file;
 	uint64_t count;
 public:
+	ReadFileStream() : count(0) {
+	}
+
 	int open(const std::string& fileName, std::ios_base::open_mode mode = std::ios_base::binary) {
+		count = 0;
 		return file.open(fileName, mode | std::ios_base::in);
 	}
 
@@ -394,8 +406,13 @@ public:
 	}
 
     virtual size_t read(byte* buf, size_t n) {
-		count += n;
-		return file.read(buf, n);
+		size_t ret = file.read(buf, n);
+		count += ret;
+		return ret;
+	}
+
+	virtual uint64_t tell() const {
+		return count;
 	}
 
     virtual ~ReadFileStream() {

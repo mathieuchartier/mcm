@@ -53,13 +53,13 @@ struct ss_table {
 	T stretchTable[denom], squashTable[total], *squashPtr;
 public:
 	// probability = p / Denom
-	void build() {
+	void build(int delta) {
+		squashPtr = &squashTable[0 - minInt];
+#if 0
 		size_t limit = maxInt + 1;
-
 		for (int x = 0; x < total; x++) {
 			squashTable[x] = limit;
 		}
-
 		for (int i = 0;i < denom;i++) {
 			const double p = (double) i / (double) denom;
 			double sp = squash(p);
@@ -80,8 +80,34 @@ public:
 				squashTable[x] = p;
 			}
 		}
-
-		squashPtr = &squashTable[0 - minInt];
+		if (false)
+		for (int x = 0; x < total; x++) {
+			squashTable[x] = std::min(std::max(squashTable[x] + delta, 1), denom - 1);
+		}
+#else
+		// From paq9a
+		int t[33] = {
+		//1,2,3,6,10,16,27,50,79,126,198,306,465,719,1072,1478,2047,
+		1,2,3,6,10,16,27,45,73,120,194,310,488,747,1101,1546,2047,
+		0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+		for (int i = 17; i < 33; ++i) {
+			t[i] = 4096 - t[32 - i];
+		}
+		for (int i = minInt; i < maxInt; ++i) {
+			const int w = i & 127;
+			const int d = (i >> 7) + 16;
+			squashTable[i + 2048] = (t[d] * (128 - w) + t[(d + 1)] * w + 64) >> 7;
+		}
+		int pi = 0;
+		for (int x = -2047; x <= 2047; ++x) {  // invert squash()
+			int i = squashPtr[x];
+			for (int j = pi; j <= i; ++j) {
+				stretchTable[j] = x;
+			}
+			pi = i + 1;
+		}
+		stretchTable[4095] = 2047;
+#endif
 	}
 
 	const T* getStretchPtr() const {

@@ -197,11 +197,9 @@ public:
 
 	// Division table.
 	DivTable<short, shift, 1024> div_table;
-	
-	static const size_t kMaxWordMdl = 20;
-	static const size_t kMaxMatchMdl = 80;
-	int word_w[kMaxWordMdl][kMaxMatchMdl];
-	int match_w[kMaxWordMdl][kMaxMatchMdl];
+
+	// ISSE
+	HPStationaryModel isse[256][81][2];
 
 	// SM
 	typedef StationaryModel PredModel;
@@ -232,12 +230,15 @@ public:
 	}
 
 	void init() {
-		for (size_t i = 0; i < kMaxWordMdl; ++i) {
-			for (size_t j = 0; j < kMaxMatchMdl; ++j) {
-				word_w[i][j] = match_w[i][j] = 1000;
-			}
-		}
-		table.build();
+		for (size_t i = 0; i < 256; ++i)
+			for (size_t j = 0; j <= 80; ++j)
+				for (size_t k = 0; k < 2; ++k) {
+					auto& m = isse[i][j][k];
+					m.init();
+					m.setP(2 + i * 16);
+				}
+		table.build(0);
+		//table.build(0);
 
 		mixer_mask = 0xFFFF;
 		mixers.resize(static_cast<size_t>(kProfileCount) * (mixer_mask + 1));
@@ -344,17 +345,6 @@ public:
 		const size_t p1 = static_cast<uint8_t>(buffer[buffer.getPos() - 2]);
 		size_t mixer_ctx = p0 >> 5;
 		const size_t mm_len = match_model.getLength();
-		mixer_ctx <<= 2;
-		if (mm_len) {
-			mixer_ctx |= 1 + 
-				(mm_len >= match_model.min_match + 3) + 
-				(mm_len >= match_model.min_match + 7) + 
-				//(mm_len >= match_model.min_match + 8) + 
-				//(mm_len >= match_model.min_match + 16) + 
-				//(mm_len >= match_model.min_match + 32) + 
-				//(mm_len >= match_model.min_match + 50) +
-				0;
-		}
 		mixer_ctx <<= 3;
 		if (use_word) {
 			auto wlen = word_model.getLength();
@@ -363,9 +353,25 @@ public:
 				(wlen >= 2) +
 				(wlen >= 3) +
 				(wlen >= 4) +
-				(wlen >= 7) +
+				(wlen >= 5) +
+				(wlen >= 6) +
+				(wlen >= 8) +
 				0;
 		}
+		mixer_ctx <<= 2;
+		if (mm_len) {
+			if (use_word) {
+				mixer_ctx |= 1 +
+					(mm_len >= match_model.min_match + 2) + 
+					(mm_len >= match_model.min_match + 7) + 
+					0;
+			} else {
+				mixer_ctx |= 1 +
+					(mm_len >= match_model.min_match + 1) + 
+					(mm_len >= match_model.min_match + 4) + 
+					0;
+			}
+		}		
 		mixer_base = getProfileMixers(profile) + (mixer_ctx << 8);
 	}
 
@@ -405,9 +411,12 @@ public:
 			base_contexts[start++] = hash_lookup(word_model.getHash(), false); // Word model
 		}
 		if (use_sparse) {
+			base_contexts[start++] = hash_lookup(hashFunc(p1, 0x4B1BEC1D)); // Order 12
+			// if (opt_var & 2 && start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p2, 0x651A833E)); // Order 23
+			// if (opt_var & 4 && start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p3, 0x4B1BEC1D)); // Order 34
 			base_contexts[start++] = hash_lookup(hashFunc(p2, hashFunc(p1, 0x37220B98))); // Order 12
 			base_contexts[start++] = hash_lookup(hashFunc(p3, hashFunc(p2, 0x651A833E))); // Order 23
-			base_contexts[start++] = hash_lookup(hashFunc(p4, hashFunc(p3, 0x4B1BEC1D))); // Order 34
+			// if (opt_var & 32 && start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p4, hashFunc(p3, 0x4B1BEC1D))); // Order 34
 		}
 		hash_t h = hashFunc(0x32017044, p0);
 		size_t order = 2;  // Start at order 2.
@@ -497,9 +506,12 @@ public:
 			p6 = mm_p;
 
 			int stp = cur_mixer->p(p0, p1, p2, p3, p4, p5, p6, p7);
+			//int stp = (p0 + p1 + p2 + p3 + p4 + p5 + p6 + p7) / 4;
 			int mixer_p = table.sq(stp); // Mix probabilities.
 #endif
 			p = mixer_p; // stp;
+			// p = std::max(mixer_p / 8 * 8, 1);
+			// auto& mdl = isse[mixer_p / 16][match_model.getLength()][match_model.getExpectedBit()];
 
 			size_t bit;
 			if (decode) { 
@@ -509,6 +521,8 @@ public:
 				code <<= 1;
 				ent.encode(stream, bit, p, shift);
 			}
+
+			// mdl.update(bit);
 
 #if USE_MMX
 			bool ret = cur_mixer->update(wp, mixer_p, bit);

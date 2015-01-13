@@ -39,16 +39,14 @@
 #include "Util.hpp"
 
 class ProgressMeter {
-	uint64_t count, prev_size, prev_count;
-	clock_t start, prev_time;
+	uint64_t count;
+	clock_t start;
 	bool encode;
 public:
 	ProgressMeter(bool encode = true)
 		: count(0)
-		, prev_size(0)
-		, prev_count(0)
+		, start(clock())
 		, encode(encode) {
-		prev_time = start = clock();
 	}
 
 	~ProgressMeter() {
@@ -65,32 +63,66 @@ public:
 
 	// Surprisingly expensive to call...
 	void printRatio(uint64_t comp_size, const std::string& extra) {
+		printRatio(comp_size, count, extra);
+	}
+
+	// Surprisingly expensive to call...
+	void printRatio(uint64_t comp_size, uint64_t in_size, const std::string& extra) const {
 		// Be sure to empty mmx before printing progress meter.
 		_mm_empty();
-		const auto cur_ratio = double(comp_size - prev_size) / double(count - prev_count);
-		const auto ratio = double(comp_size) / count;
+		const auto cur_Time = clock();
+		const auto ratio = double(comp_size) / in_size;
 		auto cur_time = clock();
 		auto time_delta = cur_time - start;
 		if (!time_delta) {
 			++time_delta;
 		}
-		const size_t rate = size_t(double(count / KB) / (double(time_delta) / double(CLOCKS_PER_SEC)));
+		const size_t rate = size_t(double(in_size / KB) / (double(time_delta) / double(CLOCKS_PER_SEC)));
 		std::cout
-			<< count / KB << "KB " << (encode ? "->" : "<-") << " "
-			<< comp_size / KB << "KB " << rate << "KB/s ratio: " << std::setprecision(5) << std::fixed << ratio << extra.c_str() << " cratio: " << cur_ratio << "\t\r";
-		prev_size = comp_size;
-		prev_count = count;
-		prev_time = cur_time;
+			<< in_size / KB << "KB " << (encode ? "->" : "<-") << " "
+			<< comp_size / KB << "KB " << rate << "KB/s ratio: " << std::setprecision(5) << std::fixed << ratio << extra.c_str() << "\t\r";
 	}
 
 	forceinline void addBytePrint(uint64_t total, const char* extra = "") {
 		if (!(addByte() & 0xFFFF)) {
 			// 4 updates per second.
-			if (clock() - prev_time > 250) {
-				printRatio(total, extra);
-			}
+			// if (clock() - prev_time > 250) {
+			// 	printRatio(total, extra);
+			// }
 		}
 	}
+};
+
+class ProgressReadStream : public ReadStream {
+	static const size_t kUpdateInterval = 256 * KB;
+public:
+	ProgressReadStream(Stream* in_stream, Stream* out_stream) : in_stream_(in_stream), out_stream_(out_stream), update_count_(0) {
+	}
+	virtual int get() {
+		byte b;
+		if (read(&b, 1) == 0) {
+			return EOF;
+		}
+		return static_cast<char>(b);
+	}
+    virtual size_t read(byte* buf, size_t n) {
+		size_t ret = in_stream_->read(buf, n);
+		update_count_ += ret;
+		if (update_count_ > kUpdateInterval) {
+			update_count_ -= kUpdateInterval;
+			meter_.printRatio(out_stream_->tell(), in_stream_->tell(), "");
+		}
+		return ret;
+	}
+	virtual uint64_t tell() const {
+		return in_stream_->tell();
+	}
+
+private:
+	Stream* in_stream_;
+	Stream* out_stream_;
+	ProgressMeter meter_;
+	uint64_t update_count_;
 };
 
 class CompressionJob {
