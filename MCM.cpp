@@ -36,6 +36,7 @@
 #include "Huffman.hpp"
 #include "LZ.hpp"
 #include "Tests.hpp"
+#include "TurboCM.hpp"
 #include "X86Binary.hpp"
 
 CompressorFactories* CompressorFactories::instance = nullptr;
@@ -401,8 +402,9 @@ int main(int argc, char* argv[]) {
 		}
 
 		clock_t start = clock();
-		std::cout << "Compressing to " << out_file << std::endl;
-		CM<6> comp;
+		std::cout << "Compressing to " << out_file << " mem level=" << options.mem_level << std::endl;
+		//CM<6> comp;
+		TurboCM<6> comp;
 		comp.setMemUsage(options.mem_level);
 		{
 			ProgressReadStream rms(&fin, &fout);

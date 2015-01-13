@@ -60,7 +60,7 @@ public:
 	}
 
 	template <typename TOut>
-	void IncreaseRange(TOut& out) {
+	forceinline void IncreaseRange(TOut& out) {
 		while (Range < TopValue) {
 			Range <<= 8;
 			shiftLow(out);
