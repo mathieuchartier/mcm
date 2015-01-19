@@ -31,7 +31,7 @@
 // From 7zip, added single bit functions
 class Range7 {
 private:
-	uint Range, Code, _cacheSize;
+	uint32_t Range, Code, _cacheSize;
 	uint64_t Low;
 	byte _cache;
 
@@ -39,7 +39,7 @@ private:
 
 	template <typename TOut>
 	forceinline void shiftLow(TOut& sout) { //Emit the top byte 
-		if (size_t(Low) < size_t(0xFF << TopBits) || Low >> 32) {
+		if (static_cast<uint32_t>(Low) < static_cast<uint32_t>(0xFF << TopBits) || (Low >> 32) != 0) {
 			byte temp = _cache;
 			do {
 				sout.put(byte(temp + byte(Low >> 32)));
@@ -48,7 +48,7 @@ private:
 			_cache = byte(uint(Low >> 24));
 		}
 		++_cacheSize;
-		Low = size_t(Low << 8);
+		Low = static_cast<uint32_t>(Low << 8);
 	}
 public:
 	void init() {
@@ -67,9 +67,9 @@ public:
 		}
 	}
 
-	forceinline size_t getDecodedBit(size_t p, size_t shift) {
-		const size_t mid = (Range >> shift) * p;
-		size_t bit = Code < mid;
+	forceinline uint32_t getDecodedBit(uint32_t p, uint32_t shift) {
+		const uint32_t mid = (Range >> shift) * p;
+		uint32_t bit = Code < mid;
 		if (bit) {
 			Range = mid;
 		} else {
@@ -80,10 +80,10 @@ public:
 	}
 
 	template <typename TOut>
-	forceinline void encode(TOut& out, size_t bit, size_t p, size_t shift) {
+	forceinline void encode(TOut& out, uint32_t bit, uint32_t p, uint32_t shift) {
 		assert(p < (1U << shift));
 		assert(p != 0U);
-		const size_t mid = (Range >> shift) * p;
+		const uint32_t mid = (Range >> shift) * p;
 		if (bit) {
 			Range = mid;
 		} else {
@@ -94,7 +94,7 @@ public:
 	}
 
 	template <typename TIn>
-	forceinline size_t decode(TIn& in, size_t p, size_t shift) {
+	forceinline uint32_t decode(TIn& in, uint32_t p, uint32_t shift) {
 		assert(p < (1U << shift));
 		assert(p != 0U);
 		auto ret = getDecodedBit(p, shift);
@@ -103,7 +103,7 @@ public:
 	}
 
 	template <typename TOut>
-	inline void encodeBit( TOut& out, size_t bit) {
+	inline void encodeBit( TOut& out, uint32_t bit) {
 		Range >>= 1;
 		if (bit) {
 			Low += Range;
@@ -115,8 +115,8 @@ public:
 	}
 
 	template <typename TIn>
-	inline size_t decodeBit(TIn& in) {
-		size_t top = Range;
+	inline uint32_t decodeBit(TIn& in) {
+		uint32_t top = Range;
 		Range >>= 1;
 		if (Code >= Range) {
 			Code -= Range;
@@ -161,14 +161,14 @@ public:
 	template <typename TIn>
 	uint DecodeDirectBit(TIn& sin) {
 		Range >>= 1;
-		size_t t = (Code - Range) >> 31;
+		uint32_t t = (Code - Range) >> 31;
 		Code -= Range & (t - 1);
 		Normalize(sin);
 		return t ^ 1;
 	}
 
 	template <typename TOut>
-	inline void Encode(TOut& Out, size_t start, size_t size, size_t total) {
+	inline void Encode(TOut& Out, uint32_t start, uint32_t size, uint32_t total) {
 		assert(size > 0);
 		assert(start < total);
 		assert(start + size <= total);
@@ -189,7 +189,7 @@ public:
 	}
 
 	template <typename TOut>
-	inline void encodeDirect(TOut& Out, size_t start, size_t total) {
+	inline void encodeDirect(TOut& Out, uint32_t start, uint32_t total) {
 		assert(start < total);
 		Range /= total;
 		Low += start * Range;
@@ -202,7 +202,7 @@ public:
 	template <typename TIn>
 	inline uint decodeByte(TIn& In) {
 		Range >>= 8;
-		size_t start = Code / Range;
+		uint32_t start = Code / Range;
 		Code -= start * Range;
 		Normalize(In);
 		return start;

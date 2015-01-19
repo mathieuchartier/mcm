@@ -37,7 +37,7 @@ class Detector {
 	bool is_forbidden[256]; // Chars which don't appear in text often.
 	
 	DataProfile profile; // Current profile.
-	size_t profile_length; // Length.
+	uint64_t profile_length; // Length.
 
 	// MZ pattern, todo replace with better detection.
 	typedef std::vector<byte> Pattern;
@@ -45,10 +45,17 @@ class Detector {
 
 	// Buffer
 	std::deque<byte> buffer;
+	
+	// Opt var
+	size_t opt_var_;
 public:
-	Detector() {
+	Detector() : opt_var_(0) {
 		init();
 	}
+
+	void setOptVar(size_t var) {
+		opt_var_ = var;
+		}
 
 	void init() {
 		profile_length = 0;
@@ -69,7 +76,7 @@ public:
 		while (buffer.size() < 128 * KB) {
 			int c = sin.get();
 			if (c == EOF) break;
-			buffer.push_back(c);
+			buffer.push_back((char)c);
 		}
 	}
 
@@ -81,7 +88,7 @@ public:
 		return buffer.size();
 	}
 
-	forceinline size_t at(size_t index) const {
+	forceinline uint32_t at(uint32_t index) const {
 		assert(index < buffer.size());
 		return buffer[index];
 	}
@@ -92,21 +99,21 @@ public:
 		}
 		assert(profile_length > 0);
 		--profile_length;
-		size_t ret = buffer.front();
+		uint32_t ret = buffer.front();
 		buffer.pop_front();
 		return ret;
 	}
 
-	forceinline size_t readBytes(size_t pos, size_t bytes = 4, bool big_endian = true) {
-		size_t w = 0;
+	forceinline uint32_t readBytes(uint32_t pos, uint32_t bytes = 4, bool big_endian = true) {
+		uint32_t w = 0;
 		if (pos + bytes <= size()) {
 			// Past the end of buffer :(
 			if(big_endian) {
-				for (size_t i = 0; i < bytes; ++i) {
+				for (uint32_t i = 0; i < bytes; ++i) {
 					w = (w << 8) | at(pos + i);
 				}
 			} else {
-				for (size_t i = bytes; i; --i) {
+				for (uint32_t i = bytes; i; --i) {
 					w = (w << 8) | at(pos + i - 1);
 				}
 			}
@@ -118,7 +125,7 @@ public:
 		if (size() < pattern.size()) {
 			return false;
 		}
-		for (size_t i = 0;i < pattern.size();++i) {
+		for (uint32_t i = 0;i < pattern.size();++i) {
 			if (pattern[i] != at(i)) {
 				return false;
 			}
@@ -138,7 +145,7 @@ public:
 
 		const auto total = size();
 		UTF8Decoder<true> decoder;
-		size_t text_length = 0, i = 0;
+		uint32_t text_length = 0, i = 0;
 		for (;i < total;++i) {
 			auto c = buffer[i];
 			decoder.update(c);
@@ -150,31 +157,31 @@ public:
 			}
 		}
 		
-		if (text_length >= std::min(total, static_cast<size_t>(64))) {
+		if (text_length >= std::min(total, static_cast<size_t>(100))) {
 			profile = kText;
 			profile_length = text_length;
 		} else {
 			// This is pretty bad, need a clean way to do it.
-			size_t fpos = 0;
-			size_t w0 = readBytes(fpos); fpos += 4;
+			uint32_t fpos = 0;
+			uint32_t w0 = readBytes(fpos); fpos += 4;
 			if (w0 == 0x52494646) {
-				size_t chunk_size = readBytes(fpos); fpos += 4;
-				size_t format = readBytes(fpos); fpos += 4;
+				uint32_t chunk_size = readBytes(fpos); fpos += 4;
+				uint32_t format = readBytes(fpos); fpos += 4;
 				// Format subchunk.
-				size_t subchunk_id = readBytes(fpos); fpos += 4;
+				uint32_t subchunk_id = readBytes(fpos); fpos += 4;
 				if (format == 0x57415645 && subchunk_id == 0x666d7420) {
-					size_t subchunk_size = readBytes(fpos, 4, false); fpos += 4;
+					uint32_t subchunk_size = readBytes(fpos, 4, false); fpos += 4;
 					if (subchunk_size == 16) {
-						size_t audio_format = readBytes(fpos, 2, false); fpos += 2;
-						size_t num_channels = readBytes(fpos, 2, false); fpos += 2;
+						uint32_t audio_format = readBytes(fpos, 2, false); fpos += 2;
+						uint32_t num_channels = readBytes(fpos, 2, false); fpos += 2;
 						if (audio_format == 1 && (num_channels == 1 || num_channels == 2)) {
 							fpos += 4; // Skip: Sample rate
 							fpos += 4; // Skip: Byte rate
 							fpos += 2; // Skip: Block align
-							size_t bits_per_sample = readBytes(fpos, 2, false); fpos += 2;
-							size_t subchunk2_id = readBytes(fpos, 4); fpos += 4;
+							uint32_t bits_per_sample = readBytes(fpos, 2, false); fpos += 2;
+							uint32_t subchunk2_id = readBytes(fpos, 4); fpos += 4;
 							if (subchunk2_id == 0x64617461) {
-								size_t subchunk2_size = readBytes(fpos, 4, false); fpos += 4;
+								uint32_t subchunk2_size = readBytes(fpos, 4, false); fpos += 4;
 								// Read wave header, TODO binary block as big as fpos?? Need to be able to queue subblocks then.
 								profile_length = fpos + subchunk2_size;
 								profile = kWave;
@@ -186,7 +193,7 @@ public:
 			}
 
 			profile = kBinary;
-			profile_length = 1; //std::max(i, (size_t)16);
+			profile_length = 1; //std::max(i, (uint32_t)16);
 		}
 		
 		return profile;

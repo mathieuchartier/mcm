@@ -31,7 +31,9 @@
 #include <thread>
 
 #include "Archive.hpp"
+#include "CCM.hpp"
 #include "CM.hpp"
+#include "Dict.hpp"
 #include "File.hpp"
 #include "Huffman.hpp"
 #include "LZ.hpp"
@@ -41,12 +43,14 @@
 
 CompressorFactories* CompressorFactories::instance = nullptr;
 
-CM<6> comp;
+typedef X86AdvancedFilter DefaultFilter;
+//typedef IdentityFilter DefaultFilter;
+//typedef Dict DefaultFilter;
 
 class VerifyStream : public WriteStream {
 public:
 	std::ifstream fin;
-	size_t differences, total;
+	uint32_t differences, total;
 
 	VerifyStream(const std::string& file_name) {
 		fin.open(file_name, std::ios_base::in | std::ios_base::binary);
@@ -72,17 +76,17 @@ public:
 		++total;
 	}
 
-	forceinline size_t getTotal() const {
+	forceinline uint32_t getTotal() const {
 		return total;
 	}
 
 	void summary() {
 		fin.get();
 		if (!fin.eof()) {
-			std::cerr << "ERROR: Output truncated at byte " << fin.tellg() << std::endl;
+			std::cerr << "ERROR: Output truncated at byte " << fin.tellg() << " differences=" << differences << std::endl;
 		} else {
 			if (differences) {
-				std::cerr << "ERROR: Total differences: " << differences << std::endl;
+				std::cerr << "ERROR: differences=" << differences << std::endl;
 			} else {
 				std::cout << "No differences found!" << std::endl;
 			}
@@ -98,12 +102,12 @@ std::string trimExt(std::string str) {
 	if ((pos = str.find_last_of('/')) != std::string::npos) {
 		start = std::max(start, pos + 1);
 	}
-	return str.substr(static_cast<size_t>(start));
+	return str.substr(static_cast<uint32_t>(start));
 }
 
 static int usage(const std::string& name) {
 	std::cout
-		<< "mcm file compressor v0." << comp.version << ", (c)2013 Google Inc" << std::endl
+		<< "mcm file compressor v0." << CM<6>::version << ", (c)2015 Google Inc" << std::endl
 		<< "Caution: Use only for testing!!" << std::endl
 		<< "Usage: " << name << " [options] <infile> <outfile>" << std::endl
 		<< "Options: -d for decompress" << std::endl
@@ -123,7 +127,7 @@ void openArchive(ReadStream* stream) {
 }
 
 // Compress a single file.
-void compressSingleFile(ReadFileStream* fin, WriteFileStream* fout, size_t blocks) {
+void compressSingleFile(ReadFileStream* fin, WriteFileStream* fout, uint32_t blocks) {
 	// Split the file into a list of blocks.
 	File& file = fin->getFile();
 	// Seek to end and 
@@ -177,8 +181,8 @@ public:
 	Mode mode;
 	bool opt_mode;
 	Compressor* compressor;
-	size_t mem_level;
-	size_t threads;
+	uint32_t mem_level;
+	uint32_t threads;
 	uint64_t block_size;
 	FilePath archive_file;
 	std::vector<FilePath> files;
@@ -239,6 +243,7 @@ public:
 			else if (arg == "-7") mem_level = 7;
 			else if (arg == "-8") mem_level = 8;
 			else if (arg == "-9") mem_level = 9;
+			else if (arg == "-10") mem_level = 10;
 			else if (arg == "-b") {
 				if  (i + 1 >= argc) {
 					return usage(program);
@@ -296,7 +301,7 @@ public:
 
 int main(int argc, char* argv[]) {
 	CompressorFactories::init();
-	// runAllTests();
+	//runAllTests();
 	Options options;
 	auto ret = options.parse(argc, argv);
 	if (ret) {
@@ -306,7 +311,7 @@ int main(int argc, char* argv[]) {
 	Archive archive;
 	switch (options.mode) {
 	case Options::MODE_MEM_TEST: {
-		const size_t iterations = kIsDebugBuild ? 1 : 1;
+		const uint32_t iterations = kIsDebugBuild ? 1 : 1;
 		// Read in the whole file.
 		size_t length = 0;
 		uint64_t long_length = 0;
@@ -315,11 +320,11 @@ int main(int argc, char* argv[]) {
 			lengths.push_back(getFileLength(file.getName()));
 			long_length += lengths.back();
 		}
-		length = static_cast<size_t>(long_length);
+		length = static_cast<uint32_t>(long_length);
 		check(length < 300 * MB);
 		auto in_buffer = new byte[length];
 		// Read in the files.
-		size_t index = 0;
+		uint32_t index = 0;
 		uint64_t read_pos = 0;
 		for (const auto& file : options.files) {
 			File f;
@@ -333,13 +338,13 @@ int main(int argc, char* argv[]) {
 		//auto* compressor = new LZ4;
 		//auto* compressor = new MemCopyCompressor;
 		auto out_buffer = new byte[compressor->getMaxExpansion(length)];
-		size_t comp_start = clock();
-		size_t comp_size;
+		uint32_t comp_start = clock();
+		uint32_t comp_size;
 		static const bool opt_mode = false;
 		if (opt_mode) {
-			size_t best_size = 0xFFFFFFFF;
-			size_t best_opt = 0;
-			for (size_t opt = 0; ; ++opt) {
+			uint32_t best_size = 0xFFFFFFFF;
+			uint32_t best_opt = 0;
+			for (uint32_t opt = 0; ; ++opt) {
 				compressor->setOpt(opt);
 				comp_size = compressor->compressBytes(in_buffer, out_buffer, length);
 				std::cout << "Opt " << opt << " / " << best_opt << " =  " << comp_size << "/" << best_size << std::endl;
@@ -349,30 +354,30 @@ int main(int argc, char* argv[]) {
 				}
 			}
 		} else {
-			for (size_t i = 0; i < iterations; ++i) {
+			for (uint32_t i = 0; i < iterations; ++i) {
 				comp_size = compressor->compressBytes(in_buffer, out_buffer, length);
 			}
 		}
 
-		size_t comp_end = clock();
+		uint32_t comp_end = clock();
 		std::cout << "Compression " << length << " -> " << comp_size << " = " << float(double(length) / double(comp_size)) << " rate: "
 			<< prettySize(static_cast<uint64_t>(long_length * iterations / clockToSeconds(comp_end - comp_start))) << "/s" << std::endl;
 		memset(in_buffer, 0, length);
-		size_t decomp_start = clock();
-		static const size_t decomp_iterations = kIsDebugBuild ? 1 : iterations * 5;
-		for (size_t i = 0; i < decomp_iterations; ++i) {
+		uint32_t decomp_start = clock();
+		static const uint32_t decomp_iterations = kIsDebugBuild ? 1 : iterations * 5;
+		for (uint32_t i = 0; i < decomp_iterations; ++i) {
 			compressor->decompressBytes(out_buffer, in_buffer, length);
 		}
-		size_t decomp_end = clock();
+		uint32_t decomp_end = clock();
 		std::cout << "Decompression took: " << decomp_end - comp_end << " rate: "
 			<< prettySize(static_cast<uint64_t>(long_length * decomp_iterations / clockToSeconds(decomp_end - decomp_start))) << "/s" << std::endl;
 		index = 0;
 		for (const auto& file : options.files) {
 			File f;
 			f.open(file.getName(), std::ios_base::in | std::ios_base::binary);
-			size_t count = static_cast<size_t>(f.read(out_buffer, static_cast<size_t>(lengths[index])));
+			uint32_t count = static_cast<uint32_t>(f.read(out_buffer, static_cast<uint32_t>(lengths[index])));
 			check(count == lengths[index]);
-			for (size_t i = 0; i < count; ++i) {
+			for (uint32_t i = 0; i < count; ++i) {
 				if (out_buffer[i] != in_buffer[i]) {
 					std::cerr << "File" << file.getName() << " doesn't match at byte " << i << std::endl;
 					check(false);
@@ -392,24 +397,26 @@ int main(int argc, char* argv[]) {
 		WriteFileStream fout;
 		auto in_file = options.files.back().getName();
 		auto out_file = options.archive_file.getName();
-		if (err = fin.open(in_file, std::ios_base::binary)) {
+		if (err = fin.open(in_file, std::ios_base::in | std::ios_base::binary)) {
 			std::cerr << "Error opening: " << in_file << " (" << errstr(err) << ")" << std::endl;
 			return 1;
 		}
-		if (err = fout.open(out_file, std::ios_base::binary)) {
+		if (err = fout.open(out_file, std::ios_base::out | std::ios_base::binary)) {
 			std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
 			return 2;
 		}
 
 		clock_t start = clock();
 		std::cout << "Compressing to " << out_file << " mem level=" << options.mem_level << std::endl;
-		//CM<6> comp;
-		TurboCM<6> comp;
-		comp.setMemUsage(options.mem_level);
+		std::unique_ptr<Compressor> comp;
+		comp.reset(new CM<5>);
+		//comp.reset(new TurboCM<6>);
+		//comp.reset(new CCM);
+		comp->setMemUsage(options.mem_level);
 		{
 			ProgressReadStream rms(&fin, &fout);
-			X86AdvancedFilter f(&rms);
-			comp.compress(&f, &fout);
+			DefaultFilter f(&rms);
+			comp->compress(&f, &fout);
 		}
 		clock_t time = clock() - start;
 		std::cout << "Compression " << fin.getCount() << "->" << fout.getCount() << " took " << time << "ms" << std::endl;
@@ -426,9 +433,9 @@ int main(int argc, char* argv[]) {
 			
 		std::cout << "Decompresing & verifying file" << std::endl;		
 		VerifyStream verifyStream(in_file);
-		X86AdvancedFilter f(&verifyStream);
+		DefaultFilter f(&verifyStream);
 		start = clock();
-		comp.decompress(&fin, &f);
+		comp->decompress(&fin, &f);
 		f.flush();
 		verifyStream.summary();
 		time = clock() - start;

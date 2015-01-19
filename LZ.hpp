@@ -73,7 +73,7 @@ class LZ {
 	BoundedQueue<byte> lookahead;
 	CyclicBuffer<byte> buffer;
 
-	void tryMatch(size_t& pos, size_t& len) {
+	void tryMatch(uint32_t& pos, uint32_t& len) {
 		
 	}
 
@@ -81,8 +81,8 @@ class LZ {
 		buffer.push(c);
 	}
 public:
-	static const size_t version = 0;
-	void setMemUsage(size_t n) {}
+	static const uint32_t version = 0;
+	void setMemUsage(uint32_t n) {}
 
 	typedef safeBitModel<unsigned int, 12> BitModel;
 	typedef bitContextModel<BitModel, 1 << 8> CtxModel;
@@ -95,7 +95,7 @@ public:
 	}
 
 	template <typename TOut, typename TIn>
-	size_t Compress(TOut& sout, TIn& sin) {
+	uint32_t Compress(TOut& sout, TIn& sin) {
 		init();
 		ent.init();
 		for (;;) {
@@ -104,7 +104,7 @@ public:
 			mdl.encode(ent, sout, c);
 		}
 		ent.flush(sout);
-		return (size_t)sout.getTotal();
+		return (uint32_t)sout.getTotal();
 	}
 
 	template <typename TOut, typename TIn>
@@ -128,10 +128,10 @@ public:
 
 // variable order rolz.
 class VRolz {
-	static const size_t kMinMatch = 2U;
-	static const size_t kMaxMatch = 0xFU + kMinMatch;
+	static const uint32_t kMinMatch = 2U;
+	static const uint32_t kMaxMatch = 0xFU + kMinMatch;
 public:
-	template<size_t kSize>
+	template<uint32_t kSize>
 	class RolzTable {
 	public:
 		RolzTable() {
@@ -145,8 +145,8 @@ public:
 			}
 		}
 
-		forceinline size_t add(size_t pos) {
-			size_t old = slots_[pos_];
+		forceinline uint32_t add(uint32_t pos) {
+			uint32_t old = slots_[pos_];
 			if (++pos_ == kSize) {
 				pos_ = 0;
 			}
@@ -154,24 +154,24 @@ public:
 			return old;
 		}
 
-		forceinline size_t operator[](size_t index) {
+		forceinline uint32_t operator[](uint32_t index) {
 			return slots_[index];
 		}
 
-		forceinline size_t size() {
+		forceinline uint32_t size() {
 			return kSize;
 		}
 
 	private:
-		size_t pos_;
-		size_t slots_[kSize];
+		uint32_t pos_;
+		uint32_t slots_[kSize];
 	};
 
 	RolzTable<16> order1[0x100];
 	RolzTable<16> order2[0x10000];
 
-	void addHash(byte* in, size_t pos, size_t prev);
-	size_t getMatchLen(byte* m1, byte* m2, size_t max_len);
+	void addHash(byte* in, uint32_t pos, uint32_t prev);
+	uint32_t getMatchLen(byte* m1, byte* m2, uint32_t max_len);
 	virtual size_t getMaxExpansion(size_t in_size);
 	virtual size_t compressBytes(byte* in, byte* out, size_t count);
 	virtual void decompressBytes(byte* in, byte* out, size_t count);
@@ -197,29 +197,29 @@ public:
 	void init(byte* in, const byte* limit);
 	
 protected:
-	const byte* in_;
-	const byte* in_ptr_;
-	const byte* limit_;
-	const byte* non_match_ptr_;
+	const uint8_t* in_;
+	const uint8_t* in_ptr_;
+	const uint8_t* limit_;
+	const uint8_t* non_match_ptr_;
 	size_t non_match_len_;
 };
 
 class GreedyMatchFinder : public MemoryMatchFinder {
 public:
-	size_t opt;
+	uint32_t opt;
 
 	void init(byte* in, const byte* limit);
 	GreedyMatchFinder();
 	Match findNextMatch();
-	forceinline hash_t hashFunc(size_t a, hash_t b) {
+	forceinline hash_t hashFunc(uint32_t a, hash_t b) {
 		b += a;
 		b += rotate_left(b, 6);
 		return b ^ (b >> 23);
 	}
 
 private:
-	static const size_t kMinMatch = 4;
-	static const size_t kMaxDist = 0xFFFF;
+	static const uint32_t kMinMatch = 4;
+	static const uint32_t kMaxDist = 0xFFFF;
 	// This is probably not very efficient.
 	class Entry {
 	public:
@@ -227,7 +227,7 @@ private:
 			init();
 		}
 		void init() {
-			pos_ = std::numeric_limits<size_t>::max() - kMaxDist * 2;
+			pos_ = std::numeric_limits<uint32_t>::max() - kMaxDist * 2;
 			hash_ = 0;
 		}
 		forceinline static uint32_t getHash(uint32_t word, uint32_t slot) {
@@ -248,7 +248,7 @@ private:
 	};
 	;
 	std::vector<Entry> hash_storage_;
-	size_t hash_mask_;
+	uint32_t hash_mask_;
 	Entry* hash_table_;
 };
 
@@ -262,18 +262,18 @@ public:
 		auto lookahead = *reinterpret_cast<const uint32_t*>(in_ptr_);
 		size_t dist;
 		while (true) {
-			const size_t hash_index = (lookahead * 190807U) >> 16;
-			// const size_t hash_index = (lookahead * 2654435761U) >> 20;
+			const uint32_t hash_index = (lookahead * 190807U) >> 16;
+			// const uint32_t hash_index = (lookahead * 2654435761U) >> 20;
 			assert(hash_index <= hash_mask_);
 			match_ptr = in_ + hash_table_[hash_index];
-			hash_table_[hash_index] = in_ptr_ - in_;
+			hash_table_[hash_index] = static_cast<uint32_t>(in_ptr_ - in_);
 			dist = in_ptr_ - match_ptr;
 			if (dist - kMinMatch <= kMaxDist - kMinMatch) {
 				if (*reinterpret_cast<const uint32_t*>(match_ptr) == lookahead) {
 					break;
 				}
 			}
-			lookahead = (lookahead >> 8) | (static_cast<size_t>(*(in_ptr_ + sizeof(lookahead))) << 24);
+			lookahead = (lookahead >> 8) | (static_cast<uint32_t>(*(in_ptr_ + sizeof(lookahead))) << 24);
 			if (++in_ptr_ >= limit_) {
 				// assert(in_ptr_ == limit_);
 				non_match_len_ = in_ptr_ - non_match_ptr_;
@@ -299,7 +299,7 @@ public:
 		assert(match_ptr + len <= in_ptr_);
 		assert(in_ptr_ + len <= limit_);
 		// Verify match.
-		for (size_t i = 0; i < len; ++i) {
+		for (uint32_t i = 0; i < len; ++i) {
 			assert(in_ptr_[i] == match_ptr[i]);
 		}
 		Match match;
@@ -310,41 +310,41 @@ public:
 	}
 
 private:
-	static const size_t kMaxDist = 0xFFFF;
-	static const size_t kMatchCount = 1;
-	static const size_t kMinMatch = 4;
+	static const uint32_t kMaxDist = 0xFFFF;
+	static const uint32_t kMatchCount = 1;
+	static const uint32_t kMinMatch = 4;
 
-	std::vector<size_t> hash_storage_;
-	size_t hash_mask_;
-	size_t* hash_table_;
+	std::vector<uint32_t> hash_storage_;
+	uint32_t hash_mask_;
+	uint32_t* hash_table_;
 };
 
 class LZFast : public MemoryLZ {
 public:
-	size_t opt;
+	uint32_t opt;
 	LZFast() : opt(0) {
 	}
-	virtual void setOpt(size_t new_opt) {
+	virtual void setOpt(uint32_t new_opt) {
 		opt = new_opt;
 	}
 	byte* flushNonMatch(byte* out_ptr, const byte* in_ptr, size_t non_match_len);
 	virtual size_t getMaxExpansion(size_t in_size);
 	virtual size_t compressBytes(byte* in, byte* out, size_t count);
 	virtual void decompressBytes(byte* in, byte* out, size_t count);
-	template<size_t pos>
+	template<uint32_t pos>
 	ALWAYS_INLINE static byte* processMatch(byte matches, uint32_t lengths, byte* out, byte** in);
 
 private:
 	static const bool kCountMatches = true;
 	GreedyMatchFinder match_finder_;
-	std::vector<size_t> non_matches_;
+	std::vector<uint32_t> non_matches_;
 	// Match format:
 	// <byte> top bit = set -> match
 	// match len = low bits
 	static const size_t kMatchShift = 7;
 	static const size_t kMatchFlag = 1U << kMatchShift;
 	static const size_t kMinMatch = 4;
-	// static const size_t kMaxMatch = (0xFF ^ kMatchFlag) + kMinMatch;
+	// static const uint32_t kMaxMatch = (0xFF ^ kMatchFlag) + kMinMatch;
 	static const size_t kMinNonMatch = 1;
 #if 1
 	static const size_t kMaxMatch = 0x7F + kMinMatch;
@@ -362,9 +362,9 @@ private:
 
 class LZ4 : public MemoryCompressor {
 public:
-	virtual size_t getMaxExpansion(size_t in_size);
-	virtual size_t compressBytes(byte* in, byte* out, size_t count);
-	virtual void decompressBytes(byte* in, byte* out, size_t count);
+	virtual uint32_t getMaxExpansion(uint32_t in_size);
+	virtual uint32_t compressBytes(byte* in, byte* out, uint32_t count);
+	virtual void decompressBytes(byte* in, byte* out, uint32_t count);
 };
 
 

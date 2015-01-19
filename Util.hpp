@@ -76,14 +76,14 @@ static const bool kIsDebugBuild = false;
 #define ASSUME(x)
 #endif
 
-typedef size_t hash_t;
+typedef uint32_t hash_t;
 
 static const uint64_t KB = 1024;
 static const uint64_t MB = KB * KB;
 static const uint64_t GB = KB * MB;
-static const size_t kCacheLineSize = 64; // Sandy bridge.
-static const size_t kPageSize = 4 * KB;
-static const size_t kBitsPerByte = 8;
+static const uint32_t kCacheLineSize = 64; // Sandy bridge.
+static const uint32_t kPageSize = 4 * KB;
+static const uint32_t kBitsPerByte = 8;
 
 enum DataProfile {
 	kText,
@@ -118,25 +118,25 @@ forceinline static char lower_case(char c) {
 }
 
 // Trust in the compiler
-forceinline size_t rotate_left(size_t h, size_t bits) {
+forceinline uint32_t rotate_left(uint32_t h, uint32_t bits) {
 	return (h << bits) | (h >> (sizeof(h) * 8 - bits));
 }
 
-forceinline size_t rotate_right(size_t h, size_t bits) {
+forceinline uint32_t rotate_right(uint32_t h, uint32_t bits) {
 	return (h << (sizeof(h) * 8 - bits)) | (h >> bits);
 }
 
 #define check(c) while (!(c)) { std::cerr << "check failed " << #c << std::endl; *reinterpret_cast<int*>(1234) = 4321;}
 #define dcheck(c) assert(c)
 
-template <const size_t A, const size_t B, const size_t C, const size_t D>
+template <const uint32_t A, const uint32_t B, const uint32_t C, const uint32_t D>
 struct shuffle {
 	enum {
 		value = (D << 6) | (C << 4) | (B << 2) | A,
 	};
 };
 
-forceinline bool isPowerOf2(size_t n) {
+forceinline bool isPowerOf2(uint32_t n) {
 	return (n & (n - 1)) == 0;
 }
 
@@ -148,7 +148,7 @@ forceinline uint bitSize(uint Value) {
 
 template <typename T>
 void printIndexedArray(const std::string& str, const T& arr) {
-	size_t index = 0;
+	uint32_t index = 0;
 	std::cout << str << std::endl;
 	for (const auto& it : arr) {
 		if (it) {
@@ -166,7 +166,7 @@ struct _bitSize<0> {static const uint64_t value = 0;};
 
 inline void fatalError(const std::string& message) {
 	std::cerr << "Fatal error: " << message << std::endl;
-	*reinterpret_cast<size_t*>(1234) = 0;
+	*reinterpret_cast<uint32_t*>(1234) = 0;
 }
 
 inline void unimplementedError(const char* function) {
@@ -175,7 +175,7 @@ inline void unimplementedError(const char* function) {
 	fatalError(oss.str());
 }
 
-inline size_t rand32() {
+inline uint32_t rand32() {
 	return rand() ^ (rand() << 16);
 }
 
@@ -218,9 +218,9 @@ forceinline void copy16bytes(byte* no_alias out, const byte* no_alias in, const 
 }
 
 forceinline static void memcpy16(void* dest, const void* src, size_t len) {
-	byte* no_alias dest_ptr = reinterpret_cast<byte* no_alias>(dest);
-	const byte* no_alias src_ptr = reinterpret_cast<const byte* no_alias>(src);
-	const byte* no_alias limit = dest_ptr + len;
+	uint8_t* no_alias dest_ptr = reinterpret_cast<uint8_t* no_alias>(dest);
+	const uint8_t* no_alias src_ptr = reinterpret_cast<const uint8_t* no_alias>(src);
+	const uint8_t* no_alias limit = dest_ptr + len;
 	*dest_ptr++ = *src_ptr++;
 	if (len >= sizeof(__m128)) {
 		const byte* no_alias limit2 = limit - sizeof(__m128);
@@ -252,10 +252,10 @@ forceinline void memcpy16unsafe(byte* no_alias out, const byte* no_alias in, con
 	} while (out < limit);
 }
 
-template<size_t kMaxSize>
+template<uint32_t kMaxSize>
 class FixedSizeByteBuffer {
 public:
-	size_t getMaxSize() const {
+	uint32_t getMaxSize() const {
 		return kMaxSize;
 	}
 
@@ -263,27 +263,27 @@ protected:
 	byte buffer_[kMaxSize];
 };
 
-template<size_t kMaxSize>
+template<uint32_t kMaxSize>
 class FixedSizeStreamBuffer : public FixedSizeByteBuffer<kMaxSize> {
 public:
 	FixedSizeStreamBuffer() : size_(0), pos_(0) {
 	}
 
-	size_t getMaxWrite() const {
+	uint32_t getMaxWrite() const {
 		return kMaxSize - size_;
 	}
 
-	size_t getMaxRead() const {
+	uint32_t getMaxRead() const {
 		return size_ - pos_;
 	}
 
-	size_t write(byte* buf, size_t count) {
+	uint32_t write(byte* buf, uint32_t count) {
 		assert(count < getMaxWrite());
 		memcpy(&buffer_[size_], buf, count);
 		size_ += count;
 	}
 
-	void read(byte* buf, size_t count) {
+	void read(byte* buf, uint32_t count) {
 		assert(count < getMaxRead());
 		memcpy(buf, &buffer_[pos_], count);
 		pos_ += count;
@@ -298,23 +298,23 @@ public:
 
 private:
 	// Current size.
-	size_t size_;
+	uint32_t size_;
 	// Current position.
-	size_t pos_;
+	uint32_t pos_;
 };
 
-template <class T, size_t kSize>
+template <class T, uint32_t kSize>
 class StaticArray {
 public:
 	StaticArray() {
 	}
-	ALWAYS_INLINE const T& operator[](size_t i) const {
+	ALWAYS_INLINE const T& operator[](uint32_t i) const {
 		return data_[i];
 	}
-	ALWAYS_INLINE T& operator[](size_t i) {
+	ALWAYS_INLINE T& operator[](uint32_t i) {
 		return data_[i];
 	}
-	ALWAYS_INLINE size_t size() const {
+	ALWAYS_INLINE uint32_t size() const {
 		return kSize;
 	}
 
@@ -322,7 +322,7 @@ private:
 	T data_[kSize];
 };
 
-template <class T, size_t kCapacity>
+template <class T, uint32_t kCapacity>
 class StaticBuffer {
 public:
 	StaticBuffer() : pos_(0), size_(0) {
@@ -401,6 +401,6 @@ double clockToSeconds(clock_t c);
 std::string errstr(int err);
 std::vector<byte> randomArray(size_t size);
 uint64_t computeRate(uint64_t size, uint64_t delta_time);
-std::vector<byte> loadFile(const std::string& name, size_t max_size = 0xFFFFFFF);
+std::vector<byte> loadFile(const std::string& name, uint32_t max_size = 0xFFFFFFF);
 
 #endif

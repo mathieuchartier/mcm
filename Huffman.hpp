@@ -35,9 +35,9 @@ class Huffman {
 public:
 	class Code {
 	public:
-		static const size_t nonLeaf = 0;
-		size_t value;
-		size_t length;
+		static const uint32_t nonLeaf = 0;
+		uint32_t value;
+		uint32_t length;
 
 		Code() : value(0), length(nonLeaf) {
 		
@@ -47,11 +47,11 @@ public:
 	template <typename T>
 	class Tree {
 	public:
-		size_t value;
+		uint32_t value;
 		T weight;
 		Tree *a, *b;
 
-		forceinline size_t getAlphabet() const {
+		forceinline uint32_t getAlphabet() const {
 			return value;
 		}
 
@@ -63,7 +63,7 @@ public:
 			return weight;
 		}
 
-		void getCodes(Code* codes, size_t bits = 0, size_t length = 0) const {
+		void getCodes(Code* codes, uint32_t bits = 0, uint32_t length = 0) const {
 			assert(codes != nullptr);
 			if (isLeaf()) {
 				codes[value].value = bits;
@@ -74,7 +74,7 @@ public:
 			}
 		}
 
-		void getLengths(T* lengths, size_t cur_len = 0) {
+		void getLengths(T* lengths, uint32_t cur_len = 0) {
 			if (isLeaf()) {
 				lengths[value] = cur_len;
 			} else {
@@ -83,7 +83,7 @@ public:
 			}
 		}
 
-		void calcDepth(size_t cur_depth = 0) {
+		void calcDepth(uint32_t cur_depth = 0) {
 			if (!isLeaf()) weight = 0;
 			if (a != nullptr) {
 				a->calcDepth(cur_depth + 1);
@@ -95,14 +95,14 @@ public:
 			}
 		}
 
-		uint64_t getCost(size_t bits = 0) const {
+		uint64_t getCost(uint32_t bits = 0) const {
 			if (isLeaf())
 				return bits * weight;
 			else
 				return a->getCost(bits + 1) + b->getCost(bits + 1);
 		}
 
-		Tree(size_t value, T w) : value(value), weight(w), a(nullptr), b(nullptr) {
+		Tree(uint32_t value, T w) : value(value), weight(w), a(nullptr), b(nullptr) {
 
 		}
 
@@ -121,7 +121,7 @@ public:
 		}
 	};
 
-	typedef Tree<size_t> HuffTree;
+	typedef Tree<uint32_t> HuffTree;
 
 	class TreeComparator {
 	public:
@@ -142,29 +142,29 @@ public:
 		return (state & 0x100) != 0;
 	}
 
-	forceinline size_t getTransition(uint16_t state, size_t bit) {
+	forceinline uint32_t getTransition(uint16_t state, uint32_t bit) {
 		assert(state < 256);
 		return state_trans[state][bit];
 	}
 
-	forceinline static size_t getChar(uint16_t state) {
+	forceinline static uint32_t getChar(uint16_t state) {
 		assert(isLeaf(state));
 		return state ^ 0x100;
 	}
 
-	forceinline const Code& getCode(size_t index) const {
+	forceinline const Code& getCode(uint32_t index) const {
 		return codes[index];
 	}
 
 	template <typename T>
-	void build(const Tree<T>* tree, size_t alphabet_size = 256) {
+	void build(const Tree<T>* tree, uint32_t alphabet_size = 256) {
 		typedef const Tree<T> TTree;
 		tree->getCodes(codes);
 		std::vector<TTree*> work, todo;
 		work.push_back(tree);
 
-		std::map<TTree*, size_t> tree_map;
-		size_t cur_state = start_state, cur_state_leaf = cur_state + 0x100;
+		std::map<TTree*, uint32_t> tree_map;
+		uint32_t cur_state = start_state, cur_state_leaf = cur_state + 0x100;
 		bool state_available[256];
 		for (auto& b : state_available) b = true;
 
@@ -172,7 +172,7 @@ public:
 		// TODO: Improve layout to maximize number of cache misses to 2 per byte.
 		do {
 			std::vector<TTree*> temp;
-			for (size_t i = 0; i < work.size(); ++i) {
+			for (uint32_t i = 0; i < work.size(); ++i) {
 				auto* cur_tree = work[i];
 				if (cur_tree->isLeaf()) {
 					tree_map[cur_tree] = cur_tree->value | 0x100;
@@ -201,9 +201,9 @@ public:
 		}
 	}
 
-	static HuffTree* buildTreeOptimal(size_t* frequencies, size_t count = 256) {
+	static HuffTree* buildTreeOptimal(uint32_t* frequencies, uint32_t count = 256) {
 		TreeSet trees;
-		for (size_t i = 0; i < count; ++i) {
+		for (uint32_t i = 0; i < count; ++i) {
 			if (frequencies[i]) {
 				trees.insert(new HuffTree(i, frequencies[i]));
 			}
@@ -213,10 +213,10 @@ public:
 
 	// TODO: Optimize, fix memory leaks.
 	// Based off of example from Introduction to Data Compression.
-	static HuffTree* buildTreePackageMerge(size_t* frequencies, size_t count = 256, size_t max_depth = 16) {
+	static HuffTree* buildTreePackageMerge(size_t* frequencies, uint32_t count = 256, uint32_t max_depth = 16) {
 		class Package {
 		public:
-			std::multiset<size_t> alphabets;
+			std::multiset<uint32_t> alphabets;
 			uint64_t weight;
 
 			Package() : weight(0) {
@@ -230,12 +230,12 @@ public:
 			}
 		};
 
-		size_t package_limit = 2 * count - 2;
+		uint32_t package_limit = 2 * count - 2;
 
 		// Set up initial packages.
 		typedef std::multiset<Package*, Package> PSet;
 		PSet original_set;
-		for (size_t i = 0; i < count; ++i) {
+		for (uint32_t i = 0; i < count; ++i) {
 			auto* p = new Package;
 			p->alphabets.insert(i);
 			p->weight = 1 + frequencies[i]; // Algorithm can't handle 0 frequencies.
@@ -245,12 +245,12 @@ public:
 		PSet merge_set = original_set;
 
 		// Perform the package merge algorithm.
-		for (size_t i = 1; i < max_depth; ++i) {
+		for (uint32_t i = 1; i < max_depth; ++i) {
 			PSet new_set;
 			size_t count = merge_set.size() / 2;
 			// Package count pacakges.
 			auto it = merge_set.begin();
-			for (size_t j = 0; j < count; ++j) {
+			for (uint32_t j = 0; j < count; ++j) {
 				Package *a = *(it++);
 				Package *b = *(it++);
 				auto *new_package = new Package;
@@ -283,7 +283,7 @@ public:
 		}
 
 		// Calculate lengths.
-		std::vector<size_t> lengths(count, 0);
+		std::vector<uint32_t> lengths(count, 0);
 		for (auto* p : merge_set) {
 			for (auto a : p->alphabets) { 
 				++lengths[a];
@@ -291,7 +291,7 @@ public:
 		}
 
 		// Might not work for max_depth = 32.
-		size_t total = 0;
+		uint32_t total = 0;
 		for (auto l : lengths) {
 			assert(l > 0 && l <= max_depth);
 			total += 1 << (max_depth - l);
@@ -307,27 +307,27 @@ public:
 		return buildFromCodeLengths(&lengths[0], count, max_depth, &frequencies[0]);
 	}
 
-	static HuffTree* buildFromCodeLengths(size_t* lengths, size_t count, size_t max_depth, size_t* freqs = nullptr) {
-		HuffTree* tree = new HuffTree(size_t(0), 0);
+	static HuffTree* buildFromCodeLengths(uint32_t* lengths, uint32_t count, uint32_t max_depth, size_t* freqs = nullptr) {
+		HuffTree* tree = new HuffTree(uint32_t(0), 0);
 		typedef std::vector<HuffTree*> TreeVec;
 		TreeVec cur_level;
 		cur_level.push_back(tree);
-		for (size_t i = 0; i <= max_depth; ++i) {
-			for (size_t j = 0; j < count; ++j) {
+		for (uint32_t i = 0; i <= max_depth; ++i) {
+			for (uint32_t j = 0; j < count; ++j) {
 				if (lengths[j] == i) {
 					if (cur_level.empty()) break;
 					auto* tree = cur_level.back();
 					cur_level.pop_back();
 					tree->value = j;
-					tree->weight = freqs != nullptr ? freqs[j] : 0;
+					tree->weight = static_cast<uint32_t>(freqs != nullptr ? freqs[j] : 0);
 				}
 			}
 
 			TreeVec new_set;
-			for (size_t i = 0; i < cur_level.size(); ++i) {
+			for (uint32_t i = 0; i < cur_level.size(); ++i) {
 				auto* tree = cur_level[i];
-				tree->a = new HuffTree(size_t(0), 0);
-				tree->b = new HuffTree(size_t(0), 0);
+				tree->a = new HuffTree(uint32_t(0), 0);
+				tree->b = new HuffTree(uint32_t(0), 0);
 				new_set.push_back(tree->a);
 				new_set.push_back(tree->b);
 			}
@@ -354,11 +354,11 @@ public:
 
 	// Write a huffmann tree to a stream.
 	template <typename TEnt, typename TStream>
-	static void writeTree(TEnt& ent, TStream& stream, HuffTree* tree, size_t alphabet_size, size_t max_length) {
-		std::vector<size_t> lengths(alphabet_size, 0);
+	static void writeTree(TEnt& ent, TStream& stream, HuffTree* tree, uint32_t alphabet_size, uint32_t max_length) {
+		std::vector<uint32_t> lengths(alphabet_size, 0);
 		tree->getLengths(&lengths[0]);
 		// Assumes we can't have any 0 length codes.
-		for (size_t i = 0; i < alphabet_size; ++i) {
+		for (uint32_t i = 0; i < alphabet_size; ++i) {
 			assert(lengths[i] > 0 && lengths[i] <= max_length);
 			ent.encodeDirect(stream, lengths[i] - 1, max_length);
 		}
@@ -366,32 +366,32 @@ public:
 
 	// Read a huffmann tree from a stream.
 	template <typename TEnt, typename TStream>
-	static HuffTree* readTree(TEnt& ent, TStream& stream, size_t alphabet_size, size_t max_length) {
-		std::vector<size_t> lengths(alphabet_size, 0);
-		for (size_t i = 0; i < alphabet_size; ++i) {
+	static HuffTree* readTree(TEnt& ent, TStream& stream, uint32_t alphabet_size, uint32_t max_length) {
+		std::vector<uint32_t> lengths(alphabet_size, 0);
+		for (uint32_t i = 0; i < alphabet_size; ++i) {
 			lengths[i] = ent.decodeDirect(stream, max_length) + 1;
 		}
 		return buildFromCodeLengths(&lengths[0], alphabet_size, max_length, nullptr);
 	}
 
-	static const size_t alphabet_size = 256;
-	static const size_t max_length = 16;
+	static const uint32_t alphabet_size = 256;
+	static const uint32_t max_length = 16;
 public:
-	static const size_t version = 0;
-	void setMemUsage(size_t n) {}
+	static const uint32_t version = 0;
+	void setMemUsage(uint32_t n) {}
 
 	template <typename TOut, typename TIn>
 	uint64_t Compress(TOut& sout, TIn& sin) {
 		Range7 ent;
-		size_t count = 0;
-		std::vector<size_t> freq(alphabet_size, 0);
+		uint32_t count = 0;
+		std::vector<uint32_t> freq(alphabet_size, 0);
 
 		// Get frequencies
-		size_t length = 0;
+		uint32_t length = 0;
 		for (;;++length) {
 			auto c = sin.read();
 			if (c == EOF) break;
-			++freq[(size_t)c];
+			++freq[(uint32_t)c];
 		}
 
 		// Print frequencies
@@ -436,14 +436,14 @@ public:
 
 		ent.initDecoder(sin);
 		auto* tree = readTree(ent, sin, alphabet_size, max_length);
-		size_t length = ent.DecodeDirectBits(sin, 31);
+		uint32_t length = ent.DecodeDirectBits(sin, 31);
 
 		// Generate codes.
 		build(tree);
 
 		std::cout << std::endl;
-		for (size_t i = 0; i < length; ++i) {
-			size_t state = 0;
+		for (uint32_t i = 0; i < length; ++i) {
+			uint32_t state = 0;
 			do {
 				state = getTransition(state, ent.DecodeDirectBit(sin));
 			} while (!isLeaf(state));
@@ -456,14 +456,14 @@ public:
 };
 
 class HuffmanStatic : public MemoryCompressor {
-	static const size_t kCodeBits = 16;
-	static const size_t kAlphabetSize = 256;
+	static const uint32_t kCodeBits = 16;
+	static const uint32_t kAlphabetSize = 256;
 public:
-	virtual size_t getMaxExpansion(size_t in_size) {
+	virtual uint32_t getMaxExpansion(uint32_t in_size) {
 		return in_size * 6 / 5 + (kCodeBits * 256 / kBitsPerByte + 100);
 	}
-	virtual size_t compressBytes(byte* in, byte* out, size_t count);
-	virtual void decompressBytes(byte* in, byte* out, size_t count);
+	virtual uint32_t compressBytes(byte* in, byte* out, uint32_t count);
+	virtual void decompressBytes(byte* in, byte* out, uint32_t count);
 };
 
 #endif

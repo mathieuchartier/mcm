@@ -48,7 +48,7 @@ public:
 };
 
 // Byte filter is complicated since filters are not necessarily a 1:1 mapping.
-template<size_t kInBufferSize = 16 * KB, size_t kOutBufferSize = 16 * KB>
+template<uint32_t kInBufferSize = 16 * KB, uint32_t kOutBufferSize = 16 * KB>
 class ByteStreamFilter : public Filter {
 public:
 	void flush() {
@@ -102,8 +102,8 @@ public:
 			n -= len;
 		}
 	}
-	virtual void forwardFilter(byte* out, size_t* out_count, byte* in, size_t* in_count) = 0;
-	virtual void reverseFilter(byte* out, size_t* out_count, byte* in, size_t* in_count) = 0;
+	virtual void forwardFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) = 0;
+	virtual void reverseFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) = 0;
 
 private:
 	size_t refillWriteAndProcess() {
@@ -138,15 +138,38 @@ private:
 	StaticBuffer<uint8_t, kInBufferSize> in_buffer_;
 	// Out buffer (passed through filter or reverse filter).
 	StaticBuffer<uint8_t, kInBufferSize> out_buffer_;
+
+protected:
 	// Proxy stream.
 	Stream* const stream_;
 };
 
-template <size_t kBlockSize = 0x10000>
+class IdentityFilter : public ByteStreamFilter<4 * KB, 4 * KB> {
+public:
+	IdentityFilter(Stream* stream) : ByteStreamFilter(stream) { }
+	virtual void forwardFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
+		const auto max_c = std::min(*out_count, *in_count);
+		std::copy(in, in + max_c, out);
+		*out_count = *in_count = max_c;
+	}
+	virtual void reverseFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
+		const auto max_c = std::min(*out_count, *in_count);
+		std::copy(in, in + max_c, out);
+		*out_count = *in_count = max_c;
+	}
+	void dumpInfo() {
+	}
+	void setSpecific(uint32_t) { }
+	static size_t getMaxExpansion() {
+		return 1;
+	}
+};
+
+template <uint32_t kBlockSize = 0x10000>
 class ByteBufferFilter : public Filter {
 public:
 	ByteBufferFilter(Stream* stream) : stream_(stream), block_pos_(0), block_size_(0) {
-		block_.reset(new byte[kBlockSize]);
+		block_.reset(new uint8_t[kBlockSize]);
 		block_data_ = block_.get();
 	}
 	void flush() {
@@ -219,8 +242,8 @@ private:
 
 	static const size_t kBlockSize = 0x10000;
 	Stream* const stream_;
-	std::unique_ptr<byte[]> block_;
-	byte* block_data_;
+	std::unique_ptr<uint8_t[]> block_;
+	uint8_t* block_data_;
 	size_t block_size_;
 	size_t block_pos_;
 };

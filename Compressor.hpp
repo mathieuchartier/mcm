@@ -50,7 +50,9 @@ public:
 	}
 
 	~ProgressMeter() {
+#ifndef _WIN64
 		_mm_empty();
+#endif
 	}
 
 	forceinline uint64_t getCount() const {
@@ -68,8 +70,10 @@ public:
 
 	// Surprisingly expensive to call...
 	void printRatio(uint64_t comp_size, uint64_t in_size, const std::string& extra) const {
+#ifndef _WIN64
 		// Be sure to empty mmx before printing progress meter.
 		_mm_empty();
+#endif
 		const auto cur_Time = clock();
 		const auto ratio = double(comp_size) / in_size;
 		auto cur_time = clock();
@@ -77,7 +81,7 @@ public:
 		if (!time_delta) {
 			++time_delta;
 		}
-		const size_t rate = size_t(double(in_size / KB) / (double(time_delta) / double(CLOCKS_PER_SEC)));
+		const uint32_t rate = uint32_t(double(in_size / KB) / (double(time_delta) / double(CLOCKS_PER_SEC)));
 		std::cout
 			<< in_size / KB << "KB " << (encode ? "->" : "<-") << " "
 			<< comp_size / KB << "KB " << rate << "KB/s ratio: " << std::setprecision(5) << std::fixed << ratio << extra.c_str() << "\t\r";
@@ -94,7 +98,7 @@ public:
 };
 
 class ProgressReadStream : public ReadStream {
-	static const size_t kUpdateInterval = 256 * KB;
+	static const uint32_t kUpdateInterval = 512 * KB;
 public:
 	ProgressReadStream(Stream* in_stream, Stream* out_stream) : in_stream_(in_stream), out_stream_(out_stream), update_count_(0) {
 	}
@@ -103,7 +107,7 @@ public:
 		if (read(&b, 1) == 0) {
 			return EOF;
 		}
-		return static_cast<char>(b);
+		return b;
 	}
     virtual size_t read(byte* buf, size_t n) {
 		size_t ret = in_stream_->read(buf, n);
@@ -190,9 +194,11 @@ public:
 	};
 
 	// Optimization variable for brute forcing.
-	virtual void setOpt(size_t opt) {}
-	virtual size_t getOpt() const {
+	virtual void setOpt(uint32_t opt) {}
+	virtual uint32_t getOpt() const {
 		return 0;
+	}
+	virtual void setMemUsage(uint32_t level) {
 	}
 	virtual bool failed() {
 		return false;
@@ -224,7 +230,7 @@ public:
 		return in_size * 3 / 2;
 	}
 
-	virtual size_t compressBytes(byte* in, byte* out, size_t count) {
+	virtual uint32_t compressBytes(byte* in, byte* out, size_t count) {
 		WriteMemoryStream wms(out);
 		ReadMemoryStream rms(in, in + count);
 		compressor.compress(rms, wms);
@@ -246,14 +252,14 @@ public:
 	std::vector<Compressor::Factory*> factories;
 
 	void addCompressor(bool is_legacy, Compressor::Factory* factory);
-	size_t findFactoryIndex(Compressor::Factory* factory) const;
+	uint32_t findFactoryIndex(Compressor::Factory* factory) const;
 	CompressorFactories();
-	Compressor::Factory* getLegacyFactory(size_t index);
-	Compressor::Factory* getFactory(size_t index);
+	Compressor::Factory* getLegacyFactory(uint32_t index);
+	Compressor::Factory* getFactory(uint32_t index);
 	forceinline static CompressorFactories* getInstance() {
 		return instance;
 	}
-	static Compressor* makeCompressor(size_t type);
+	static Compressor* makeCompressor(uint32_t type);
 	static void init();
 
 private:
@@ -282,26 +288,26 @@ public:
 };
 
 class BitStreamCompressor : public MemoryCompressor {
-	static const size_t kBits = 8;
+	static const uint32_t kBits = 8;
 public:
 	size_t getMaxExpansion(size_t in_size);
 	size_t compressBytes(byte* in, byte* out, size_t count);
 	void decompressBytes(byte* in, byte* out, size_t count);
 };
 
-template <size_t kAlphabetSize = 0x100>
+template <uint32_t kAlphabetSize = 0x100>
 class FrequencyCounter {
-	size_t frequencies_[kAlphabetSize];
+	uint32_t frequencies_[kAlphabetSize];
 public:
 	FrequencyCounter() {
 		std::fill(frequencies_, frequencies_ + kAlphabetSize, 0U);
 	}
 
-	inline void addFrequency(size_t index) {
+	inline void addFrequency(uint32_t index) {
 		++frequencies_[index];
 	}
 
-	void normalize(size_t target) {
+	void normalize(uint32_t target) {
 		check(target != 0U);
 		uint64_t total = 0;
 		for (auto f : frequencies_) {
@@ -309,7 +315,7 @@ public:
 		}
 		const auto factor = static_cast<double>(target) / static_cast<double>(total);
 		for (auto& f : frequencies_) {
-			auto new_val = static_cast<size_t>(double(f) * factor);
+			auto new_val = static_cast<uint32_t>(double(f) * factor);
 			total += new_val - f;
 			f = new_val;
 		}
@@ -333,11 +339,11 @@ public:
 		}
 	}
 
-	const size_t* getFrequencies() const {
+	const uint32_t* getFrequencies() const {
 		return frequencies_;
 	}
 
-	void count(byte* data, size_t bytes) {
+	void count(byte* data, uint32_t bytes) {
 		// TODO: Vectorize.
 		for (; count; --count) {
 			addFrequency(*data++);

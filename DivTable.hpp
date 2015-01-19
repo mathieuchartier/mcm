@@ -24,7 +24,7 @@
 #ifndef _DIV_TABLE_HPP_
 #define _DIV_TABLE_HPP_
 
-template <typename T, const size_t shift_, const size_t size_>
+template <typename T, const uint32_t shift_, const uint32_t size_>
 class DivTable {
 	T data[size_];
 public:
@@ -33,12 +33,12 @@ public:
 	}
 
 	void init() {
-		for (size_t i = 0; i < size_; ++i) {
+		for (uint32_t i = 0; i < size_; ++i) {
 			data[i] = int(1 << shift_) / int(i * 16 + 1);
 		}
 	}
 
-	forceinline size_t size() const {
+	forceinline uint32_t size() const {
 		return size_;
 	}
 

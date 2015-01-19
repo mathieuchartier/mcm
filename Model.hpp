@@ -52,9 +52,9 @@ public:
 		if (f > 0.999) f = 0.999;
 	}
 
-	inline size_t getP() const
+	inline uint32_t getP() const
 	{
-		return (size_t)(f * (float)max);
+		return (uint32_t)(f * (float)max);
 	}
 };
 
@@ -63,15 +63,15 @@ public:
 #pragma pack(1)
 
 // Bit probability model (should be rather fast).
-template <typename T, const size_t _shift, const size_t _learn_rate = 5, const size_t _bits = 15>
+template <typename T, const uint32_t _shift, const uint32_t _learn_rate = 5, const uint32_t _bits = 15>
 class safeBitModel {
 protected:
 	T p;
-	static const size_t pmax = (1 << _bits) - 1;
+	static const uint32_t pmax = (1 << _bits) - 1;
 public:
-	static const size_t shift = _shift;
-	static const size_t learn_rate = _learn_rate;
-	static const size_t max = 1 << shift;
+	static const uint32_t shift = _shift;
+	static const uint32_t learn_rate = _learn_rate;
+	static const uint32_t max = 1 << shift;
 
 	void init() {
 		p = pmax / 2;
@@ -86,23 +86,23 @@ public:
 		p += ((static_cast<int>(bit) << _bits) - static_cast<int>(p) + round) >> _learn_rate;
 	}
 
-	inline size_t getP() const {
-		size_t ret = p >> (_bits - shift);
+	inline uint32_t getP() const {
+		uint32_t ret = p >> (_bits - shift);
 		ret += ret == 0;
 		return ret;
 	}
 };
 
 // Bit probability model (should be rather fast).
-template <typename T, const size_t _shift, const size_t _learn_rate = 5, const size_t _bits = 15>
+template <typename T, const uint32_t _shift, const uint32_t _learn_rate = 5, const uint32_t _bits = 15>
 class fastBitModel {
 protected:
 	T p;
-	static const size_t pmax = (1 << _bits) - 1;
+	static const T pmax = (1 << _bits) - 1;
 public:
-	static const size_t shift = _shift;
-	static const size_t learn_rate = _learn_rate;
-	static const size_t max = 1 << shift;
+	static const uint32_t shift = _shift;
+	static const uint32_t learn_rate = _learn_rate;
+	static const uint32_t max = 1 << shift;
 
 	void init() {
 		p = pmax / 2;
@@ -112,29 +112,36 @@ public:
 		init();
 	}
 
-	inline void update(T bit) {
+	forceinline void update(T bit) {
+		// update(bit, _learn_rate);
 		int round = 1 << (_learn_rate - 1);
 		p += ((static_cast<int>(bit) << _bits) - static_cast<int>(p) + round) >> _learn_rate;
 	}
 
-	inline void setP(size_t new_p) {
+	forceinline void update(T bit, int32_t learn_rate) {
+		// const int round = 1 << (learn_rate - 1);
+		const int round = 0;
+		p += ((static_cast<int>(bit) << _bits) - static_cast<int>(p) + round) >> learn_rate;
+	}
+
+	inline void setP(uint32_t new_p) {
 		p = new_p << (_bits - shift);
 	}
 
-	inline size_t getP() const {
+	inline uint32_t getP() const {
 		return p >> (_bits - shift);
 	}
 };
 
 // Bit probability model (should be rather fast).
-template <typename T, const size_t _shift, const size_t _learn_rate = 5>
+template <typename T, const uint32_t _shift, const uint32_t _learn_rate = 5>
 class fastBitSTModel {
 protected:
 	T p;
 public:
-	static const size_t shift = _shift;
-	static const size_t learn_rate = _learn_rate;
-	static const size_t max = 1 << shift;
+	static const uint32_t shift = _shift;
+	static const uint32_t learn_rate = _learn_rate;
+	static const uint32_t max = 1 << shift;
 
 	void init() {
 		p = 0;
@@ -156,26 +163,26 @@ public:
 	}
 
 	template <typename Table>
-	inline void setP(size_t new_p, Table& table) {
+	inline void setP(uint32_t new_p, Table& table) {
 		p = table.st(new_p) << shift; 
 	}
 
 	// Return the stretched probability.
-	inline size_t getSTP() const {
+	inline uint32_t getSTP() const {
 		return p + (1 << shift - 1) >> shift;
 	}
 };
 
 // Bit probability model (should be rather fast).
-template <typename T, const size_t _shift, const size_t _learn_rate = 5, const size_t _bits = 15>
+template <typename T, const uint32_t _shift, const uint32_t _learn_rate = 5, const uint32_t _bits = 15>
 class fastBitSTAModel {
 protected:
 	T p;
-	static const size_t pmax = (1 << _bits) - 1;
+	static const uint32_t pmax = (1 << _bits) - 1;
 public:
-	static const size_t shift = _shift;
-	static const size_t learn_rate = _learn_rate;
-	static const size_t max = 1 << shift;
+	static const uint32_t shift = _shift;
+	static const uint32_t learn_rate = _learn_rate;
+	static const uint32_t max = 1 << shift;
 
 	void init() {
 		p = pmax / 2;
@@ -190,7 +197,7 @@ public:
 		p += ((static_cast<int>(bit) << _bits) - static_cast<int>(p) + 00) >> _learn_rate;
 	}
 
-	inline void setP(size_t new_p) {
+	inline void setP(uint32_t new_p) {
 		p = new_p << (_bits - shift);
 	}
 
@@ -199,14 +206,14 @@ public:
 	}
 };
 
-template <typename T, const size_t _shift, const size_t _learn_rate = 5>
+template <typename T, const uint32_t _shift, const uint32_t _learn_rate = 5>
 class fastBitStretchedModel : public fastBitModel<T, _shift, _learn_rate> {
 public:
-	static const size_t shift = _shift;
-	static const size_t learn_rate = _learn_rate;
-	static const size_t max = 1 << shift;
+	static const uint32_t shift = _shift;
+	static const uint32_t learn_rate = _learn_rate;
+	static const uint32_t max = 1 << shift;
 
-	inline size_t getP() const {
+	inline uint32_t getP() const {
 		return getP() - (1 << (shift - 1));
 	}
 };
@@ -218,11 +225,11 @@ template <typename T>
 class fastCountModel {
 	T n[2];
 public:
-	inline size_t getN(size_t i) const {
+	inline uint32_t getN(uint32_t i) const {
 		return n[i];
 	}
 
-	inline size_t getTotal() const {
+	inline uint32_t getTotal() const {
 		return n[0] + n[1];
 	}
 
@@ -234,14 +241,14 @@ public:
 		n[0] = n[1] = 0;
 	}
 
-	void update(size_t bit) {
+	void update(uint32_t bit) {
 		n[bit] += n[bit] < 0xFF;
 		n[1 ^ bit] = n[1 ^ bit] / 2 + (n[1 ^ bit] != 0);
 	}
 
-	inline size_t getP() const {
-		size_t a = getN(0);
-		size_t b = getN(1);
+	inline uint32_t getP() const {
+		uint32_t a = getN(0);
+		uint32_t b = getN(1);
 		if (!a && !b) return 1 << 11;
 		if (!a) return 0;
 		if (!b) return (1 << 12) - 1;
@@ -250,9 +257,9 @@ public:
 };
 
 
-template <typename Predictor, const size_t max>
+template <typename Predictor, const uint32_t max>
 class bitContextModel {
-	static const size_t bits = _bitSize<max - 1>::value;
+	static const uint32_t bits = _bitSize<max - 1>::value;
 	Predictor pred[max];
 public:
 	void init() {
@@ -261,13 +268,13 @@ public:
 
 	// Returns the cost of a symbol.
 	template <typename CostTable>
-	inline size_t cost(const CostTable& table, size_t sym, size_t limit = max) {
+	inline uint32_t cost(const CostTable& table, uint32_t sym, uint32_t limit = max) {
 		assert(limit <= max);
 		assert(sym < limit);
-		size_t ctx = 1, total = 0;
-		for (size_t bit = bits - 1; bit != size_t(-1); --bit) {
+		uint32_t ctx = 1, total = 0;
+		for (uint32_t bit = bits - 1; bit != uint32_t(-1); --bit) {
 			if ((sym >> bit | 1) << bit < limit) {
-				size_t b = (sym >> bit) & 1;
+				uint32_t b = (sym >> bit) & 1;
 				total += table.cost(pred[ctx].getP(), b);
 				ctx += ctx + b;
 			}
@@ -276,39 +283,39 @@ public:
 	}
 
 	template <typename TEnt, typename TStream>
-	inline void encode(TEnt& ent, TStream& stream, size_t sym, size_t limit = max) {
-		size_t ctx = 1;
+	inline void encode(TEnt& ent, TStream& stream, uint32_t sym, uint32_t limit = max) {
+		uint32_t ctx = 1;
 		assert(limit <= max);
 		assert(sym < limit);
-		for (size_t bit = bits - 1; bit != size_t(-1); --bit)
+		for (uint32_t bit = bits - 1; bit != uint32_t(-1); --bit)
 			if ((sym >> bit | 1) << bit < limit) {
-				size_t b = (sym >> bit) & 1;
+				uint32_t b = (sym >> bit) & 1;
 				ent.encode(stream, b, pred[ctx].getP(), Predictor::shift);
 				pred[ctx].update(b);
 				ctx += ctx + b;
 			}
 	}
 
-	inline void update(size_t sym, size_t limit = max) {
-		size_t ctx = 1;
+	inline void update(uint32_t sym, uint32_t limit = max) {
+		uint32_t ctx = 1;
 		assert(limit <= max);
 		assert(sym < limit);
-		for (size_t bit = bits - 1; bit != size_t(-1); --bit)
+		for (uint32_t bit = bits - 1; bit != uint32_t(-1); --bit)
 			if ((sym >> bit | 1) << bit < limit) {
-				size_t b = (sym >> bit) & 1;
+				uint32_t b = (sym >> bit) & 1;
 				pred[ctx].update(b);
 				ctx += ctx + b;
 			}
 	}
 
 	template <typename TEnt, typename TStream>
-	inline size_t decode(TEnt& ent, TStream& stream, size_t limit = max) {
-		size_t ctx = 1, sym = 0;
+	inline uint32_t decode(TEnt& ent, TStream& stream, uint32_t limit = max) {
+		uint32_t ctx = 1, sym = 0;
 		assert(limit <= max);
 		assert(sym < limit);
-		for (size_t bit = bits - 1; bit != size_t(-1); --bit) {
+		for (uint32_t bit = bits - 1; bit != uint32_t(-1); --bit) {
 			if ((sym >> bit | 1) << bit < limit) {
-				size_t b = ent.decode(stream, pred[ctx].getP(), Predictor::shift);
+				uint32_t b = ent.decode(stream, pred[ctx].getP(), Predictor::shift);
 				sym |= b << bit;
 				pred[ctx].update(b);
 				ctx += ctx + b;

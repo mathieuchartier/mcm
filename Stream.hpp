@@ -7,7 +7,7 @@ class Stream {
 public:
 	virtual int get() = 0;
 	virtual void put(int c) = 0;
-    virtual size_t read(byte* buf, size_t n) {
+    virtual size_t read(uint8_t* buf, size_t n) {
 		size_t count;
 		for (count = 0; count < n; ++count) {
 			auto c = get();
@@ -18,7 +18,7 @@ public:
 		}
 		return count;
 	}
-	virtual void write(const byte* buf, size_t n) {
+	virtual void write(const uint8_t* buf, size_t n) {
 		for (;n; --n) {
 			put(*(buf++));
 		}
@@ -47,7 +47,7 @@ public:
 class VoidWriteStream : public WriteStream {
 public:
 	virtual ~VoidWriteStream() {}
-    virtual void write(const byte*, size_t) {
+    virtual void write(const byte*, uint32_t) {
 	}
 	virtual void put(int) {
 	}
@@ -101,7 +101,7 @@ public:
 	virtual void put(int c) {
 		*pos_++ = static_cast<byte>(static_cast<unsigned int>(c));
 	}
-	virtual void write(const byte* data, size_t count) {
+	virtual void write(const byte* data, uint32_t count) {
 		memcpy(pos_, data, count);
 		pos_ += count;
 	}
@@ -121,7 +121,7 @@ public:
 	virtual void put(int c) {
 		buffer_->push_back(c);
 	}
-	virtual void write(const byte* data, size_t count) {
+	virtual void write(const byte* data, uint32_t count) {
 		buffer_->insert(buffer_->end(), data, data + count);
 	}
 	virtual uint64_t tell() const {
@@ -140,7 +140,7 @@ class OStreamWrapper : public std::ostream {
 public:
 };
 
-template <const size_t buffer_size>
+template <const uint32_t buffer_size>
 class BufferedStreamReader {
 public:
 	Stream* stream;
@@ -176,7 +176,7 @@ public:
 	}
 };
 
-template <const size_t kBufferSize>
+template <const uint32_t kBufferSize>
 class BufferedStreamWriter {
 public:
 	BufferedStreamWriter(Stream* stream) {
@@ -194,7 +194,7 @@ public:
 		stream_->write(buffer_, ptr_ - buffer_);
 		ptr_ = buffer_;
 	}
-	forceinline void put(byte c) {
+	forceinline void put(uint8_t c) {
 		if (UNLIKELY(ptr_ >= end())) {
 			flush();
 		}
@@ -206,20 +206,20 @@ public:
 	}
 
 private:
-	const byte* end() const { 
+	const uint8_t* end() const { 
 		return &buffer_[kBufferSize];
 	}
 	Stream* stream_;
-	byte buffer_[kBufferSize];
-	byte* ptr_;
+	uint8_t buffer_[kBufferSize];
+	uint8_t* ptr_;
 };
 
 template <const bool kLazy = true>
 class MemoryBitStream {
 	byte* no_alias data_;
-	size_t buffer_;
-	size_t bits_;
-	static const size_t kBitsPerSizeT = sizeof(size_t) * kBitsPerByte;
+	uint32_t buffer_;
+	uint32_t bits_;
+	static const uint32_t kBitsPerSizeT = sizeof(uint32_t) * kBitsPerByte;
 public:
 	forceinline MemoryBitStream(byte* data) : data_(data), buffer_(0), bits_(0) {
 	}
@@ -239,7 +239,7 @@ public:
 		bits_ += kBitsPerByte;
 	}
 
-	forceinline size_t readBits(size_t bits) {
+	forceinline uint32_t readBits(uint32_t bits) {
 		if (kLazy) {
 			while (bits_ < bits) {
 				readByte();
@@ -251,14 +251,14 @@ public:
 			tryReadByte();
 		}
 		bits_ -= bits;
-		size_t ret = buffer_ >> bits_;
+		uint32_t ret = buffer_ >> bits_;
 		buffer_ -= ret << bits_;
 		return ret;
 	}
 
 	forceinline void flushByte() {
 		bits_ -= kBitsPerByte;
-		size_t byte = buffer_ >> bits_;
+		uint32_t byte = buffer_ >> bits_;
 		buffer_ -= byte << bits_;
 		*data_++ = byte;
 	}
@@ -270,7 +270,7 @@ public:
 		*data_++ = buffer_;
 	}
 
-	forceinline void writeBits(size_t data, size_t bits) {
+	forceinline void writeBits(uint32_t data, uint32_t bits) {
 		bits_ += bits;
 		buffer_  = (buffer_ << bits) | data;
 		while (bits_ >= kBitsPerByte) {

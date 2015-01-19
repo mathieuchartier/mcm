@@ -38,13 +38,13 @@ public:
 	public:
 		FHeader();
 		virtual ~FHeader();
-		size_t getVersion() const;
+		uint32_t getVersion() const;
 		bool isValid();
 		void write(File* file);
 		void read(File* file);
 
 	private:
-		static const size_t header_size = 4;
+		static const uint32_t header_size = 4;
 		char magic[header_size];
 		uint32_t version;
 		uint64_t free_list_;
@@ -56,7 +56,7 @@ public:
 
 	// Archive consists of a list of these.
 	class FBlockHeader {
-		static const size_t kTypeBits = 8;
+		static const uint32_t kTypeBits = 8;
 		static const uint64_t kTypeMask = (1 << kTypeBits) - 1;
 	public:
 		enum Type { 
@@ -117,12 +117,12 @@ public:
 			kBlockTypeFile,
 			kBlockTypeSegment,
 		};
-		FListHeader(BlockType type, size_t count);
+		FListHeader(BlockType type, uint64_t count);
 		void setNextBlock(uint64_t next_block);
 
 	private:	
 		BlockType type_;
-		size_t count_;
+		uint64_t count_;
 		uint64_t next_block_;
 	};
 
@@ -227,7 +227,7 @@ public:
 			return openFile(file_index_++);
 		}
 
-		bool openFile(size_t index) {
+		bool openFile(uint32_t index) {
 			assert(block_ != nullptr);
 			auto& file_manager = archive_->getFileManager();
 			// Close the currently opened file.
@@ -300,7 +300,7 @@ public:
 	private:
 		Archive* archive_;
 		FileSegment::Vector* block_;
-		size_t file_index_;
+		uint32_t file_index_;
 		uint64_t remain_;
 		uint64_t offset_;
 		OffsetFileReadStream file_read_stream_;
@@ -336,15 +336,15 @@ public:
 	// Add a new file block.
 	void addNewFileBlock(const std::vector<FilePath>& files);
 	// Simply way of splitting files.
-	static std::vector<FileSegment::Vector> splitFiles(const std::vector<FilePath>& files, size_t blocks, uint64_t min_block_size);
+	static std::vector<FileSegment::Vector> splitFiles(const std::vector<FilePath>& files, uint32_t blocks, uint64_t min_block_size);
 	FileManager& getFileManager();
 	void open(const FilePath& file_path, bool overwrite, std::ios_base::open_mode mode = 0);
 	Job* startCompressionJob();
-	// OffsetFileReadStream* compressFiles(size_t method, OffsetFileWriteStream* out_stream, FileHeaderBlock& block, size_t mem);
-	static void compressBlock(OffsetFileWriteStream* out_stream, size_t method, ReadStream* stream, size_t mem);
+	// OffsetFileReadStream* compressFiles(uint32_t method, OffsetFileWriteStream* out_stream, FileHeaderBlock& block, uint32_t mem);
+	static void compressBlock(OffsetFileWriteStream* out_stream, uint32_t method, ReadStream* stream, uint32_t mem);
 	// Compress some files.
-	void compressFiles(OffsetFileWriteStream* out_stream, size_t method, FileSegment::Vector* block, size_t mem);
-	void compressFiles(size_t method, FileSegment::Vector* block, size_t mem);
+	void compressFiles(OffsetFileWriteStream* out_stream, uint32_t method, FileSegment::Vector* block, uint32_t mem);
+	void compressFiles(uint32_t method, FileSegment::Vector* block, uint32_t mem);
 	void Dump(std::ostream& os);
 
 private:

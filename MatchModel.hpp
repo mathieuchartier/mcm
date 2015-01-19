@@ -11,40 +11,44 @@ public:
 	static const size_t max_match = 80;
 	static const size_t char_shift = 2;
 	static const size_t mm_shift = 2;
-	static const size_t mm_round = (1 << mm_shift) - 1;
 	static const size_t max_value = 1 << 12;
+	static const size_t kMaxCtxLen = 32;
 	static const bool kMultiMatch = false;
 	static const bool kExtendMatch = false;
 private:
 	static const size_t bits_per_char = 16;
-	static const size_t num_length_models = ((max_match - min_match + 2 + 2 * mm_round) >> mm_shift) * bits_per_char;
+	static const size_t num_length_models = (kMaxCtxLen + 1) * bits_per_char;
 	Model models[(256 >> char_shift) * num_length_models], *model_base; // Bits expected 0 x 8, 1 x 8.
 
 	// Current minimum match
-	size_t cur_min_match;
+	uint32_t cur_min_match;
 
 	// Current match.
 	size_t pos, len;
 
 	// Hash table
-	size_t hash_mask;
+	uint32_t hash_mask;
 	MemMap hash_storage;
 	uint32_t* hash_table;
 	Model* cur_mdl;
-	size_t expected_code, prev_char;
-	static const size_t code_bit_shift = sizeof(size_t) * 8 - 1;
+	uint32_t expected_code, prev_char;
+	static const uint32_t code_bit_shift = sizeof(uint32_t) * 8 - 1;
 
 	// Hashes.
-	hash_t h0, h1, h2, h3;
+	uint32_t h0, h1, h2, h3;
 public:
-	typedef CyclicBuffer<byte> Buffer;
-	size_t opt_var;
+	typedef CyclicBuffer<uint8_t> Buffer;
+	uint32_t opt_var;
 
 	MatchModel() : opt_var(0) {
 
 	}
 
-	void resize(size_t size) {
+	void setOpt(uint32_t var) {
+		opt_var = var;
+	}
+
+	void resize(uint32_t size) {
 		hash_mask = size - 1;
 		// Check power of 2.
 		assert((hash_mask & (hash_mask + 1)) == 0);
@@ -59,11 +63,11 @@ public:
 		return bit ? -p : p;
 	}
 
-	forceinline size_t getExpectedBit() const {
+	forceinline uint32_t getExpectedBit() const {
 		return expected_code >> code_bit_shift;
 	}
 
-	forceinline size_t getMinMatch() const {
+	forceinline uint32_t getMinMatch() const {
 		return min_match;
 	}
 
@@ -73,19 +77,19 @@ public:
 		expected_code = 0;
 		pos = len = 0;
 		for (auto& m : models) m.init();
-		for (size_t c = 0;c < (256 >> char_shift);++c) {
+		for (size_t c = 0; c < (256U >> char_shift); ++c) {
 			setPrevChar(c << char_shift);
-			for (size_t i = 0;i < num_length_models;++i) {
-				size_t index = i / bits_per_char;
-				size_t len = min_match + (index << mm_shift);
+			for (size_t i = 0; i < num_length_models; ++i) {
+				const size_t index = i / bits_per_char;
+				const size_t len = min_match + (index << mm_shift);
 				model_base[i].setP((max_value / 2) / len); 
 			}
 		}
-		setPrevChar(254);
+		setPrevChar(0);
 		updateCurMdl();
 	}
 
-	forceinline size_t getLength() const {
+	forceinline uint32_t getLength() const {
 		return len;
 	}
 
@@ -93,16 +97,16 @@ public:
 		len = 0;
 	}
 
-	forceinline void setPrevChar(size_t c) {
+	forceinline void setPrevChar(uint32_t c) {
 		prev_char = c;
-		size_t base = prev_char >> char_shift;
+		uint32_t base = prev_char >> char_shift;
 		model_base = &models[base * num_length_models];
 	}
 			
-	void search(Buffer& buffer, size_t spos) {
+	void search(Buffer& buffer, uint32_t spos) {
 		// Reverse match.
-		size_t blast = buffer.getPos() - 1;
-		size_t len = sizeof(uint32_t);
+		uint32_t blast = buffer.getPos() - 1;
+		uint32_t len = sizeof(uint32_t);
 		if (*reinterpret_cast<uint32_t*>(&buffer[spos - len]) ==
 			*reinterpret_cast<uint32_t*>(&buffer[blast - len])) {
 			--spos;
@@ -121,12 +125,12 @@ public:
 		}
 	}
 
-	forceinline void setHash(hash_t new_h1) {
+	forceinline void setHash(uint32_t new_h1) {
 		h0 = new_h1;
 		assert(cur_min_match >= min_match);
 	}
 	
-	forceinline hash_t hashFunc(size_t a, hash_t b) {
+	forceinline uint32_t hashFunc(uint32_t a, uint32_t b) {
 		b += a;
 		b += rotate_left(b, 9);
 		return b ^ (b >> 6);
@@ -166,21 +170,21 @@ public:
 
 	void updateCurMdl() {
 		if (len) {
-			cur_mdl = model_base + bits_per_char * ((len - min_match) >> 2);
+			cur_mdl = model_base + bits_per_char * std::min(len - min_match, kMaxCtxLen);
 		}
 	}
 
-	forceinline size_t getExpectedChar(Buffer& buffer) const {
+	forceinline uint32_t getExpectedChar(Buffer& buffer) const {
 		return buffer[pos + 1];
 	}
 
-	void updateExpectedCode(size_t code, size_t bit_len = 8) {
+	void updateExpectedCode(uint32_t code, uint32_t bit_len = 8) {
 		expected_code = code << (code_bit_shift - bit_len + 1);
 	}
 
-	forceinline void updateBit(size_t bit) {
+	forceinline void updateBit(uint32_t bit) {
 		if (len) {
-			size_t diff = (expected_code >> code_bit_shift) ^ bit;
+			uint32_t diff = (expected_code >> code_bit_shift) ^ bit;
 			(cur_mdl++)->update(diff);
 			expected_code <<= 1;
 			len &= -(1 ^ diff);

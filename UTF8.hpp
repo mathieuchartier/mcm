@@ -29,8 +29,8 @@
 template <bool error_check = false>
 class UTF8Decoder {
 	// Accumulator word.
-	size_t extra;
-	size_t acc;
+	uint32_t extra;
+	uint32_t acc;
 	bool error;
 public:
 	UTF8Decoder() {
@@ -48,7 +48,7 @@ public:
 		return !extra;
 	}
 
-	forceinline size_t getAcc() const {
+	forceinline uint32_t getAcc() const {
 		return acc;
 	}
 
@@ -60,7 +60,7 @@ public:
 		error = false;
 	}
 
-	forceinline void update(size_t c) {// 5 extra bits
+	forceinline void update(uint32_t c) {// 5 extra bits
 		if (extra) {
 			// Add another char to the UTF char.
 			acc = (acc << 6) | (c & 0x3F);

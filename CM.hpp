@@ -40,29 +40,63 @@
 #include "Util.hpp"
 #include "WordModel.hpp"
 
-// #include "APM.hpp"
+#include "APM.hpp"
 
 // Options.
 #define USE_MMX 0
 
 // Map from state -> probability.
 class ProbMap {
-private:
-	struct Prob {
-		uint16_t count[2];
-		uint16_t st_p;
-		uint16_t p;
+public:
+	class Prob {
+	public:
+		Prob() : p_(2048), stp_(0) {
+			count_[0] = count_[1] = 0;
+		}
+		forceinline int16_t getSTP() {
+			return stp_;
+		}
+		forceinline int16_t getP() {
+			return p_;
+		}
+		forceinline void addCount(size_t bit) {
+			++count_[bit];
+		}
+		template <typename Table>
+		void update(const Table& table, size_t min_count = 10) {
+			const size_t count = count_[0] + count_[1];
+			if (count > min_count) {
+				setP(table, 4096U * static_cast<uint32_t>(count_[1]) / count);
+				count_[0] = count_[1] = 0;
+			}
+		}
+		template <typename Table>
+		void setP(const Table& table, uint16_t p) {
+			p_ = p;
+			stp_ = table.st(p_);
+		}
+
+	private:
+		uint16_t count_[2];
+		uint16_t p_;
+		int16_t stp_;
 	};
-	Prob probs[256];
+
+	Prob& getProb(size_t st) {
+		return probs_[st];
+	}
+
+private:
+	Prob probs_[256];
 };
 
-template <const size_t inputs = 6>
+template <size_t inputs = 6>
 class CM : public Compressor {
 public:
-	static const short version = 5;
+	static const short version = 6;
 
 	static const bool statistics = false;
-	static const bool use_prefetch = false;
+	static const bool use_prefetch = true;
 	static const bool fixed_probs = false;
 
 	// Archive header.
@@ -117,12 +151,14 @@ public:
 	};
 
 	// Statistics
-	size_t mixer_skip[2];
-	size_t skip_count;
+	uint32_t mixer_skip[2];
+	uint32_t skip_count;
+	uint32_t match_count_;
+	uint32_t non_match_count_;
 
 	// SS table
-	static const size_t shift = 12;
-	static const size_t max_value = 1 << shift;
+	static const uint32_t shift = 12;
+	static const uint32_t max_value = 1 << shift;
 	typedef ss_table<short, max_value, -2 * int(KB), 2 * int(KB), 8> SSTable;
 	SSTable table;
 	
@@ -138,53 +174,47 @@ public:
 	MatchModel<HPStationaryModel> match_model;
 
 	// Hash table
-	size_t hash_mask;
-	size_t hash_alloc_size;
+	uint32_t hash_mask;
+	uint32_t hash_alloc_size;
 	MemMap hash_storage;
-	byte *hash_table;
+	uint8_t *hash_table;
 
 	// Automatically zerored out.
-	static const size_t o0size = 0x100;
-	static const size_t o1size = 0x10000;
-	byte *order0, *order1;
+	static const uint32_t o0size = 0x100;
+	static const uint32_t o1size = 0x10000;
+	uint8_t *order0, *order1;
 	
 	// Mixers
-	size_t mixer_mask;
+	uint32_t mixer_mask;
 #if USE_MMX
 	typedef MMXMixer<inputs, 15, 1> CMMixer;
 #else
-	typedef Mixer<int, inputs + 1, 17, 1> CMMixer;
+	typedef Mixer<int, inputs, 17, 1> CMMixer;
 #endif
 	std::vector<CMMixer> mixers;
 	CMMixer *mixer_base;
 
 	// Contexts
-	hash_t base_hashes[inputs];
-	size_t owhash; // Order of sizeof(size_t) hash.
+	uint32_t owhash; // Order of sizeof(uint32_t) hash.
 
 	// Rotating buffer.
 	CyclicBuffer<byte> buffer;
 
 	// Options
-	size_t opt_var;
+	uint32_t opt_var;
 	bool use_word;
 	bool use_match;
 	bool use_sparse;
 	
 	// CM state table.
-	static const size_t num_states = 256;
-	short state_p[num_states];
-	byte state_trans[num_states][2];
+	static const uint32_t num_states = 256;
+	uint8_t state_trans[num_states][2];
 
 	// Huffman preprocessing.
-	static const bool use_huffman = true;
-	static const size_t huffman_len_limit = 16;
+	static const bool use_huffman = false;
+	static const uint32_t huffman_len_limit = 16;
 	Huffman huff;
 	
-	// Debug
-	size_t match_count_;
-	size_t non_match_count_;
-
 	// End of block signal.
 	BitModel end_of_block_mdl;
 	DataProfile profile;
@@ -192,31 +222,31 @@ public:
 	typedef bitContextModel<BitModel, 255> BlockFlagModel;
 	BlockFlagModel block_flag_model;
 
-	typedef bitContextModel<BitModel, (size_t)kProfileCount+1> BlockProfileModel;
-	BlockProfileModel block_profile_models[(size_t)kProfileCount];
-
-	// Division table.
-	DivTable<short, shift, 1024> div_table;
+	typedef bitContextModel<BitModel, (uint32_t)kProfileCount+1> BlockProfileModel;
+	BlockProfileModel block_profile_models[(uint32_t)kProfileCount];
 
 	// ISSE
-	HPStationaryModel isse[256][81][2];
+	APM apm1;
+	APM apm2;
 
 	// SM
 	typedef StationaryModel PredModel;
-	PredModel preds[(size_t)kProfileCount][inputs][256];
+	PredModel preds[(uint32_t)kProfileCount][inputs][256];
+	typedef PredModel PredArray[inputs][256];
+	PredArray* cur_preds;
 	
-	static const size_t eof_char = 126;
+	static const uint32_t eof_char = 126;
 	
-	forceinline size_t hash_lookup(hash_t hash, bool prefetch_addr = use_prefetch) {
+	forceinline uint32_t hash_lookup(hash_t hash, bool prefetch_addr = use_prefetch) {
 		hash &= hash_mask;
-		size_t ret = hash + (o0size + o1size);
+		uint32_t ret = hash + (o0size + o1size);
 		if (prefetch_addr) {	
-			prefetch(hash_table + (ret & (size_t)~(kCacheLineSize - 1)));
+			prefetch(hash_table + (ret & (uint32_t)~(kCacheLineSize - 1)));
 		}
 		return ret;
 	}
 
-	void setMemUsage(size_t usage) {
+	void setMemUsage(uint32_t usage) {
 		archive_header.mem_usage = usage;
 	}
 
@@ -224,24 +254,19 @@ public:
 		opt_var = 0;
 	}
 
-	void setOpt(size_t var) {
+	void setOpt(uint32_t var) {
 		opt_var = var;
 		word_model.setOpt(var);
+		match_model.setOpt(var);
 	}
 
 	void init() {
-		for (size_t i = 0; i < 256; ++i)
-			for (size_t j = 0; j <= 80; ++j)
-				for (size_t k = 0; k < 2; ++k) {
-					auto& m = isse[i][j][k];
-					m.init();
-					m.setP(2 + i * 16);
-				}
 		table.build(0);
-		//table.build(0);
-
+		apm1.init(table, 0x10000);
+		apm2.init(table, 0x100);
+		
 		mixer_mask = 0xFFFF;
-		mixers.resize(static_cast<size_t>(kProfileCount) * (mixer_mask + 1));
+		mixers.resize(static_cast<uint32_t>(kProfileCount) * (mixer_mask + 1));
 		for (auto& mixer : mixers) {
 			mixer.init();
 		}
@@ -255,7 +280,7 @@ public:
 		hash_mask = ((2 * MB) << archive_header.mem_usage) / sizeof(hash_table[0]) - 1;
 		hash_alloc_size = hash_mask + o0size + o1size + kPageSize + (1 << huffman_len_limit);
 		hash_storage.resize(hash_alloc_size); // Add extra space for ctx.
-		order0 = reinterpret_cast<byte*>(hash_storage.getData());
+		order0 = reinterpret_cast<uint8_t*>(hash_storage.getData());
 		order1 = order0 + o0size;
 		hash_table = order0; // Here is where the real hash table starts
 
@@ -273,10 +298,8 @@ public:
 		match_model.init();
 		
 		// Optimization
-		for (size_t i = 0; i < num_states; ++i) {
-			// Pre stretch state map.
-			state_p[i] = table.st(sm.p(i));
-			for (size_t j = 0; j < 2; ++j) {
+		for (uint32_t i = 0; i < num_states; ++i) {
+			for (uint32_t j = 0; j < 2; ++j) {
 				state_trans[i][j] = sm.getTransition(i, j);
 			}
 		}
@@ -292,9 +315,9 @@ public:
 			{1890,1430,689,498,380,292,171,165,155,137,96,101,70,81,92,72,64,85,76,57,100,65,33,44,49,40,69,39,63,29,46,55,41,63,33,38,35,24,33,32,30,28,33,51,66,28,52,2,15,0,0,1,0,797,442,182,242,194,201,183,153,135,124,171,93,85,122,67,71,93,222,32,631,896,980,647,895,164,93,1375,693,566,497,420,414,411,357,356,319,1740,649,683,681,1717,1170,1025,892,834,835,685,1727,1259,1612,1588,1778,1999,2524,2197,2613,2781,2957,2181,1664,1735,1496,1061,913,2521,1524,1935,2155,2733,1500,1282,2906,3093,2337,3337,2392,1647,3113,2435,1885,3332,2614,3384,3394,3437,3606,3432,3669,3473,2090,1598,3186,3578,3713,3533,1936,1525,2864,3689,3624,3782,3769,2293,3974,2654,3953,2693,3088,2302,1967,2558,2865,1563,2458,1805,3255,3700,1576,2840,2649,3017,1472,2467,2018,3157,3024,2338,3011,3377,3361,3394,3515,1715,3653,2480,1370,3695,3593,2812,2561,3709,3827,3780,3787,3799,3850,3817,3773,3863,3943,1946,3922,3946,3954,3952,4089,2316,4095,2515,4087,3067,2107,4095,2986,2806,3420,2255,3818,3269,3614,2293,2541,3370,3583,3572,2147,2845,2940,2999,3591,3507,1981,3072,2950,2851,3629,3890,3891,3867,2290,3846,3637,2856,4009,3996,3989,4032,4007,4023,2937,4008,4095,2048,},
 		};
 
-		for (size_t i = 0;i < static_cast<size_t>(kProfileCount); ++i) {
-			for (size_t j = 0; j < inputs;++j) {
-				for (size_t k = 0; k < num_states; ++k) {
+		for (uint32_t i = 0;i < static_cast<uint32_t>(kProfileCount); ++i) {
+			for (uint32_t j = 0; j < inputs;++j) {
+				for (uint32_t k = 0; k < num_states; ++k) {
 					auto& pr = preds[i][j][k];
 					pr.init();
 					if (fixed_probs) {
@@ -306,11 +329,6 @@ public:
 			}
 		}
 
-		div_table.init();
-		for (size_t i = 0; i < div_table.size(); ++i) {
-			div_table[i] = table.st(div_table[i]);
-		}
-
 		setDataProfile(kBinary);
 		owhash = 0;
 
@@ -320,31 +338,31 @@ public:
 		}
 	}
 
-	forceinline hash_t hashFunc(size_t a, hash_t b) {
+	forceinline uint32_t hashFunc(uint32_t a, uint32_t b) {
 		b += a;
 		b += rotate_left(b, 9);
 		return b ^ (b >> 6);
 	}
 
-	forceinline size_t getOrder0() const {
+	forceinline uint32_t getOrder0() const {
 		return 0;
 	}
 
-	forceinline size_t getOrder1(size_t p0) const {
-		size_t ret = o0size + (p0 << 8);
+	forceinline uint32_t getOrder1(uint32_t p0) const {
+		uint32_t ret = o0size + (p0 << 8);
 		// if (use_prefetch) prefetch(&hash_table[ret]);
 		return ret;
 	}
 
 	forceinline CMMixer* getProfileMixers(DataProfile profile) {
-		return &mixers[static_cast<size_t>(profile) * (mixer_mask + 1)];
+		return &mixers[static_cast<uint32_t>(profile) * (mixer_mask + 1)];
 	}
 
 	void calcMixerBase() {
-		const size_t p0 = static_cast<uint8_t>(buffer[buffer.getPos() - 1]);
-		const size_t p1 = static_cast<uint8_t>(buffer[buffer.getPos() - 2]);
-		size_t mixer_ctx = p0 >> 5;
-		const size_t mm_len = match_model.getLength();
+		const uint32_t p0 = static_cast<uint8_t>(buffer[buffer.getPos() - 1]);
+		const uint32_t p1 = static_cast<uint8_t>(buffer[buffer.getPos() - 2]);
+		uint32_t mixer_ctx = p0 >> 5;
+		const uint32_t mm_len = match_model.getLength();
 		mixer_ctx <<= 3;
 		if (use_word) {
 			auto wlen = word_model.getLength();
@@ -373,115 +391,77 @@ public:
 			}
 		}		
 		mixer_base = getProfileMixers(profile) + (mixer_ctx << 8);
+		cur_preds = &preds[static_cast<uint32_t>(profile)];
 	}
 
-	forceinline byte nextState(byte t, size_t bit, size_t smi = 0) {
+	forceinline byte nextState(byte t, uint32_t bit, uint32_t smi, int learn_rate = 8) {
 		if (!fixed_probs) {
-			preds[0][smi][t].update(bit);
+			(*cur_preds)[smi][t].update(bit, learn_rate);
 		}
 		return state_trans[t][bit];
 	}
 	
-	forceinline int getP(byte state, size_t smi, const short* no_alias st) const {
-		if (fixed_probs) {
-			return preds[0][smi][state].getP();
-		} else {
-			return st[preds[0][smi][state].getP()];
+	forceinline int getP(byte state, uint32_t smi, const short* st) const {
+		int p = (*cur_preds)[smi][state].getP();
+		if (!fixed_probs) {
+			p = st[p];
 		}
+		return p;
 	}
 
 	template <const bool decode, typename TStream>
-	size_t processByte(TStream& stream, size_t c = 0) {
-		size_t base_contexts[inputs]; // Base contexts
-
-		const size_t bpos = buffer.getPos();
-		const size_t blast = bpos - 1; // Last seen char
-		const size_t
-			p0 = static_cast<byte>(owhash >> 0),
-			p1 = static_cast<byte>(owhash >> 8),
-			p2 = static_cast<byte>(owhash >> 16),
-			p3 = static_cast<byte>(owhash >> 24),
-			p4 = static_cast<byte>(buffer[blast - 4]);
-		check(buffer[blast] == p0);
-
-		size_t start = 0;
-		// base_contexts[start++] = getOrder0();
-		base_contexts[start++] = getOrder1(p0); // Order 1
-		if (use_word && start < inputs) {
-			base_contexts[start++] = hash_lookup(word_model.getHash(), false); // Word model
-		}
-		if (use_sparse) {
-			base_contexts[start++] = hash_lookup(hashFunc(p1, 0x4B1BEC1D)); // Order 12
-			// if (opt_var & 2 && start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p2, 0x651A833E)); // Order 23
-			// if (opt_var & 4 && start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p3, 0x4B1BEC1D)); // Order 34
-			base_contexts[start++] = hash_lookup(hashFunc(p2, hashFunc(p1, 0x37220B98))); // Order 12
-			base_contexts[start++] = hash_lookup(hashFunc(p3, hashFunc(p2, 0x651A833E))); // Order 23
-			// if (opt_var & 32 && start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p4, hashFunc(p3, 0x4B1BEC1D))); // Order 34
-		}
-		hash_t h = hashFunc(0x32017044, p0);
-		size_t order = 2;  // Start at order 2.
-		for (;;) {
-			h = hashFunc(buffer[bpos - order], h);
-			if (start >= inputs) {
-				break;
-			}
-			if (order != 5) {
-				base_contexts[start++] = hash_lookup(h);
-			}
-			order++;
-		}
-		match_model.setHash(h);
-		calcMixerBase();
-
-		if (statistics && !decode && match_model.getLength() > 6) {
-			if (match_model.getExpectedChar(buffer) == c) {
-				++match_count_;
-			} else {
-				++non_match_count_;
-			}
-		}
-
+	uint32_t processNibble(TStream& stream, uint32_t c, uint32_t* base_contexts, size_t ctx_add) {
 		// Maximize performance!
-		byte* no_alias ht = hash_table;
+		byte* const ht = hash_table;
 
-		const short* no_alias st = table.getStretchPtr();
-		size_t huff_state = huff.start_state, code = 0;
+		const short* st = table.getStretchPtr();
+		uint32_t huff_state = huff.start_state, code = 0;
 		if (!decode) {
-			const auto& huff_code = huff.getCode(c);
-			code = huff_code.value << (sizeof(size_t) * 8 - huff_code.length);
+			if (use_huffman) {
+				const auto& huff_code = huff.getCode(c);
+				code = huff_code.value << (sizeof(uint32_t) * 8 - huff_code.length);
+			} else {
+				code = c << (sizeof(uint32_t) * 8 - 4);
+			}
 		}
+		size_t base_ctx = 1;
 		for (;;) {
+			size_t ctx;
 			// Get match model prediction.
-			size_t ctx = huff_state;
+			if (use_huffman) {
+				ctx = huff_state;
+			} else {
+				ctx = ctx_add + base_ctx;
+			}
 			int mm_p = match_model.getP(st);
 	
-			byte
-				*no_alias s0 = nullptr, *no_alias s1 = nullptr, *no_alias s2 = nullptr, *no_alias s3 = nullptr, 
-				*no_alias s4 = nullptr, *no_alias s5 = nullptr, *no_alias s6 = nullptr, *no_alias s7 = nullptr;
+			uint8_t
+				*sp0 = nullptr, *sp1 = nullptr, *sp2 = nullptr, *sp3 = nullptr, 
+				*sp4 = nullptr, *sp5 = nullptr, *sp6 = nullptr, *sp7 = nullptr;
+			size_t s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, s5 = 0, s6 = 0, s7 = 0;
 
-			size_t p;
+			uint32_t p;
 			int p0 = 0, p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0;
 			CMMixer* cur_mixer = nullptr;
-			if (inputs > 1) { s1 = &ht[base_contexts[1] ^ ctx]; }
-			if (inputs > 2) { s2 = &ht[base_contexts[2] ^ ctx]; }
-			if (inputs > 3) { s3 = &ht[base_contexts[3] ^ ctx]; }
-			if (inputs > 4) { s4 = &ht[base_contexts[4] ^ ctx]; }
-			if (inputs > 5) { s5 = &ht[base_contexts[5] ^ ctx]; }
-			if (inputs > 6) { s6 = &ht[base_contexts[6] ^ ctx]; }
-			if (inputs > 7) { s7 = &ht[base_contexts[7] ^ ctx]; }
-			if (inputs > 0) { s0 = &ht[base_contexts[0] ^ ctx]; }
+			if (inputs > 1) { sp1 = &ht[base_contexts[1] ^ ctx]; s1 = *sp1; }
+			if (inputs > 2) { sp2 = &ht[base_contexts[2] ^ ctx]; s2 = *sp2; }
+			if (inputs > 3) { sp3 = &ht[base_contexts[3] ^ ctx]; s3 = *sp3; }
+			if (inputs > 4) { sp4 = &ht[base_contexts[4] ^ ctx]; s4 = *sp4; }
+			if (inputs > 5) { sp5 = &ht[base_contexts[5] ^ ctx]; s5 = *sp5; }
+			if (inputs > 6) { sp6 = &ht[base_contexts[6] ^ ctx]; s6 = *sp6; }
+			if (inputs > 7) { sp7 = &ht[base_contexts[7] ^ ctx]; s7 = *sp7; }
+			if (inputs > 0 && mm_p == 0) { sp0 = &ht[base_contexts[0] ^ ctx]; s0 = *sp0; }
 
-			if (s0 != nullptr) {
-				assert(s0 >= ht && s0 <= ht + hash_alloc_size);
+			if (sp0 != nullptr) {
+				assert(sp0 >= ht && sp0 <= ht + hash_alloc_size);
 			}
-			assert(s1 >= ht && s1 <= ht + hash_alloc_size);
-			assert(s2 >= ht && s2 <= ht + hash_alloc_size);
-			assert(s3 >= ht && s3 <= ht + hash_alloc_size);
-			assert(s4 >= ht && s4 <= ht + hash_alloc_size);
-			assert(s5 >= ht && s5 <= ht + hash_alloc_size);
+			assert(sp1 >= ht && sp1 <= ht + hash_alloc_size);
+			assert(sp2 >= ht && sp2 <= ht + hash_alloc_size);
+			assert(sp3 >= ht && sp3 <= ht + hash_alloc_size);
+			assert(sp4 >= ht && sp4 <= ht + hash_alloc_size);
+			assert(sp5 >= ht && sp5 <= ht + hash_alloc_size);
 
 			cur_mixer = &mixer_base[ctx];
-
 #if USE_MMX
 			__m128i wa = _mm_cvtsi32_si128(static_cast<unsigned short>(((inputs > 0) ? (mm_p ? mm_p : getP(*s0, 0, st)) : 0)));
 			__m128i wb = _mm_cvtsi32_si128((inputs > 1) ? (int(getP(*s1, 1, st)) << 16) : 0);
@@ -495,55 +475,65 @@ public:
 			int stp = cur_mixer->p(wp);
 			int mixer_p = table.sq(stp); // Mix probabilities.
 #else
-			if (inputs > 0) p0 = getP(*s0, 0, st);
-			if (inputs > 1) p1 = getP(*s1, 1, st);
-			if (inputs > 2) p2 = getP(*s2, 2, st);
-			if (inputs > 3) p3 = getP(*s3, 3, st);
-			if (inputs > 4) p4 = getP(*s4, 4, st);
-			if (inputs > 5) p5 = getP(*s5, 5, st);
-			if (inputs > 6) p6 = getP(*s6, 6, st);
-			if (inputs > 7) p7 = getP(*s7, 7, st);
-			p6 = mm_p;
+			if (inputs > 0) p0 = mm_p ? mm_p : getP(s0, 0, st);
+			if (inputs > 1) p1 = getP(s1, 1, st);
+			if (inputs > 2) p2 = getP(s2, 2, st);
+			if (inputs > 3) p3 = getP(s3, 3, st);
+			if (inputs > 4) p4 = getP(s4, 4, st);
+			if (inputs > 5) p5 = getP(s5, 5, st);
+			if (inputs > 6) p6 = getP(s6, 6, st);
+			if (inputs > 7) p7 = getP(s7, 7, st);
+			// p6 = mm_p;
 
 			int stp = cur_mixer->p(p0, p1, p2, p3, p4, p5, p6, p7);
-			//int stp = (p0 + p1 + p2 + p3 + p4 + p5 + p6 + p7) / 4;
 			int mixer_p = table.sq(stp); // Mix probabilities.
 #endif
-			p = mixer_p; // stp;
+			p = mixer_p;
+			// auto& pr = isse[owhash & 0xFF][std::min(std::max(stp + 2048, 0), 4095)];
+			// p = std::max(pr.getP(), 1U);
+			// p = (p + apm1.pp(table, p, ctx * 256 + (owhash & 0xFF))) / 2;
+			// p = (p + apm2.pp(table, p, ctx)) / 2;
+			// p = std::max(p, 1U);
+			// p = std::min(std::max(p, 1U), 4095U);
+			// p = std::max(p, 1U);
+			// p = mixer_p; // stp;
 			// p = std::max(mixer_p / 8 * 8, 1);
 			// auto& mdl = isse[mixer_p / 16][match_model.getLength()][match_model.getExpectedBit()];
-
-			size_t bit;
+			
+			uint32_t bit;
 			if (decode) { 
 				bit = ent.getDecodedBit(p, shift);
 			} else {
-				bit = code >> (sizeof(size_t) * 8 - 1);
+				bit = code >> (sizeof(uint32_t) * 8 - 1);
 				code <<= 1;
 				ent.encode(stream, bit, p, shift);
 			}
 
+			// apm1.update(bit);
+			// apm2.update(bit);
+			// pr.update(bit, 10);
 			// mdl.update(bit);
 
 #if USE_MMX
-			bool ret = cur_mixer->update(wp, mixer_p, bit);
+			const bool ret = cur_mixer->update(wp, mixer_p, bit);
 #else
-			bool ret = cur_mixer->update(p0, p1, p2, p3, p4, p5, p6, p7, mixer_p, bit);
+			const bool ret = cur_mixer->update(p0, p1, p2, p3, p4, p5, p6, p7, mixer_p, bit, 12);
 #endif
 
 			if (statistics) {
 				// Returns false if we skipped the update due to a low error,
 				// should happen frequently on highly compressible files.
-				++mixer_skip[(size_t)ret];
+				++mixer_skip[static_cast<uint32_t>(ret)];
 			}
 			
-			if (inputs > 0) *s0 = nextState(*s0, bit, 0);
-			if (inputs > 1) *s1 = nextState(*s1, bit, 1);
-			if (inputs > 2) *s2 = nextState(*s2, bit, 2);
-			if (inputs > 3) *s3 = nextState(*s3, bit, 3);
-			if (inputs > 4) *s4 = nextState(*s4, bit, 4);
-			if (inputs > 5) *s5 = nextState(*s5, bit, 5);
-			if (inputs > 6) *s6 = nextState(*s6, bit, 6);
-			if (inputs > 7) *s7 = nextState(*s7, bit, 7);
+			if (inputs > 0 && mm_p == 0) *sp0 = nextState(s0, bit, 0);
+			if (inputs > 1) *sp1 = nextState(s1, bit, 1);
+			if (inputs > 2) *sp2 = nextState(s2, bit, 2);
+			if (inputs > 3) *sp3 = nextState(s3, bit, 3);
+			if (inputs > 4) *sp4 = nextState(s4, bit, 4);
+			if (inputs > 5) *sp5 = nextState(s5, bit, 5);
+			if (inputs > 6) *sp6 = nextState(s6, bit, 6);
+			if (inputs > 7) *sp7 = nextState(s7, bit, 7);
 
 			match_model.updateBit(bit);
 
@@ -551,14 +541,87 @@ public:
 			if (decode) {
 				ent.Normalize(stream);
 			}
-			huff_state = huff.getTransition(huff_state, bit);
-			if (huff.isLeaf(huff_state)) {
+			if (use_huffman) {
+				huff_state = huff.getTransition(huff_state, bit);
+				if (huff.isLeaf(huff_state)) {
+					return huff_state;
+				}
+			} else {
+				base_ctx = base_ctx * 2 + bit;
+				if (base_ctx >= 16) break;
+			}
+		}
+		return base_ctx ^ 16;
+	}
+
+	template <const bool decode, typename TStream>
+	uint32_t processByte(TStream& stream, uint32_t c = 0) {
+		uint32_t base_contexts[inputs]; // Base contexts
+
+		const size_t bpos = buffer.getPos();
+		const size_t blast = bpos - 1; // Last seen char
+		const size_t
+			p0 = static_cast<byte>(owhash >> 0),
+			p1 = static_cast<byte>(owhash >> 8),
+			p2 = static_cast<byte>(owhash >> 16),
+			p3 = static_cast<byte>(owhash >> 24),
+			p4 = static_cast<byte>(buffer[blast - 4]);
+
+		size_t start = 0;
+		if (inputs > 6) {
+			base_contexts[start++] = getOrder0();
+		}
+		base_contexts[start++] = getOrder1(p0); // Order 1
+		const bool cur_use_word = use_word;
+		if (use_word) {
+			if (start < inputs) {
+				base_contexts[start++] = hash_lookup(word_model.getHash(), false); // Word model
+			}
+		}
+		if (use_sparse) {
+			if (start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p1, 0x4B1BEC1D)); // Order 12
+			// if (opt_var & 2 && start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p2, 0x651A833E)); // Order 23
+			// if (opt_var & 4 && start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p3, 0x4B1BEC1D)); // Order 34
+			if (start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p2, hashFunc(p1, 0x37220B98))); // Order 12
+			if (start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p3, hashFunc(p2, 0x651A833E))); // Order 23
+			// if (opt_var & 32 && start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p4, hashFunc(p3, 0x4B1BEC1D))); // Order 34
+		}
+		uint32_t h = hashFunc(p0, 0x32017044);
+		uint32_t order = 2;  // Start at order 2.
+		for (;;) {
+			h = hashFunc(buffer[bpos - order], h);
+			if (start >= inputs) {
 				break;
+			}
+			if (!cur_use_word || order != 5) {
+				base_contexts[start++] = hash_lookup(h);
+			}
+			order++;
+		}
+		match_model.setHash(h ^ owhash);
+		calcMixerBase();
+
+		if (statistics && !decode && match_model.getLength() > 6) {
+			if (match_model.getExpectedChar(buffer) == c) {
+				++match_count_;
+			} else {
+				++non_match_count_;
 			}
 		}
 
-		if (decode) {
-			c = huff.getChar(huff_state);
+		size_t huff_state = 0;
+		if (use_huffman) {
+			huff_state = processNibble<decode>(stream, c, base_contexts, 0);
+			if (decode) {
+				c = huff.getChar(huff_state);
+			}
+		} else {
+			size_t n1 = processNibble<decode>(stream, c >> 4, base_contexts, 0);
+			calcMixerBase();
+			size_t n2 = processNibble<decode>(stream, c & 0xF, base_contexts, 16 * (n1 + 3));
+			if (decode) {
+				c = n2 | (n1 << 4);
+			}
 		}
 
 		return c;
@@ -586,7 +649,7 @@ public:
 		}
 	};
 
-	void update(char c) {
+	void update(uint32_t c) {
 		if (use_word) {
 			word_model.updateUTF(c);
 			if (word_model.getLength()) {
@@ -597,8 +660,8 @@ public:
 		if (use_match) {
 			match_model.update(buffer);
 			if (match_model.getLength()) {
-				size_t expected_char = match_model.getExpectedChar(buffer);
-				size_t expected_bits = use_huffman ? huff.getCode(expected_char).length : 8;
+				uint32_t expected_char = match_model.getExpectedChar(buffer);
+				uint32_t expected_bits = use_huffman ? huff.getCode(expected_char).length : 8;
 				if (use_huffman) expected_char = huff.getCode(expected_char).value;
 				match_model.updateExpectedCode(expected_char, expected_bits);
 			}
@@ -611,209 +674,17 @@ public:
 	template <typename TStream>
 	void readSubBlock(TStream& sin, SubBlockHeader& block) {
 		block.flags = block_flag_model.decode(ent, sin);
-		block.profile = (DataProfile)block_profile_models[(size_t)profile].decode(ent, sin);
+		block.profile = (DataProfile)block_profile_models[(uint32_t)profile].decode(ent, sin);
 	}
 
 	template <typename TStream>
 	void writeSubBlock(TStream& sout, const SubBlockHeader& block) {
 		block_flag_model.encode(ent, sout, block.flags);
-		block_profile_models[(size_t)profile].encode(ent, sout, (size_t)block.profile);
+		block_profile_models[(uint32_t)profile].encode(ent, sout, (uint32_t)block.profile);
 	}
 
-	void compress(Stream* in_stream, Stream* out_stream) {
-		BufferedStreamReader<4 * KB> sin(in_stream);
-		BufferedStreamWriter<4 * KB> sout(out_stream);
-		assert(in_stream != nullptr);
-		assert(out_stream != nullptr);
-		Detector detector;
-		detector.init();
-
-		match_count_ = non_match_count_ = 0;
-
-		// Compression profiles.
-		std::vector<size_t> profile_counts((size_t)kProfileCount, 0);
-		std::vector<size_t> profile_len((size_t)kProfileCount, 0);
-
-		// Start by writing out archive header.
-		archive_header.write(sout);
-		init();
-		ent.init();
-
-		// TODO: Disable if entropy is too high?
-		if (use_huffman)  {
-			clock_t start = clock();
-			size_t freqs[256] = { 1 };
-			std::cout << "Building huffman tree" << std::endl;
-			if (false) {
-				for (;;) {
-					int c = sin.get();
-					if (c == EOF) break;
-					++freqs[c];
-				}
-			}
-			auto* tree = Huffman::buildTreePackageMerge(freqs, 256, huffman_len_limit);
-			tree->printRatio("LL");
-			Huffman::writeTree(ent, sout, tree, 256, huffman_len_limit);
-			huff.build(tree);	
-			std::cout << "Building huffman tree took: " << clock() - start << " MS" << std::endl;
-		}
-		size_t freqs[kProfileCount][256] = { 0 };
-		detector.fill(sin);
-		for (;;) {
-			if (!detector.size()) break;
-
-			// Block header
-			SubBlockHeader block;
-			// Initial detection.
-			block.profile = detector.detect();
-			++profile_counts[(size_t)block.profile];
-			writeSubBlock(sout, block);
-			setDataProfile(block.profile);
-
-			// Code a block.
-			size_t block_size = 0;
-			for (;;++block_size) {
-				detector.fill(sin);
-				DataProfile new_profile = detector.detect();
-				bool is_end_of_block = new_profile != block.profile;
-				int c;
-				if (!is_end_of_block) {
-					c = detector.read();
-					is_end_of_block = c == EOF;
-				}
-				if (is_end_of_block) {
-					c = eof_char;
-				}
-				freqs[block.profile][(byte)c]++;
-				processByte<false>(sout, c);
-				update(c);
-				if (UNLIKELY(c == eof_char)) {
-					ent.encode(sout, is_end_of_block, end_of_block_mdl.getP(), shift);
-					end_of_block_mdl.update(is_end_of_block);
-					if (is_end_of_block) break;
-				}
-			}
-			profile_len[(size_t)block.profile] += block_size;
-		}
-		_mm_empty();
-		std::cout << std::endl;
-
-		// Encode the end of block subblock.
-		SubBlockHeader eof_block;
-		eof_block.profile = kEOF;
-		writeSubBlock(sout, eof_block);
-		ent.flush(sout);
-		
-		// TODO: Put in statistics??
-		uint64_t total = 0;
-		for (size_t i = 0; i < kProfileCount; ++i) {
-			auto cnt = profile_counts[i];
-			if (cnt) {
-				std::cout << (DataProfile)i << " : " << cnt << "(" << profile_len[i] / KB << "KB)" << std::endl;
-			}
-			if (false) {
-				Huffman h2;
-				auto* tree = h2.buildTreePackageMerge(freqs[i]);
-				tree->printRatio("Tree");
-				total += tree->getCost() / 8;
-			}
-		}
-		if (false) {
-			std::cout << "Total huffman: " << total << std::endl;
-		}
-
-		std::cout << skip_count << std::endl;
-		std::cout << "match " << match_count_ << " non match " << non_match_count_ << std::endl;
-		if (statistics) {
-			// Dump weights
-			std::ofstream fout("probs.txt");
-			for (size_t i = 0; i < inputs; ++i) {
-				fout << "{";
-				for (size_t j = 0; j < 256; ++j) fout << preds[0][i][j].getP() << ",";
-				fout << "}," << std::endl;
-			}
-
-			// Print average weights so that we find out which contexts are good and which are not.
-			for (size_t cur_p = 0; cur_p < static_cast<size_t>(kProfileCount); ++cur_p) {
-				auto cur_profile = (DataProfile)cur_p;
-				CMMixer* mixers = getProfileMixers(cur_profile);
-				std::cout << "Mixer weights for profile " << cur_profile << std::endl;
-
-				for (size_t i = 0; i < 256; ++i) {
-					double weights[inputs+2] = { 0 };
-					size_t count = 0;
-					for (size_t j = 0; j < 256; ++j) {
-						// Only mixers which have been used at least a few times.
-						auto& m = mixers[i * 256 + j];
-						if (m.getLearn() < 30) {
-							for (size_t k = 0; k < m.size(); ++k) {
-								weights[k] += double(m.getWeight(k)) / double(1 << m.shift());
-							}
-							++count;
-						}
-					}
-					if (count != 0) {
-						std::cout << "Weights " << i << ":";
-						for (auto& w : weights) std::cout << w / double(count) << " ";
-						std::cout << std::endl;
-					}
-				}
-			}
-			// State count.
-			size_t z = 0, nz = 0;
-			for (size_t i = 0;i < hash_mask + 1;++i) {
-				if (hash_table[i]) ++nz;
-				else ++z;
-			}
-			std::cout << "zero " << z << " nz " << nz << std::endl;
-			std::cout << "mixer skip " << mixer_skip[0] << " " << mixer_skip[1] << std::endl;
-		}
-	}
-
-	void decompress(Stream* in_stream, Stream* out_stream) {
-		BufferedStreamReader<4 * KB> sin(in_stream);
-		BufferedStreamWriter<4 * KB> sout(out_stream);
-		assert(in_stream != nullptr);
-		assert(out_stream != nullptr);
-		// Read the header from the input stream.
-		archive_header.read(sin);
-		// Check magic && version.
-		if (archive_header.magic[0] != 'M' ||
-			archive_header.magic[1] != 'C' ||
-			archive_header.magic[2] != 'M' ||
-			archive_header.version != version) {
-			return; // TODO: Fatal error!
-		}
-		ProgressMeter meter(false);
-		init();
-		ent.initDecoder(sin);
-		if (use_huffman) {
-			auto* tree = Huffman::readTree(ent, sin, 256, huffman_len_limit);
-			huff.build(tree);
-			delete tree;
-		}
-		for (;;) {
-			SubBlockHeader block;
-			readSubBlock(sin, block);
-			if (block.profile == kEOF) break;
-			setDataProfile(block.profile);
-			
-			for (;;) {
-				size_t c = processByte<true>(sin);
-				update(c);
-
-				if (c == eof_char) {
-					int eob = ent.decode(sin, end_of_block_mdl.getP(), shift);
-					end_of_block_mdl.update(eob);
-					if (eob) {
-						break; // Hit end of block, go to next block.
-					}
-				}
-
-				sout.put(c);
-			}
-		}
-	}	
+	void compress(Stream* in_stream, Stream* out_stream);
+	void decompress(Stream* in_stream, Stream* out_stream);	
 };
 
 #endif

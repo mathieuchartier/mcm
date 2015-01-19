@@ -40,19 +40,19 @@
 #include "Util.hpp"
 #include "WordModel.hpp"
 
-template <const size_t level = 6>
+template <const uint32_t level = 6>
 class TurboCM : public Compressor {
 public:
 	// SS table
-	static const size_t shift = 12;
-	static const size_t max_value = 1 << shift;
+	static const uint32_t shift = 12;
+	static const uint32_t max_value = 1 << shift;
 	typedef ss_table<short, max_value, -2 * int(KB), 2 * int(KB), 8> SSTable;
 	SSTable table;
 	typedef fastBitModel<int, shift, 9, 30> StationaryModel;
 	static const int kEOFChar = 233;
 
 	// Contexts
-	uint32_t owhash; // Order of sizeof(size_t) hash.
+	uint32_t owhash; // Order of sizeof(uint32_t) hash.
 
 	// Rotating buffer.
 	CyclicBuffer<byte> buffer;
@@ -64,38 +64,52 @@ public:
 	std::vector<StationaryModel> isse2;
 
 	// CM state table.
-	static const size_t num_states = 256;
-	short state_p[num_states];
+	static const uint32_t num_states = 256;
 	byte state_trans[num_states][2];
 
 	// Fixed models
 	byte order0[256];
 	byte order1[256 * 256];
-	byte order2[256 * 256];
 
 	// Hash table
-	size_t hash_mask;
+	uint32_t hash_mask;
 	MemMap hash_storage;
 	byte* hash_table;
+
+	// Learn rate
+	uint32_t byte_count;
 
 	// Range encoder
 	Range7 ent;
 
 	// Memory usage
-	size_t mem_usage;
+	uint32_t mem_usage;
 
-	TurboCM() : mem_usage(0) {
+	// Word model.
+	WordModel word_model;
+
+	// Optimization variable.
+	uint32_t opt_var;
+
+	// Mixer
+	typedef Mixer<int, 4, 17, 1> CMMixer;
+	CMMixer mixer;
+
+	TurboCM() : mem_usage(0), opt_var(0) {
 	}
 
 
-	void setMemUsage(int level) {
+	void setOpt(uint32_t var) {
+		opt_var = var;
+	}
+
+	void setMemUsage(uint32_t level) {
 		mem_usage = level;
 	}
 
 	void init() {
 		for (auto& c : order0) c = 0;
 		for (auto& c : order1) c = 0;
-		for (auto& c : order2) c = 0;
 		table.build(0);
 	
 		hash_mask = ((2 * MB) << mem_usage) / sizeof(hash_table[0]) - 1;
@@ -107,10 +121,9 @@ public:
 		sm.build();
 		
 		// Optimization
-		for (size_t i = 0; i < num_states; ++i) {
+		for (uint32_t i = 0; i < num_states; ++i) {
 			// Pre stretch state map.
-			state_p[i] = table.st(sm.p(i));
-			for (size_t j = 0; j < 2; ++j) {
+			for (uint32_t j = 0; j < 2; ++j) {
 				state_trans[i][j] = sm.getTransition(i, j);
 			}
 		}
@@ -126,8 +139,8 @@ public:
 			{1890,1430,689,498,380,292,171,165,155,137,96,101,70,81,92,72,64,85,76,57,100,65,33,44,49,40,69,39,63,29,46,55,41,63,33,38,35,24,33,32,30,28,33,51,66,28,52,2,15,0,0,1,0,797,442,182,242,194,201,183,153,135,124,171,93,85,122,67,71,93,222,32,631,896,980,647,895,164,93,1375,693,566,497,420,414,411,357,356,319,1740,649,683,681,1717,1170,1025,892,834,835,685,1727,1259,1612,1588,1778,1999,2524,2197,2613,2781,2957,2181,1664,1735,1496,1061,913,2521,1524,1935,2155,2733,1500,1282,2906,3093,2337,3337,2392,1647,3113,2435,1885,3332,2614,3384,3394,3437,3606,3432,3669,3473,2090,1598,3186,3578,3713,3533,1936,1525,2864,3689,3624,3782,3769,2293,3974,2654,3953,2693,3088,2302,1967,2558,2865,1563,2458,1805,3255,3700,1576,2840,2649,3017,1472,2467,2018,3157,3024,2338,3011,3377,3361,3394,3515,1715,3653,2480,1370,3695,3593,2812,2561,3709,3827,3780,3787,3799,3850,3817,3773,3863,3943,1946,3922,3946,3954,3952,4089,2316,4095,2515,4087,3067,2107,4095,2986,2806,3420,2255,3818,3269,3614,2293,2541,3370,3583,3572,2147,2845,2940,2999,3591,3507,1981,3072,2950,2851,3629,3890,3891,3867,2290,3846,3637,2856,4009,3996,3989,4032,4007,4023,2937,4008,4095,2048,},
 		};
 
-		for (size_t j = 0; j < 8;++j) {
-			for (size_t k = 0; k < num_states; ++k) {
+		for (uint32_t j = 0; j < 8;++j) {
+			for (uint32_t k = 0; k < num_states; ++k) {
 				auto& pr = probs[j][k];
 				pr.init();
 				pr.setP(std::max(initial_probs[j][k], static_cast<unsigned short>(1)));
@@ -141,77 +154,93 @@ public:
 
 		eof_model.init();
 
+		word_model.init();
+
+		mixer.init();
+
 		owhash = 0;
+		byte_count = 0;
 	}
 
-	forceinline byte nextState(byte t, size_t bit, size_t smi = 0) {
-		probs[smi][t].update(bit);
+	forceinline byte nextState(byte t, uint32_t bit, uint32_t smi = 0) {
 		return state_trans[t][bit];
 	}
 
 	template <const bool kDecode, typename TStream>
-	size_t processByte(TStream& stream, size_t c = 0) {
-		size_t p0 = owhash & 0xFF;
+	uint32_t processByte(TStream& stream, uint32_t c = 0) {
+		uint32_t p0 = owhash & 0xFF;
 		byte* o0ptr = &order0[0];
 		byte* o1ptr = &order1[p0 << 8];
-		size_t o2h = ((owhash & 0xFFFF) * 256) & hash_mask;
-		size_t o3h = ((owhash & 0xFFFFFF) * 98765431) & hash_mask;
-		size_t o4h = (owhash * 798765431) & hash_mask;
+		uint32_t o2h = ((owhash & 0xFFFF) * 256) & hash_mask;
+		uint32_t o3h = ((owhash & 0xFFFFFF) * 3413763181) & hash_mask;
+		uint32_t o4h = (owhash * 798765431) & hash_mask;
+
+		uint32_t learn_rate = 4 +
+			(byte_count > KB) +
+			(byte_count > 16 * KB) +
+			(byte_count > 256 * KB) +
+			(byte_count > MB);
 
 		const short* no_alias st = table.getStretchPtr();
-		size_t code = 0;
+		uint32_t code = 0;
 		if (!kDecode) {
-			code = c << (sizeof(size_t) * 8 - 8);
+			code = c << (sizeof(uint32_t) * 8 - 8);
 		}
+		uint32_t len = word_model.getLength();
 		int ctx = 1;
-		for (size_t i = 0; i < 8; ++i) {
+		for (uint32_t i = 0; i < 8; ++i) {
 			byte
 				*no_alias s0 = nullptr, *no_alias s1 = nullptr, *no_alias s2 = nullptr, *no_alias s3 = nullptr, 
 				*no_alias s4 = nullptr, *no_alias s5 = nullptr, *no_alias s6 = nullptr, *no_alias s7 = nullptr;
 
 			s0 = &o1ptr[ctx];
 			s1 = &hash_table[o2h ^ ctx];
-			s2 = &hash_table[o3h ^ ctx];
-			s3 = &hash_table[o4h ^ ctx];
+			s2 = &hash_table[o4h ^ ctx];
+			// s3 = len > 4 ? &hash_table[(word_model.getHash() & hash_mask) ^ ctx] : &hash_table[o3h ^ ctx];
+			s3 = &hash_table[(word_model.getHash() & hash_mask) ^ ctx];
 
 			auto& pr0 = probs[0][*s0];
 			auto& pr1 = probs[1][*s1];
 			auto& pr2 = probs[2][*s2];
 			auto& pr3 = probs[3][*s3];
+#if 0
+			uint32_t p = table.sq(
+				(
+				3 * table.st(pr0.getP()) +
+				3 * table.st(pr1.getP()) +
+				7 * table.st(pr2.getP()) +
+				8 * table.st(pr3.getP())) / 16);
+#elif 0
+			int p0 = table.st(pr0.getP());
+			int p1 = table.st(pr1.getP());
+			int p2 = table.st(pr2.getP());
+			int p3 = table.st(pr3.getP());
+			int p = table.sq(mixer.p(p0, p1, p2, p3));
+#else
+			int p = table.sq((table.st(pr0.getP()) + table.st(pr1.getP()) + table.st(pr2.getP()) + table.st(pr3.getP())) / 4) ;
+#endif
 
-			size_t p;
-			if (true || *s3) {
-				p = pr3.getP();
-			} else if (*s2) {
-				p = pr2.getP();
-			} else if (*s1) {
-				p = pr1.getP();
-			} else {
-				p = pr0.getP();
-			}
-
-			p = std::max(p, 1U);
-
-			size_t bit;
+			uint32_t bit;
 			if (kDecode) { 
 				bit = ent.getDecodedBit(p, shift);
 			} else {
-				bit = code >> (sizeof(size_t) * 8 - 1);
+				bit = code >> (sizeof(uint32_t) * 8 - 1);
 				code <<= 1;
 				ent.encode(stream, bit, p, shift);
 			}
 
 			ctx = ctx * 2 + bit;
 
-			pr0.update(bit);
-			pr1.update(bit);
-			pr2.update(bit);
-			pr3.update(bit);
-			// *s0 = nextState(*s0, bit, 0);
-			// *s1 = nextState(*s1, bit, 1);
-			// *s2 = nextState(*s2, bit, 2);
+			// mixer.update(p0, p1, p2, p3, 0, 0, 0, 0, p, bit);
+			pr0.update(bit, learn_rate);
+			pr1.update(bit, learn_rate);
+			pr2.update(bit, learn_rate);
+			pr3.update(bit, learn_rate);
+			*s0 = nextState(*s0, bit, 0);
+			*s1 = nextState(*s1, bit, 1);
+			*s2 = nextState(*s2, bit, 2);
 			*s3 = nextState(*s3, bit, 3);
-
+			
 			// Encode the bit / decode at the last second.
 			if (kDecode) {
 				ent.Normalize(stream);
@@ -223,6 +252,8 @@ public:
 
 	void update(char c) {
 		owhash = (owhash << 8) | static_cast<byte>(c);
+		word_model.updateUTF(c);
+		++byte_count;
 	}
 
 	void compress(Stream* in_stream, Stream* out_stream) {

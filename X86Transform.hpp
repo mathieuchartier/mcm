@@ -28,14 +28,14 @@
 
 class X86Transform : public Transform {
 	bool inverse;
-	size_t base;
+	uint32_t base;
 public:
 	void init() {
 		inverse = false;
 		base = 0;
 	}
 
-	virtual size_t attempt_transform() {
+	virtual uint32_t attempt_transform() {
 		byte c = lookahead.front();
 		if ((c & 0xFE) == 0xE8) {
 			output.push(c);

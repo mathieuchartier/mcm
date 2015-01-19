@@ -43,10 +43,15 @@ MemMap::~MemMap() {
 	release();
 }
 
-void MemMap::resize(size_t bytes) {
+void MemMap::resize(uint32_t bytes) {
+	if (bytes == size) {
+		std::fill(reinterpret_cast<uint8_t*>(storage), reinterpret_cast<uint8_t*>(storage) + size, 0);
+		return;
+	}
 	release();
+	size = bytes;
 #if WIN32
-	storage = (void*)VirtualAlloc(nullptr, bytes, MEM_COMMIT, PAGE_READWRITE);
+	storage = (void*)VirtualAlloc(nullptr, size, MEM_COMMIT, PAGE_READWRITE);
 #elif USE_MALLOC
 	storage = std::calloc(1, bytes);
 #else

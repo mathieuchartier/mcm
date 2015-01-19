@@ -6,83 +6,97 @@
 class WordModel {
 public:
 	// Hashes.
-	hash_t prev;
-	hash_t h1, h2;
+	uint32_t prev;
+	uint32_t h1, h2;
 
 	// UTF decoder.
 	UTF8Decoder<false> decoder;
 
 	// Length of the model.
-	size_t len;
+	uint32_t len;
 
 	// Transform table.
-	static const size_t transform_table_size = 256;
-	size_t transform[transform_table_size];
+	static const uint32_t transform_table_size = 256;
+	uint32_t transform[transform_table_size];
 
-	size_t opt_var;
-	void setOpt(size_t n) {
+	uint32_t opt_var;
+	void setOpt(uint32_t n) {
 		opt_var = n;
 	}
 
-	WordModel() { 
-		size_t index = 0;
-		for (auto& t : transform) t = transform_table_size;
-		for (size_t i = 'a'; i <= 'z'; ++i) {
-			transform[i] = index++;
-		}
-		for (size_t i = 'A'; i <= 'Z'; ++i) {
-			transform[i] = transform[(byte)lower_case((char)i)];
-		}
-			
-		// Word model transform.
-		// transform['_'] = index++;
-		transform['À'] = transform['à'] = index++;
-		transform['Á'] = transform['á'] = index++;
-		transform['Â'] = transform['â'] = index++;
-		transform['Ã'] = transform['ã'] = index++;
-		transform['Ä'] = transform['ä'] = index++;
-		transform['Å'] = transform['å'] = index++;
-		transform['Æ'] = transform['æ'] = index++;
+	forceinline uint32_t& trans(char c) {
+		uint32_t index = (uint32_t)(uint8_t)c;
+		check(index < transform_table_size);
+		return transform[index];
+	}
 
-		transform['Ç'] = transform['ç'] = index++;
-
-		transform['È'] = transform['è'] = index++;
-		transform['É'] = transform['é'] = index++;
-		transform['Ê'] = transform['ê'] = index++;
-		transform['Ë'] = transform['ë'] = index++;
-
-		transform['Ì'] = transform['ì'] = index++;
-		transform['Í'] = transform['í'] = index++;
-		transform['Î'] = transform['î'] = index++;
-		transform['Ï'] = transform['ï'] = index++;
-
-		transform['È'] = transform['è'] = index++;
-		transform['É'] = transform['é'] = index++;
-		transform['Ê'] = transform['ê'] = index++;
-		transform['Ë'] = transform['ë'] = index++;
-
-		transform['Ð'] = index++;
-		transform['ð'] = index++;
-		transform['Ñ'] = transform['ñ'] = index++;
-
-		transform['Ò'] = transform['ò'] = index++;
-		transform['Ó'] = transform['ó'] = index++;
-		transform['Ô'] = transform['ô'] = index++;
-		transform['Ö'] = transform['ö'] = index++;
-		transform['Õ'] = transform['õ'] = index++;
-
-		transform['Ò'] = transform['ò'] = index++;
-		transform['Ó'] = transform['ó'] = index++;
-		transform['Ô'] = transform['ô'] = index++;
-		transform['Ö'] = transform['ö'] = index++;
-			
-		transform['Ù'] = transform['ù'] = index++;
-		transform['Ú'] = transform['ú'] = index++;
-		transform['Û'] = transform['û'] = index++;
-		transform['Ü'] = transform['ü'] = index++;
+	WordModel() : opt_var(0) { 
 	}
 
 	void init() {
+		uint32_t index = 0;
+		for (auto& t : transform) t = transform_table_size;
+		for (uint32_t i = 'a'; i <= 'z'; ++i) {
+			transform[i] = index++;
+		}
+		for (uint32_t i = 'A'; i <= 'Z'; ++i) {
+			transform[i] = transform[(byte)lower_case((char)i)];
+		}
+#if 0
+		for (uint32_t i = '0'; i <= '9'; ++i) {
+			transform[i] = index++;
+		}
+#endif
+		// 34 38
+		trans('"') = index++;
+		trans('&') = index++;
+		trans('<') = index++;
+		trans('{') = index++;
+		trans('À') = trans('à') = index++;
+		trans('Á') = trans('á') = index++;
+		trans('Â') = trans('â') = index++;
+		trans('Ã') = trans('ã') = index++;
+		trans('Ä') = trans('ä') = index++;
+		trans('Å') = trans('å') = index++;
+		trans('Æ') = trans('æ') = index++;
+
+		trans('Ç') = trans('ç') = index++;
+
+		trans('È') = trans('è') = index++;
+		trans('É') = trans('é') = index++;
+		trans('Ê') = trans('ê') = index++;
+		trans('Ë') = trans('ë') = index++;
+
+		trans('Ì') = trans('ì') = index++;
+		trans('Í') = trans('í') = index++;
+		trans('Î') = trans('î') = index++;
+		trans('Ï') = trans('ï') = index++;
+
+		trans('È') = trans('è') = index++;
+		trans('É') = trans('é') = index++;
+		trans('Ê') = trans('ê') = index++;
+		trans('Ë') = trans('ë') = index++;
+
+		trans('Ð') = index++;
+		trans('ð') = index++;
+		trans('Ñ') = trans('ñ') = index++;
+
+		trans('Ò') = trans('ò') = index++;
+		trans('Ó') = trans('ó') = index++;
+		trans('Ô') = trans('ô') = index++;
+		trans('Ö') = trans('ö') = index++;
+		trans('Õ') = trans('õ') = index++;
+
+		trans('Ò') = trans('ò') = index++;
+		trans('Ó') = trans('ó') = index++;
+		trans('Ô') = trans('ô') = index++;
+		trans('Ö') = trans('ö') = index++;
+			
+		trans('Ù') = trans('ù') = index++;
+		trans('Ú') = trans('ú') = index++;
+		trans('Û') = trans('û') = index++;
+		trans('Ü') = trans('ü') = index++;
+
 		len = 0;
 		prev = 0;
 		reset();
@@ -90,25 +104,25 @@ public:
 	}
 
 	forceinline void reset() {
-		h1 = 0x9FD33A52 * 5;
-		h2 = 0x21724712 * 15;
+		h1 = 0x1F20239A;
+		h2 = 0xBE5FD47A;
 		len = 0;
 	}
 
-	forceinline size_t getHash() const {
+	forceinline uint32_t getHash() const {
 		return h1 + h2;
 	}
 
-	forceinline hash_t getPrevHash() const {
+	forceinline uint32_t getPrevHash() const {
 		return prev;
 	}
 
-	forceinline size_t getLength() const {
+	forceinline uint32_t getLength() const {
 		return len;
 	}
 
-	void update(char c) {
-		size_t cur = transform[(size_t)(byte)c];
+	void update(uint8_t c) {
+		uint32_t cur = transform[c];
 		if (cur != transform_table_size || (cur >= 128 && cur != transform_table_size)) {
 			h1 = (h1 + cur) * 54;
 			h2 = h1 >> 7;
@@ -119,21 +133,21 @@ public:
 		}
 	}
 
-	forceinline hash_t hashFunc(size_t c, hash_t h) {
+	forceinline uint32_t hashFunc(uint32_t c, uint32_t h) {
 		h *= 61;
 		h += c;
 		h += rotate_left(h, 10);
-		return h ^ (h >> 5);
+		return h ^ (h >> 8);
 	}
 
 	void updateUTF(char c) {
 		decoder.update(c);
-		size_t cur = decoder.getAcc();
+		uint32_t cur = decoder.getAcc();
 		if (decoder.done()) {
 			if (cur < 256) cur = transform[cur];
 			if (LIKELY(cur != transform_table_size)) {
 				h1 = hashFunc(cur, h1);
-				h2 = h1 * 6;
+				h2 = h1 * 8;
 				++len;
 			} else {
 				if (len) {

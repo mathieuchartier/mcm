@@ -26,20 +26,20 @@
 
 #include <cmath>
 
-template <const size_t shift = 12, const size_t fp_shift_ = 8>
+template <const uint32_t shift = 12, const uint32_t fp_shift_ = 8>
 class SymbolCostTable {
-	static const size_t pmax = 1 << shift;
-	size_t log2_table[pmax];
+	static const uint32_t pmax = 1 << shift;
+	uint32_t log2_table[pmax];
 public:
-	static const size_t fp_shift = fp_shift_;
+	static const uint32_t fp_shift = fp_shift_;
 	SymbolCostTable() {
 		auto factor = double(1 << fp_shift);
-		for (size_t i = 0;i < pmax;++i) {
+		for (uint32_t i = 0;i < pmax;++i) {
 			log2_table[i] = int(-log(double(i) / double(pmax)) / log(2.0) * factor);
 		}
 	}
 
-	inline size_t cost(size_t p, size_t bit) const {
+	inline uint32_t cost(uint32_t p, uint32_t bit) const {
 		if (bit == 1) {
 			p = pmax - 1 - p;
 		}

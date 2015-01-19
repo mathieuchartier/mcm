@@ -29,7 +29,7 @@
 #include "Compressor.hpp"
 
 
-template <const size_t fp_shift = 14>
+template <const uint32_t fp_shift = 14>
 class Mix1 {
 public:
 	static const int round = 1 << (fp_shift - 1);
@@ -48,12 +48,12 @@ public:
 	}
 
 	// Calculate and return prediction.
-	forceinline size_t p(int pr) const {
+	forceinline uint32_t p(int pr) const {
 		return (pr * w + (skew << 12)) >> fp_shift;
 	}
 
 	// Neural network learn, assumes probs are stretched.
-	forceinline void update(int p0, int pr, size_t bit, size_t pshift = 12) {
+	forceinline void update(int p0, int pr, uint32_t bit, uint32_t pshift = 12) {
 		int err = ((bit << pshift) - pr) * 16;
 		int round = 1 << (fp_shift - 1);
 		w += (p0 * err + round) >> fp_shift;
@@ -61,7 +61,7 @@ public:
 	}
 };
 
-template <typename T, const size_t weights, const size_t fp_shift = 16, const size_t wshift = 7>
+template <typename T, const uint32_t weights, const uint32_t fp_shift = 16, const uint32_t wshift = 7>
 class Mixer {
 public:
 	static const int round = 1 << (fp_shift - 1);
@@ -74,11 +74,11 @@ public:
 		init();
 	}
 
-	forceinline static size_t size() {
+	forceinline static uint32_t size() {
 		return weights + 1;
 	}
 
-	forceinline static size_t shift() {
+	forceinline static uint32_t shift() {
 		return fp_shift;
 	}
 
@@ -86,16 +86,16 @@ public:
 		return learn;
 	}
 
-	forceinline T getWeight(size_t index) const {
+	forceinline T getWeight(uint32_t index) const {
 		assert(index <= weights);
 		return w[index];
 	}
 
-	void init(size_t learn_rate = 366) {
+	void init(uint32_t learn_rate = 366) {
 		if (weights != 0) {
 			int wdiv = weights;
 			for (auto& cw : w) {
-				cw = T((1 << fp_shift) / wdiv);
+				cw = static_cast<T>((1 << fp_shift) / wdiv);
 			}
 		}
 		w[weights] = 0;
@@ -103,9 +103,9 @@ public:
 	}
 
 	// Calculate and return prediction.
-	forceinline size_t p(int* probs) const {
+	forceinline int p(int* probs) const {
 		int ptotal = 0;
-		for (size_t i = 0; i < weights; ++i) {
+		for (uint32_t i = 0; i < weights; ++i) {
 			ptotal += probs[i] * int(w[i]);
 		}
 		ptotal += w[weights] << wshift;
@@ -113,7 +113,7 @@ public:
 	}
 
 	// "Fast" version
-	forceinline size_t p(
+	forceinline int p(
 		int p0 = 0, int p1 = 0, int p2 = 0, int p3 = 0,
 		int p4 = 0, int p5 = 0, int p6 = 0, int p7 = 0) const {
 		int ptotal = 0;
@@ -130,13 +130,13 @@ public:
 	}
 
 	// Neural network learn, assumes probs are stretched.
-	forceinline void update(int* probs, int pr, size_t bit, size_t pshift = 12, size_t limit = 13) {
+	forceinline void update(int* probs, int pr, int32_t bit, uint32_t pshift = 12, uint32_t limit = 13) {
 		int err = ((bit << pshift) - pr) * learn;
 		T round = 1 << (fp_shift - 1);
-		for (size_t i = 0; i < weights; ++i) {
+		for (uint32_t i = 0; i < weights; ++i) {
 			w[i] += (probs[i] * err + round) >> fp_shift;
 		}
-		static const size_t sq_learn = 9;
+		static const uint32_t sq_learn = 9;
 		w[weights] += (err + (1 << (sq_learn - 1))) >> sq_learn;
 		learn -= learn > limit;
 	}
@@ -144,7 +144,7 @@ public:
 	// "Fast" version
 	forceinline bool update(
 			int p0, int p1, int p2, int p3, int p4, int p5, int p6, int p7, 
-			int pr, size_t bit, size_t pshift = 12, size_t limit = 13) {		
+			int pr, uint32_t bit, uint32_t pshift = 12, int limit = 24) {		
 		int err = ((bit << pshift) - pr) * learn;
 		
 		bool ret = false;
@@ -162,9 +162,9 @@ public:
 			ret = true;
 		}
 		
-		static const size_t sq_learn = 9;
+		static const uint32_t sq_learn = 9;
 		w[weights] += ((err >> (sq_learn - 1)) + 1) >> 1;
-		learn -= learn > static_cast<int>(limit);
+		learn -= learn > limit;
 		return ret;
 	}
 
@@ -178,7 +178,7 @@ private:
 	}
 };
 
-template <const size_t weights, const size_t fp_shift = 16, const size_t wshift = 7>
+template <const uint32_t weights, const uint32_t fp_shift = 16, const uint32_t wshift = 7>
 class MMXMixer {
 public:
 	static const int round = 1 << (fp_shift - 1);
@@ -196,7 +196,7 @@ public:
 		return learn;
 	}
 
-	short getWeight(size_t index) const {
+	short getWeight(uint32_t index) const {
 		assert(index < weights);
 		switch (index) {
 		case 0: return _mm_extract_epi16(w, 0);
@@ -229,7 +229,7 @@ public:
 	}
 
 	// Calculate and return prediction.
-	forceinline size_t p(__m128i probs) const {
+	forceinline uint32_t p(__m128i probs) const {
 		__m128i dp = _mm_madd_epi16(w, probs);
 		// p0*w0+p1*w1, ...
 
@@ -242,7 +242,7 @@ public:
 	}
 
 	// Neural network learn, assumes probs are stretched.
-	forceinline bool update(__m128i probs, int pr, size_t bit, size_t pshift = 12, size_t limit = 13) {
+	forceinline bool update(__m128i probs, int pr, uint32_t bit, uint32_t pshift = 12, uint32_t limit = 13) {
 		int err = ((bit << pshift) - pr) * learn;
 		bool ret = false;
 		if (fastAbs(err) >= (round >> (pshift - 1))) {
@@ -251,7 +251,7 @@ public:
 			if (err > 32767) err = 32767; // Make sure we don't overflow.
 			if (err < -32768) err = -32768;
 			// I think this works, we shall see.
-			auto serr = static_cast<size_t>(static_cast<uint16_t>(err));
+			auto serr = static_cast<uint32_t>(static_cast<uint16_t>(err));
 			__m128i verr = _mm_shuffle_epi32(_mm_cvtsi32_si128(serr | (serr << 16)), 0);
 			// shift must be 16
 			w = _mm_adds_epi16(w, _mm_mulhi_epi16(probs, verr));
@@ -259,7 +259,7 @@ public:
 			// w = _mm_adds_epi16(w, _mm_srli_epi16(_mm_mullo_epi16(probs, verr), 15));
 			ret = true;
 		}
-		static const size_t sq_learn = 9;
+		static const uint32_t sq_learn = 9;
 		skew += (err + (1 << (sq_learn - 1))) >> sq_learn;
 		learn -= learn > limit;
 		return ret;
@@ -267,7 +267,7 @@ public:
 };
 
 // Very basic logistic mixer.
-template <const size_t weights, const size_t fp_shift = 16, const size_t wshift = 7>
+template <const uint32_t weights, const uint32_t fp_shift = 16, const uint32_t wshift = 7>
 class FloatMixer {
 public:
 	static const int round = 1 << (fp_shift - 1);
@@ -284,7 +284,7 @@ public:
 		return learn;
 	}
 
-	forceinline float getWeight(size_t index) const {
+	forceinline float getWeight(uint32_t index) const {
 		assert(index < weights);
 		return w[index];
 	}
@@ -320,7 +320,7 @@ public:
 	// "Fast" version
 	forceinline bool update(
 			float p0, float p1, float p2, float p3, float p4, float p5, float p6, float p7, 
-			int pr, size_t bit, size_t pshift = 12, size_t limit = 13) {		
+			int pr, uint32_t bit, uint32_t pshift = 12, uint32_t limit = 13) {		
 		float err = float(((1 ^ bit) << pshift) - pr) * learn * (1.0f / 256.0f);
 		// Branch is around 50 / 50.
 		updateRec<0>(p0, err);

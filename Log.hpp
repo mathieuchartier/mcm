@@ -56,7 +56,7 @@ public:
 	void build(int delta) {
 		squashPtr = &squashTable[0 - minInt];
 #if 0
-		size_t limit = maxInt + 1;
+		uint32_t limit = maxInt + 1;
 		for (int x = 0; x < total; x++) {
 			squashTable[x] = limit;
 		}
@@ -88,7 +88,7 @@ public:
 		// From paq9a
 		int t[33] = {
 		//1,2,3,6,10,16,27,50,79,126,198,306,465,719,1072,1478,2047,
-		1,2,3,6,10,16,27,45,73,120,194,310,488,747,1101,1546,2047,
+		1,2,3,6,10,16,27,45,73,120,194,310,488,747+2,1101-3,1546-31,2047,
 		0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 		for (int i = 17; i < 33; ++i) {
 			t[i] = 4096 - t[32 - i];
@@ -115,12 +115,12 @@ public:
 	}
 
 	// 0 <= p < denom
-	forceinline int st(size_t p) const {
+	forceinline int st(uint32_t p) const {
 		return stretchTable[p];
 	}
 
 	// minInt <= p < maxInt
-	inline size_t sq(int p) const {
+	inline uint32_t sq(int p) const {
 		if (p <= minInt) {
 			return 1;
 		}

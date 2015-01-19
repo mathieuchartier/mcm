@@ -43,7 +43,7 @@ public:
 	FileInfo() : attributes(0) {
 	}
 private:
-	size_t attributes;
+	uint32_t attributes;
 	std::string name;
 };
 
@@ -204,7 +204,7 @@ public:
 	forceinline int aget(uint64_t pos) {
 		lock.lock();
 		seek(pos); // Only seeks if necessary.
-		size_t ret = get();
+		int ret = get();
 		lock.unlock();
 		return ret;
 	}
@@ -282,7 +282,7 @@ public:
 		++offset;
 	}
 
-    virtual void write(const byte* buf, size_t n) {
+    virtual void write(const byte* buf, uint32_t n) {
 		offset += file->awrite(offset, buf, n);
 	}
 
@@ -401,8 +401,11 @@ public:
 	}
 
     virtual int get() {
-		++count;
-		return file.get();
+		int c = file.get();
+		if (c != EOF) {
+			++count;
+		}
+		return c;
 	}
 
     virtual size_t read(byte* buf, size_t n) {
@@ -419,7 +422,7 @@ public:
 	}
 };
 
-template <const size_t size = 16 * KB>
+template <const uint32_t size = 16 * KB>
 class BufferedFileStream {
 public:
 	static const uint64_t mask = size - 1;
@@ -430,13 +433,13 @@ public:
 private:
 	void flush() {
 		if ((total & mask) != 0) {
-			file->write(buffer, static_cast<size_t>(total & mask));
+			file->write(buffer, static_cast<uint32_t>(total & mask));
 		}
 	}
 
 	void flushWhole() {
 		assert((total & mask) == 0);
-		file->write(buffer, static_cast<size_t>(size));
+		file->write(buffer, static_cast<uint32_t>(size));
 	}
 
 public:
@@ -486,7 +489,7 @@ public:
 	// Go back to the start of the file.
 	void restart() {
 		total = 0;
-		eof_pos = (size_t)-1;
+		eof_pos = (uint32_t)-1;
 		file.rewind();
 	}
 
@@ -501,7 +504,7 @@ public:
 	void reset() {
 		file.close();
 		total = 0;
-		eof_pos = (size_t)-1;
+		eof_pos = (uint32_t)-1;
 	}
 
 	BufferedFileStream() {
@@ -520,7 +523,7 @@ public:
 		std::string name;
 		std::ios_base::open_mode mode;
 		File file;
-		size_t count;
+		uint32_t count;
 		
 		File* getFile() {
 			return &file;

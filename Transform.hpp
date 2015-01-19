@@ -40,12 +40,12 @@ protected:
 	BoundedQueue<byte> lookahead, output;
 	// Output queue.
 	byte *buffer;
-	size_t buffer_mask;
-	size_t transform_count, untransform_count;
-	size_t transform_pos, untransform_pos;
+	uint32_t buffer_mask;
+	uint32_t transform_count, untransform_count;
+	uint32_t transform_pos, untransform_pos;
 
 	// Returns how many bytes were transformed.
-	virtual size_t attempt_transform() = 0;
+	virtual uint32_t attempt_transform() = 0;
 public:
 	void release() {
 		delete [] buffer;
@@ -53,7 +53,7 @@ public:
 	}
 
 	// Size needs to be a power of 2.
-	void init(size_t size = 512 * KB) {
+	void init(uint32_t size = 512 * KB) {
 		release();
 		buffer_mask = size - 1;
 		buffer = new byte[buffer_mask + 1];
@@ -67,11 +67,11 @@ public:
 	}
 
 	// Start of the untransformed region.
-	byte& at(size_t index) {
+	byte& at(uint32_t index) {
 		return buffer[(untransform_pos - untransform_count + index) & buffer_mask];
 	}
 
-	forceinline byte at(size_t index) const {
+	forceinline byte at(uint32_t index) const {
 		return buffer[(untransform_pos - untransform_count + index) & buffer_mask];
 	}
 

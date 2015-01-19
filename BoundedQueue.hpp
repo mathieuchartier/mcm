@@ -28,9 +28,9 @@
 
 template <typename T>
 class BoundedQueue : public CyclicBuffer<T> {
-	size_t read_pos;
+	uint32_t read_pos;
 public:
-	size_t getReadPos() const {
+	uint32_t getReadPos() const {
 		return read_pos;
 	}
 
