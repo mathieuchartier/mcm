@@ -38,12 +38,6 @@ static const uint32_t kTestIterations = 10;
 static const uint32_t kIterations = 256;	
 static const uint32_t kBenchDataSize = 7654321;
 
-template <uint32_t bytes, uint32_t offset>
-class FixedDeltaFilter : public DeltaFilter {
-public:
-	FixedDeltaFilter(Stream* stream) : DeltaFilter(stream, bytes, offset) { }
-};
-
 typedef FixedDeltaFilter<2, 2> WavDeltaFilter;
 
 class SimpleFilter : public ByteStreamFilter<4 * KB, 4 * KB> {
@@ -331,7 +325,7 @@ void runFilterTests() {
 	}
 	std::cout << "Done running " << kTestIterations << " test iterations" << std::endl;
 
-	std::vector<byte> data = loadFile("vcfiu.hlp", 4 * MB);
+	//std::vector<byte> data = loadFile("vcfiu.hlp", 4 * MB);
 	//std::vector<byte> data = loadFile("rafale.bmp", 4 * MB);
 	//std::vector<byte> data = loadFile("ohs.doc", 5 * MB);
 	//std::vector<byte> data = loadFile("world95.txt", 4 * MB);
@@ -344,7 +338,7 @@ void runFilterTests() {
 	//std::vector<byte> data = loadFile("enwik46.txt", 5 * MB);
 	//std::vector<byte> data = loadFile("A10.jpg", 5 * MB);
 	//std::vector<byte> data = loadFile("include.tar", 25 * MB);
-	//std::vector<byte> data = loadFile("calgary.tar", 5 * MB);
+	std::vector<byte> data = loadFile("calgary.tar", 5 * MB);
 	//std::vector<byte> data = loadFile("mxc.tar", 60 * MB);
 	//std::vector<byte> data = loadFile("magic.txt", 60 * MB);
 	//std::vector<byte> data = loadFile("test.dll", 5 * MB);

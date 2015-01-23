@@ -400,6 +400,11 @@ public:
 		return count;
 	}
 
+	void seek(uint64_t pos) {
+		file.seek(pos, SEEK_SET);
+		count = pos;
+	}
+
     virtual int get() {
 		int c = file.get();
 		if (c != EOF) {

@@ -113,9 +113,9 @@ public:
 	}
 
 	// "Fast" version
-	forceinline int p(
-		int p0 = 0, int p1 = 0, int p2 = 0, int p3 = 0,
-		int p4 = 0, int p5 = 0, int p6 = 0, int p7 = 0) const {
+	forceinline int p(int wshift,
+		int p0 = 0, int p1 = 0, int p2 = 0, int p3 = 0, int p4 = 0,
+		int p5 = 0, int p6 = 0, int p7 = 0, int p8 = 0, int p9 = 0) const {
 		int ptotal = 0;
 		if (weights > 0) ptotal += p0 * static_cast<int>(w[0]);
 		if (weights > 1) ptotal += p1 * static_cast<int>(w[1]);
@@ -125,6 +125,8 @@ public:
 		if (weights > 5) ptotal += p5 * static_cast<int>(w[5]);
 		if (weights > 6) ptotal += p6 * static_cast<int>(w[6]);
 		if (weights > 7) ptotal += p7 * static_cast<int>(w[7]);
+		if (weights > 8) ptotal += p8 * static_cast<int>(w[8]);
+		if (weights > 9) ptotal += p9 * static_cast<int>(w[9]);
 		ptotal += w[weights] << wshift;
 		return ptotal >> fp_shift;
 	}
@@ -142,15 +144,13 @@ public:
 	}
 
 	// "Fast" version
-	forceinline bool update(
-			int p0, int p1, int p2, int p3, int p4, int p5, int p6, int p7, 
-			int pr, uint32_t bit, uint32_t pshift = 12, int limit = 24) {		
-		int err = ((bit << pshift) - pr) * learn;
-		
-		bool ret = false;
-
-		// Branch is around 50 / 50.
-		if (err < -(round >> (pshift - 1)) || err > (round >> (pshift - 1))) {
+	forceinline bool update(int pr, uint32_t bit, uint32_t pshift = 12, int limit = 24, int delta = 1,
+		int p0 = 0, int p1 = 0, int p2 = 0, int p3 = 0, int p4 = 0,
+		int p5 = 0, int p6 = 0, int p7 = 0, int p8 = 0, int p9 = 0) {
+		const int err = ((bit << pshift) - pr) * learn;
+		const int delta_round = round >> (pshift - 1);
+		const bool ret = err < -delta_round || err > delta_round;
+		if (ret) { // Branch is around 50 / 50.
 			updateRec<0>(p0, err);
 			updateRec<1>(p1, err);
 			updateRec<2>(p2, err);
@@ -159,12 +159,13 @@ public:
 			updateRec<5>(p5, err);
 			updateRec<6>(p6, err);
 			updateRec<7>(p7, err);
-			ret = true;
+			updateRec<8>(p8, err);
+			updateRec<9>(p9, err);
+			const size_t sq_learn = 9;
+			const size_t sq_round = 1 << (sq_learn - 1);
+			w[weights] += (err + sq_round) >> sq_learn;
+			learn -= learn > limit;
 		}
-		
-		static const uint32_t sq_learn = 9;
-		w[weights] += ((err >> (sq_learn - 1)) + 1) >> 1;
-		learn -= learn > limit;
 		return ret;
 	}
 

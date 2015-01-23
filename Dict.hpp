@@ -26,12 +26,13 @@
 
 #include <memory>
 #include <numeric>
+#include <unordered_set>
 
 #include "Filter.hpp"
 
-class Dict : public ByteStreamFilter<16 * KB, 16 * KB> {
+class SimpleDict : public ByteStreamFilter<16 * KB, 16 * KB> {
 public:
-	Dict(Stream* stream) : ByteStreamFilter(stream), built_(false) {
+	SimpleDict(Stream* stream) : ByteStreamFilter(stream), built_(false) {
 
 	}
 
@@ -39,40 +40,96 @@ public:
 		if (!built_) {
 			buildDictionary();
 		}
+		size_t count = std::min(*out_count, *in_count);
+		std::copy(in, in + count, out);
+		*in_count = *out_count = count;
 	}
 	virtual void reverseFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
-	}
-
-	void build() {
-
-	}
-
-	void buildCodes() {
-		for (;;) {
-
-		}
+		size_t count = std::min(*out_count, *in_count);
+		std::copy(in, in + count, out);
+		*in_count = *out_count = count;
 	}
 
 private:
+	typedef std::pair<size_t, std::string> WordCountPair;
+
+	class EncodeEnry {
+	public:
+		std::string word;
+		uint8_t code_chars;
+		uint8_t char_a;
+		uint8_t char_b;
+
+		class HashCmp {
+		public:
+			size_t operator()(const EncodeEnry& a) {
+				return std::hash<std::string>()(a.word);
+			}
+			bool operator()(const EncodeEnry& a, const EncodeEnry& b) {
+				return a.word == b.word;
+			}
+		};
+	};
+
+	class EncodeDict {
+	public:
+		std::unordered_set<EncodeEnry, EncodeEnry::HashCmp, EncodeEnry::HashCmp> words_;
+		void find(const std::string& s) {
+
+		}
+	};
+
+	class Comparator {
+	public:
+		Comparator(size_t codes_required) {
+			SetCodesRequired(codes_required);
+		}
+		void SetCodesRequired(size_t codes_required) {
+			codes_required_ = codes_required;
+		}
+		size_t wordCost(const WordCountPair& a) const {
+			if (a.second.length() <= codes_required_) {
+				return 0;
+			}
+			const size_t savings = a.first * (a.second.length() - codes_required_);
+			const size_t extra_cost = a.second.length() + 1 + codes_required_;
+			if (extra_cost >= savings) {
+				return 0;
+			}
+			return savings - extra_cost;
+		}
+		bool operator()(const WordCountPair& a, const WordCountPair& b) const {
+			return wordCost(a) < wordCost(b);
+		}
+
+		size_t codes_required_;
+	};
+
+	bool isWordChar(int c) const {
+		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+	}
+
 	void buildDictionary() {
 		auto stream_pos = stream_->tell();
 		uint64_t counts[256] = { 0 };
 		std::map<std::string, size_t> words;
-		static const size_t kMaxWord = 4096;
+		static const size_t kMaxWord = 255;
 		uint8_t word_buffer[kMaxWord + 1];
 		size_t pos = 0;
 		uint64_t char_count = 0;
 		BufferedStreamReader<4 * KB> reader(stream_);
+		for (auto c = 'a'; c < 'z'; ++c) counts[static_cast<uint8_t>(c)] = std::numeric_limits<uint64_t>::max();
+		for (auto c = 'A'; c < 'Z'; ++c) counts[static_cast<uint8_t>(c)] = std::numeric_limits<uint64_t>::max();
 		for (;;) {
 			int c = reader.get();
 			if (c == EOF) {
 				break;
 			}
-			if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
-				word_buffer[pos++] = c;
-				if (pos == kMaxWord) {
-					pos = 0;;
+			if (c != 0 && isWordChar(c)) {
+				if (pos >= kMaxWord) {
+					pos = 0;
 				}
+				word_buffer[pos++] = c;
 			} else {
 				if (pos > 2) {
 					words[std::string(word_buffer, word_buffer + pos)]++;
@@ -81,8 +138,17 @@ private:
 				}
 				pos = 0;
 			}
-			++counts[(uint8_t)c];
+			++counts[static_cast<uint8_t>(c)];
 		}
+
+		std::vector<WordCountPair> sorted_words;
+		for (auto it = words.begin(); it != words.end(); ++it) {
+			// Remove all the words which hve less than 10 occurences.
+			if (it->second >= 10) {
+				sorted_words.push_back(std::make_pair(it->second, it->first));
+			}
+		}
+
 		uint64_t total = std::accumulate(counts, counts + 256, 0U);
 		// Calculate candidate code bytes.
 		std::vector<std::pair<uint64_t, byte>> code_pairs;
@@ -95,28 +161,24 @@ private:
 		}
 		std::sort(code_pairs.begin(), code_pairs.end());
 
-		std::vector<std::pair<size_t, std::string>> sorted_words;
-		for (auto it = words.begin(); it != words.end(); ++it) {
-			// Remove all the words which hve less than 10 occurences.
-			if (it->second >= 10) {
-				sorted_words.push_back(std::make_pair(it->second * (it->first.length() - 1), it->first));
-			}
-		}
-		std::sort(sorted_words.rbegin(), sorted_words.rend());
+		size_t b1 = code_pairs.size() / 2; // One byte code words
+		size_t b2 = (code_pairs.size() - b1) * code_pairs.size(); // Two byte code words
+		
+		Comparator c1(1);
+		std::sort(sorted_words.rbegin(), sorted_words.rend(), c1);
 		size_t save_total1 = 0;
-		for (size_t i = 0; i < 100; ++i) {
-			size_t num_words = sorted_words[i].first / (sorted_words[i].second.length() - 1);
-			save_total1 += sorted_words[i].first - num_words * 0;
+		for (size_t i = 0; i < b1; ++i) {
+			save_total1 += c1.wordCost(sorted_words[i]);
 		}
+		sorted_words.erase(sorted_words.begin(), sorted_words.begin() + 100);
+		Comparator c2(2);
+		std::sort(sorted_words.rbegin(), sorted_words.rend(), c2);
 		size_t save_total2 = 0;
-		for (size_t i = 100; i < 100 * 100; ++i) {
-			size_t num_words = sorted_words[i].first / (sorted_words[i].second.length() - 1);
-			save_total2 += sorted_words[i].first - num_words * 1;
+		for (size_t i = std::min(sorted_words.size(), b1);
+			i < std::min(sorted_words.size(), b2); ++i) {
+			save_total2 += c2.wordCost(sorted_words[i]);
 		}
-		std::cout << std::endl << save_total1 << " " << save_total2 << " " << save_total1 + save_total2 << std::endl;
-
-		// Remove anything codes over 60.
-		// Reset.
+		std::cout << std::endl << code_pairs.size() << ":" << save_total1 << " " << save_total2 << " " << save_total1 + save_total2 << std::endl;
 
 		stream_->seek(stream_pos);
 		built_ = true;
@@ -135,7 +197,7 @@ private:
 	};
 
 	// Entries.
-	static const size_t kDictFraction = 2000;
+	static const size_t kDictFraction = 1000;
 	std::vector<Entry> entires;
 };
 

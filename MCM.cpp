@@ -33,6 +33,7 @@
 #include "Archive.hpp"
 #include "CCM.hpp"
 #include "CM.hpp"
+#include "DeltaFilter.hpp"
 #include "Dict.hpp"
 #include "File.hpp"
 #include "Huffman.hpp"
@@ -44,8 +45,9 @@
 CompressorFactories* CompressorFactories::instance = nullptr;
 
 typedef X86AdvancedFilter DefaultFilter;
+//typedef FixedDeltaFilter<2, 1> DefaultFilter;
+//typedef SimpleDict DefaultFilter;
 //typedef IdentityFilter DefaultFilter;
-//typedef Dict DefaultFilter;
 
 class VerifyStream : public WriteStream {
 public:
@@ -409,9 +411,8 @@ int main(int argc, char* argv[]) {
 		clock_t start = clock();
 		std::cout << "Compressing to " << out_file << " mem level=" << options.mem_level << std::endl;
 		std::unique_ptr<Compressor> comp;
-		comp.reset(new CM<5>);
+		comp.reset(new CM<6>);
 		//comp.reset(new TurboCM<6>);
-		//comp.reset(new CCM);
 		comp->setMemUsage(options.mem_level);
 		{
 			ProgressReadStream rms(&fin, &fout);

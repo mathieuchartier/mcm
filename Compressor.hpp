@@ -121,6 +121,9 @@ public:
 	virtual uint64_t tell() const {
 		return in_stream_->tell();
 	}
+	virtual void seek(uint64_t pos) {
+		in_stream_->seek(pos);
+	}
 
 private:
 	Stream* in_stream_;

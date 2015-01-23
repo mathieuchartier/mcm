@@ -224,7 +224,9 @@ void CM<inputs>::decompress(Stream* in_stream, Stream* out_stream) {
 }	
 
 template class CM<4>;
-template class CM<5>;
+// template class CM<5>;
 template class CM<6>;
-template class CM<7>;
+// template class CM<7>;
 template class CM<8>;
+// template class CM<9>;
+// template class CM<10>;

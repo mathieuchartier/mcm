@@ -40,7 +40,7 @@
 #include "Util.hpp"
 #include "WordModel.hpp"
 
-#include "APM.hpp"
+// #include "APM.hpp"
 
 // Options.
 #define USE_MMX 0
@@ -90,13 +90,30 @@ private:
 	Prob probs_[256];
 };
 
+// Logarithm
+static class Ilog {
+std::vector<uint8_t> t;
+public:
+	int operator()(size_t x) const {
+		return t[x];
+	}
+	Ilog() {
+		t.resize(256 * 256);
+		uint32_t x = 14155776;
+		for (int i = 2; i < 65536; ++i) {
+			x += 774541002 / (i * 2 - 1);
+			t[i] = x >> 24;
+		}
+	}
+};
+
 template <size_t inputs = 6>
 class CM : public Compressor {
 public:
 	static const short version = 6;
 
 	static const bool statistics = false;
-	static const bool use_prefetch = true;
+	static const bool use_prefetch = false;
 	static const bool fixed_probs = false;
 
 	// Archive header.
@@ -171,7 +188,8 @@ public:
 
 	Range7 ent;
 	
-	MatchModel<HPStationaryModel> match_model;
+	typedef MatchModel<HPStationaryModel> MatchModelType;
+	MatchModelType match_model;
 
 	// Hash table
 	uint32_t hash_mask;
@@ -184,12 +202,21 @@ public:
 	static const uint32_t o1size = 0x10000;
 	uint8_t *order0, *order1;
 	
+	// Fast sparse
+	uint8_t spar1[256 * 256];
+	uint8_t spar2[256 * 256];
+	uint8_t spar3[256 * 256];
+	StationaryModel sparse_probs[256];
+	// Maps from char to 4 bit identifier.
+	uint8_t sparse_ctx_map[256];
+	uint8_t text_ctx_map[256];
+
 	// Mixers
 	uint32_t mixer_mask;
 #if USE_MMX
 	typedef MMXMixer<inputs, 15, 1> CMMixer;
 #else
-	typedef Mixer<int, inputs, 17, 1> CMMixer;
+	typedef Mixer<int, inputs, 17, 11> CMMixer;
 #endif
 	std::vector<CMMixer> mixers;
 	CMMixer *mixer_base;
@@ -205,7 +232,7 @@ public:
 	bool use_word;
 	bool use_match;
 	bool use_sparse;
-	
+
 	// CM state table.
 	static const uint32_t num_states = 256;
 	uint8_t state_trans[num_states][2];
@@ -225,16 +252,17 @@ public:
 	typedef bitContextModel<BitModel, (uint32_t)kProfileCount+1> BlockProfileModel;
 	BlockProfileModel block_profile_models[(uint32_t)kProfileCount];
 
-	// ISSE
-	APM apm1;
-	APM apm2;
+
+	// Magic mask (tangelo).
+	uint32_t mmask;
 
 	// SM
 	typedef StationaryModel PredModel;
-	PredModel preds[(uint32_t)kProfileCount][inputs][256];
-	typedef PredModel PredArray[inputs][256];
+	static const size_t kProbCtx = inputs;
+	typedef PredModel PredArray[kProbCtx][256];
+	PredArray preds[(uint32_t)kProfileCount];
 	PredArray* cur_preds;
-	
+
 	static const uint32_t eof_char = 126;
 	
 	forceinline uint32_t hash_lookup(hash_t hash, bool prefetch_addr = use_prefetch) {
@@ -262,13 +290,11 @@ public:
 
 	void init() {
 		table.build(0);
-		apm1.init(table, 0x10000);
-		apm2.init(table, 0x100);
 		
 		mixer_mask = 0xFFFF;
 		mixers.resize(static_cast<uint32_t>(kProfileCount) * (mixer_mask + 1));
 		for (auto& mixer : mixers) {
-			mixer.init();
+			mixer.init(382);
 		}
 	
 		for (auto& s : mixer_skip) s = 0;
@@ -278,7 +304,7 @@ public:
 		sm.build();
 		
 		hash_mask = ((2 * MB) << archive_header.mem_usage) / sizeof(hash_table[0]) - 1;
-		hash_alloc_size = hash_mask + o0size + o1size + kPageSize + (1 << huffman_len_limit);
+		hash_alloc_size = hash_mask + o0size + o1size + (1 << huffman_len_limit);
 		hash_storage.resize(hash_alloc_size); // Add extra space for ctx.
 		order0 = reinterpret_cast<uint8_t*>(hash_storage.getData());
 		order1 = order0 + o0size;
@@ -293,10 +319,22 @@ public:
 		block_flag_model.init();
 		for (auto& m : block_profile_models) m.init();
 
+		mmask = 0;
+
 		// Match model.
 		match_model.resize(buffer.getSize() / 2);
-		match_model.init();
+		match_model.init(MatchModelType::kMinMatch, 80U, use_huffman ? 16U : 8U);
 		
+		// Fast sparse models.
+		for (auto& c : spar1) c = 0;
+		for (auto& c : spar2) c = 0;
+		for (auto& c : spar3) c = 0;
+		for (auto& m : sparse_probs) m.init();
+		for (size_t i = 0; i < 256; ++i) {
+			sparse_ctx_map[i] = (i < 1) + (i < 32) + (i < 59) + (i < 64) + (i < 91) + (i < 128) + (i < 137) + (i < 139) + 
+				(i < 140) + (i < 142) + (i < 255) + (i < 131); // + (i < 58) + (i < 48);
+			text_ctx_map[i] = (i < 95) + (i < 123) + (i < 47) + (i < 64) + (i < 46) + (i < 33) + (i < 58);
+		}
 		// Optimization
 		for (uint32_t i = 0; i < num_states; ++i) {
 			for (uint32_t j = 0; j < 2; ++j) {
@@ -313,17 +351,20 @@ public:
 			{1866,1128,214,197,89,82,95,53,68,74,50,69,24,30,41,55,15,32,73,30,31,32,28,38,31,32,20,13,10,17,6,3,19,14,12,25,9,8,8,3,1,8,9,7,11,37,9,0,1,8,1,8,0,1488,439,297,309,299,278,205,191,197,162,250,126,122,160,117,125,122,680,60,1411,2169,2543,958,2873,63,78,1489,613,548,580,457,467,346,348,290,326,2625,639,740,649,1859,997,859,909,662,826,720,1853,1226,1625,1487,1671,1998,2374,2485,2632,2680,2943,2067,1383,1494,1090,1232,926,2641,1378,2214,2042,2836,1242,1218,3049,3069,2240,3483,1880,1239,3097,2355,1657,3334,2365,3460,3444,3676,3574,3423,3526,3489,1613,1446,2961,3606,3570,3555,1258,1041,2737,3610,3701,3759,3815,1498,3917,1425,3898,1405,3202,2528,2489,2565,3054,2362,2947,2758,3879,3891,1540,2945,3258,3531,2190,2745,1659,3571,3639,2321,3670,3628,3660,3786,3726,1605,3793,2112,1033,3827,3821,2677,1462,3785,3742,3823,3887,3926,3894,3900,4005,3997,4034,1612,4038,4042,4033,4056,4069,1901,4071,1774,4061,1823,2033,4065,2061,2744,2308,2606,3314,2279,2115,2756,980,2620,2315,2566,2265,1672,1166,1217,2286,2410,2248,1346,1413,1638,2400,3061,3171,3038,2609,2675,2467,2368,4084,4085,4092,4079,4082,4088,3658,4083,4095,2048,},
 			{1890,1430,689,498,380,292,171,165,155,137,96,101,70,81,92,72,64,85,76,57,100,65,33,44,49,40,69,39,63,29,46,55,41,63,33,38,35,24,33,32,30,28,33,51,66,28,52,2,15,0,0,1,0,797,442,182,242,194,201,183,153,135,124,171,93,85,122,67,71,93,222,32,631,896,980,647,895,164,93,1375,693,566,497,420,414,411,357,356,319,1740,649,683,681,1717,1170,1025,892,834,835,685,1727,1259,1612,1588,1778,1999,2524,2197,2613,2781,2957,2181,1664,1735,1496,1061,913,2521,1524,1935,2155,2733,1500,1282,2906,3093,2337,3337,2392,1647,3113,2435,1885,3332,2614,3384,3394,3437,3606,3432,3669,3473,2090,1598,3186,3578,3713,3533,1936,1525,2864,3689,3624,3782,3769,2293,3974,2654,3953,2693,3088,2302,1967,2558,2865,1563,2458,1805,3255,3700,1576,2840,2649,3017,1472,2467,2018,3157,3024,2338,3011,3377,3361,3394,3515,1715,3653,2480,1370,3695,3593,2812,2561,3709,3827,3780,3787,3799,3850,3817,3773,3863,3943,1946,3922,3946,3954,3952,4089,2316,4095,2515,4087,3067,2107,4095,2986,2806,3420,2255,3818,3269,3614,2293,2541,3370,3583,3572,2147,2845,2940,2999,3591,3507,1981,3072,2950,2851,3629,3890,3891,3867,2290,3846,3637,2856,4009,3996,3989,4032,4007,4023,2937,4008,4095,2048,},
 			{1890,1430,689,498,380,292,171,165,155,137,96,101,70,81,92,72,64,85,76,57,100,65,33,44,49,40,69,39,63,29,46,55,41,63,33,38,35,24,33,32,30,28,33,51,66,28,52,2,15,0,0,1,0,797,442,182,242,194,201,183,153,135,124,171,93,85,122,67,71,93,222,32,631,896,980,647,895,164,93,1375,693,566,497,420,414,411,357,356,319,1740,649,683,681,1717,1170,1025,892,834,835,685,1727,1259,1612,1588,1778,1999,2524,2197,2613,2781,2957,2181,1664,1735,1496,1061,913,2521,1524,1935,2155,2733,1500,1282,2906,3093,2337,3337,2392,1647,3113,2435,1885,3332,2614,3384,3394,3437,3606,3432,3669,3473,2090,1598,3186,3578,3713,3533,1936,1525,2864,3689,3624,3782,3769,2293,3974,2654,3953,2693,3088,2302,1967,2558,2865,1563,2458,1805,3255,3700,1576,2840,2649,3017,1472,2467,2018,3157,3024,2338,3011,3377,3361,3394,3515,1715,3653,2480,1370,3695,3593,2812,2561,3709,3827,3780,3787,3799,3850,3817,3773,3863,3943,1946,3922,3946,3954,3952,4089,2316,4095,2515,4087,3067,2107,4095,2986,2806,3420,2255,3818,3269,3614,2293,2541,3370,3583,3572,2147,2845,2940,2999,3591,3507,1981,3072,2950,2851,3629,3890,3891,3867,2290,3846,3637,2856,4009,3996,3989,4032,4007,4023,2937,4008,4095,2048,},
+			{1890,1430,689,498,380,292,171,165,155,137,96,101,70,81,92,72,64,85,76,57,100,65,33,44,49,40,69,39,63,29,46,55,41,63,33,38,35,24,33,32,30,28,33,51,66,28,52,2,15,0,0,1,0,797,442,182,242,194,201,183,153,135,124,171,93,85,122,67,71,93,222,32,631,896,980,647,895,164,93,1375,693,566,497,420,414,411,357,356,319,1740,649,683,681,1717,1170,1025,892,834,835,685,1727,1259,1612,1588,1778,1999,2524,2197,2613,2781,2957,2181,1664,1735,1496,1061,913,2521,1524,1935,2155,2733,1500,1282,2906,3093,2337,3337,2392,1647,3113,2435,1885,3332,2614,3384,3394,3437,3606,3432,3669,3473,2090,1598,3186,3578,3713,3533,1936,1525,2864,3689,3624,3782,3769,2293,3974,2654,3953,2693,3088,2302,1967,2558,2865,1563,2458,1805,3255,3700,1576,2840,2649,3017,1472,2467,2018,3157,3024,2338,3011,3377,3361,3394,3515,1715,3653,2480,1370,3695,3593,2812,2561,3709,3827,3780,3787,3799,3850,3817,3773,3863,3943,1946,3922,3946,3954,3952,4089,2316,4095,2515,4087,3067,2107,4095,2986,2806,3420,2255,3818,3269,3614,2293,2541,3370,3583,3572,2147,2845,2940,2999,3591,3507,1981,3072,2950,2851,3629,3890,3891,3867,2290,3846,3637,2856,4009,3996,3989,4032,4007,4023,2937,4008,4095,2048,},
+			{1890,1430,689,498,380,292,171,165,155,137,96,101,70,81,92,72,64,85,76,57,100,65,33,44,49,40,69,39,63,29,46,55,41,63,33,38,35,24,33,32,30,28,33,51,66,28,52,2,15,0,0,1,0,797,442,182,242,194,201,183,153,135,124,171,93,85,122,67,71,93,222,32,631,896,980,647,895,164,93,1375,693,566,497,420,414,411,357,356,319,1740,649,683,681,1717,1170,1025,892,834,835,685,1727,1259,1612,1588,1778,1999,2524,2197,2613,2781,2957,2181,1664,1735,1496,1061,913,2521,1524,1935,2155,2733,1500,1282,2906,3093,2337,3337,2392,1647,3113,2435,1885,3332,2614,3384,3394,3437,3606,3432,3669,3473,2090,1598,3186,3578,3713,3533,1936,1525,2864,3689,3624,3782,3769,2293,3974,2654,3953,2693,3088,2302,1967,2558,2865,1563,2458,1805,3255,3700,1576,2840,2649,3017,1472,2467,2018,3157,3024,2338,3011,3377,3361,3394,3515,1715,3653,2480,1370,3695,3593,2812,2561,3709,3827,3780,3787,3799,3850,3817,3773,3863,3943,1946,3922,3946,3954,3952,4089,2316,4095,2515,4087,3067,2107,4095,2986,2806,3420,2255,3818,3269,3614,2293,2541,3370,3583,3572,2147,2845,2940,2999,3591,3507,1981,3072,2950,2851,3629,3890,3891,3867,2290,3846,3637,2856,4009,3996,3989,4032,4007,4023,2937,4008,4095,2048,},
+			{1890,1430,689,498,380,292,171,165,155,137,96,101,70,81,92,72,64,85,76,57,100,65,33,44,49,40,69,39,63,29,46,55,41,63,33,38,35,24,33,32,30,28,33,51,66,28,52,2,15,0,0,1,0,797,442,182,242,194,201,183,153,135,124,171,93,85,122,67,71,93,222,32,631,896,980,647,895,164,93,1375,693,566,497,420,414,411,357,356,319,1740,649,683,681,1717,1170,1025,892,834,835,685,1727,1259,1612,1588,1778,1999,2524,2197,2613,2781,2957,2181,1664,1735,1496,1061,913,2521,1524,1935,2155,2733,1500,1282,2906,3093,2337,3337,2392,1647,3113,2435,1885,3332,2614,3384,3394,3437,3606,3432,3669,3473,2090,1598,3186,3578,3713,3533,1936,1525,2864,3689,3624,3782,3769,2293,3974,2654,3953,2693,3088,2302,1967,2558,2865,1563,2458,1805,3255,3700,1576,2840,2649,3017,1472,2467,2018,3157,3024,2338,3011,3377,3361,3394,3515,1715,3653,2480,1370,3695,3593,2812,2561,3709,3827,3780,3787,3799,3850,3817,3773,3863,3943,1946,3922,3946,3954,3952,4089,2316,4095,2515,4087,3067,2107,4095,2986,2806,3420,2255,3818,3269,3614,2293,2541,3370,3583,3572,2147,2845,2940,2999,3591,3507,1981,3072,2950,2851,3629,3890,3891,3867,2290,3846,3637,2856,4009,3996,3989,4032,4007,4023,2937,4008,4095,2048,},
 		};
 
 		for (uint32_t i = 0;i < static_cast<uint32_t>(kProfileCount); ++i) {
-			for (uint32_t j = 0; j < inputs;++j) {
+			for (uint32_t j = 0; j < kProbCtx;++j) {
 				for (uint32_t k = 0; k < num_states; ++k) {
 					auto& pr = preds[i][j][k];
 					pr.init();
 					if (fixed_probs) {
-						pr.setP(table.st(initial_probs[j][k]));
+						pr.setP(table.st(initial_probs[std::min(j, 9U)][k]));
 					} else {
-						pr.setP(initial_probs[j][k]);
+						pr.setP(initial_probs[std::min(j, 9U)][k]);
 					}
 				}
 			}
@@ -361,10 +402,11 @@ public:
 	void calcMixerBase() {
 		const uint32_t p0 = static_cast<uint8_t>(buffer[buffer.getPos() - 1]);
 		const uint32_t p1 = static_cast<uint8_t>(buffer[buffer.getPos() - 2]);
-		uint32_t mixer_ctx = p0 >> 5;
+		uint32_t mixer_ctx; // >> 5;
 		const uint32_t mm_len = match_model.getLength();
-		mixer_ctx <<= 3;
 		if (use_word) {
+			mixer_ctx = text_ctx_map[p0];
+			mixer_ctx <<= 3;
 			auto wlen = word_model.getLength();
 			mixer_ctx |=
 				(wlen >= 1) +
@@ -375,18 +417,20 @@ public:
 				(wlen >= 6) +
 				(wlen >= 8) +
 				0;
+		} else {
+			mixer_ctx = sparse_ctx_map[p0];
 		}
 		mixer_ctx <<= 2;
 		if (mm_len) {
 			if (use_word) {
 				mixer_ctx |= 1 +
-					(mm_len >= match_model.min_match + 2) + 
-					(mm_len >= match_model.min_match + 7) + 
+					(mm_len >= match_model.kMinMatch + 2) + 
+					(mm_len >= match_model.kMinMatch + 7) + 
 					0;
 			} else {
 				mixer_ctx |= 1 +
-					(mm_len >= match_model.min_match + 1) + 
-					(mm_len >= match_model.min_match + 4) + 
+					(mm_len >= match_model.kMinMatch + 1) + 
+					(mm_len >= match_model.kMinMatch + 4) + 
 					0;
 			}
 		}		
@@ -394,15 +438,15 @@ public:
 		cur_preds = &preds[static_cast<uint32_t>(profile)];
 	}
 
-	forceinline byte nextState(byte t, uint32_t bit, uint32_t smi, int learn_rate = 8) {
+	forceinline byte nextState(byte state, uint32_t bit, uint32_t ctx) {
 		if (!fixed_probs) {
-			(*cur_preds)[smi][t].update(bit, learn_rate);
+			(*cur_preds)[ctx][state].update(bit, 9);
 		}
-		return state_trans[t][bit];
+		return state_trans[state][bit];
 	}
 	
-	forceinline int getP(byte state, uint32_t smi, const short* st) const {
-		int p = (*cur_preds)[smi][state].getP();
+	forceinline int getP(byte state, uint32_t ctx, const short* st) const {
+		int p = (*cur_preds)[ctx][state].getP();
 		if (!fixed_probs) {
 			p = st[p];
 		}
@@ -433,35 +477,34 @@ public:
 			} else {
 				ctx = ctx_add + base_ctx;
 			}
-			int mm_p = match_model.getP(st);
+			auto* const cur_mixer = &mixer_base[ctx];
+			const auto mm_l = match_model.getLength();
 	
-			uint8_t
-				*sp0 = nullptr, *sp1 = nullptr, *sp2 = nullptr, *sp3 = nullptr, 
-				*sp4 = nullptr, *sp5 = nullptr, *sp6 = nullptr, *sp7 = nullptr;
-			size_t s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, s5 = 0, s6 = 0, s7 = 0;
+			uint8_t 
+				*no_alias sp0 = nullptr, *no_alias sp1 = nullptr, *no_alias sp2 = nullptr, *no_alias sp3 = nullptr, *no_alias sp4 = nullptr,
+				*no_alias sp5 = nullptr, *no_alias sp6 = nullptr, *no_alias sp7 = nullptr, *no_alias sp8 = nullptr, *no_alias sp9 = nullptr;
+			size_t s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, s5 = 0, s6 = 0, s7 = 0, s8 = 0, s9 = 0;
 
 			uint32_t p;
-			int p0 = 0, p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0;
-			CMMixer* cur_mixer = nullptr;
-			if (inputs > 1) { sp1 = &ht[base_contexts[1] ^ ctx]; s1 = *sp1; }
-			if (inputs > 2) { sp2 = &ht[base_contexts[2] ^ ctx]; s2 = *sp2; }
-			if (inputs > 3) { sp3 = &ht[base_contexts[3] ^ ctx]; s3 = *sp3; }
-			if (inputs > 4) { sp4 = &ht[base_contexts[4] ^ ctx]; s4 = *sp4; }
-			if (inputs > 5) { sp5 = &ht[base_contexts[5] ^ ctx]; s5 = *sp5; }
-			if (inputs > 6) { sp6 = &ht[base_contexts[6] ^ ctx]; s6 = *sp6; }
-			if (inputs > 7) { sp7 = &ht[base_contexts[7] ^ ctx]; s7 = *sp7; }
-			if (inputs > 0 && mm_p == 0) { sp0 = &ht[base_contexts[0] ^ ctx]; s0 = *sp0; }
-
-			if (sp0 != nullptr) {
-				assert(sp0 >= ht && sp0 <= ht + hash_alloc_size);
+			int p0 = 0, p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0, p8 = 0, p9 = 0;
+			if (inputs > 1) { sp1 = &ht[base_contexts[1] ^ ctx]; s1 = *sp1; p1 = getP(s1, 1, st); }
+			if (inputs > 2) { sp2 = &ht[base_contexts[2] ^ ctx]; s2 = *sp2; p2 = getP(s2, 2, st); }
+			if (inputs > 3) { sp3 = &ht[base_contexts[3] ^ ctx]; s3 = *sp3; p3 = getP(s3, 3, st); }
+			if (inputs > 4) { sp4 = &ht[base_contexts[4] ^ ctx]; s4 = *sp4; p4 = getP(s4, 4, st); }
+			if (inputs > 5) { sp5 = &ht[base_contexts[5] ^ ctx]; s5 = *sp5; p5 = getP(s5, 5, st); }
+			if (inputs > 6) { sp6 = &ht[base_contexts[6] ^ ctx]; s6 = *sp6; p6 = getP(s6, 6, st); }
+			if (inputs > 7) { sp7 = &ht[base_contexts[7] ^ ctx]; s7 = *sp7; p7 = getP(s7, 7, st); }
+			if (inputs > 8) { sp8 = &ht[base_contexts[8] ^ ctx]; s8 = *sp8; p8 = getP(s8, 8, st); }
+			if (inputs > 9) { sp9 = &ht[base_contexts[9] ^ ctx]; s9 = *sp9; p9 = getP(s9, 9, st); }
+			if (inputs > 0) {
+				if (mm_l == 0) {
+					sp0 = &ht[base_contexts[0] ^ ctx]; s0 = *sp0;
+					assert(sp0 >= ht && sp0 <= ht + hash_alloc_size);
+					p0 = getP(s0, 0, st);
+				} else {
+					p0 = match_model.getP(st);
+				}
 			}
-			assert(sp1 >= ht && sp1 <= ht + hash_alloc_size);
-			assert(sp2 >= ht && sp2 <= ht + hash_alloc_size);
-			assert(sp3 >= ht && sp3 <= ht + hash_alloc_size);
-			assert(sp4 >= ht && sp4 <= ht + hash_alloc_size);
-			assert(sp5 >= ht && sp5 <= ht + hash_alloc_size);
-
-			cur_mixer = &mixer_base[ctx];
 #if USE_MMX
 			__m128i wa = _mm_cvtsi32_si128(static_cast<unsigned short>(((inputs > 0) ? (mm_p ? mm_p : getP(*s0, 0, st)) : 0)));
 			__m128i wb = _mm_cvtsi32_si128((inputs > 1) ? (int(getP(*s1, 1, st)) << 16) : 0);
@@ -475,21 +518,37 @@ public:
 			int stp = cur_mixer->p(wp);
 			int mixer_p = table.sq(stp); // Mix probabilities.
 #else
-			if (inputs > 0) p0 = mm_p ? mm_p : getP(s0, 0, st);
-			if (inputs > 1) p1 = getP(s1, 1, st);
-			if (inputs > 2) p2 = getP(s2, 2, st);
-			if (inputs > 3) p3 = getP(s3, 3, st);
-			if (inputs > 4) p4 = getP(s4, 4, st);
-			if (inputs > 5) p5 = getP(s5, 5, st);
-			if (inputs > 6) p6 = getP(s6, 6, st);
-			if (inputs > 7) p7 = getP(s7, 7, st);
-			// p6 = mm_p;
 
-			int stp = cur_mixer->p(p0, p1, p2, p3, p4, p5, p6, p7);
+#if 0
+			uint8_t* const sparse1 = &spar1[(owhash & 0xFF00) + ctx];
+			uint8_t* const sparse2 = &spar2[((owhash & 0xFF0000) >> 8) + ctx];
+			uint8_t* const sparse3 = &spar3[((owhash & 0xFF000000) >> 16) + ctx];
+			if (false && use_sparse) {
+				int sparsep =
+					16 * table.st((*cur_preds)[1][*sparse1].getP()) +
+					13 * table.st((*cur_preds)[1][*sparse2].getP()) +
+					18 * table.st((*cur_preds)[1][*sparse3].getP());
+				p6 = sparsep / 16;
+			}
+#endif
+			// p6 = table.st((*cur_preds)[0][*sparse1].getP());
+			// p7 = table.st((*cur_preds)[0][*sparse2].getP());
+			// p8 = table.st((*cur_preds)[0][*sparse3].getP());
+			// p6 = mm_p;
+			// p8 = table.st();
+			if (false && mm_l) {
+				p8 = table.st((2048 - 752) / (mm_l - 3));
+				// p8 = opt_var * std::min(mm_l, 32);
+				// p8 = ilog(mm_l) * 32;
+				if (match_model.getExpectedBit()) {
+					p8 = -p8;
+				}
+			}
+
+			int stp = cur_mixer->p(11, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9);
 			int mixer_p = table.sq(stp); // Mix probabilities.
 #endif
 			p = mixer_p;
-			// auto& pr = isse[owhash & 0xFF][std::min(std::max(stp + 2048, 0), 4095)];
 			// p = std::max(pr.getP(), 1U);
 			// p = (p + apm1.pp(table, p, ctx * 256 + (owhash & 0xFF))) / 2;
 			// p = (p + apm2.pp(table, p, ctx)) / 2;
@@ -498,7 +557,6 @@ public:
 			// p = std::max(p, 1U);
 			// p = mixer_p; // stp;
 			// p = std::max(mixer_p / 8 * 8, 1);
-			// auto& mdl = isse[mixer_p / 16][match_model.getLength()][match_model.getExpectedBit()];
 			
 			uint32_t bit;
 			if (decode) { 
@@ -509,15 +567,10 @@ public:
 				ent.encode(stream, bit, p, shift);
 			}
 
-			// apm1.update(bit);
-			// apm2.update(bit);
-			// pr.update(bit, 10);
-			// mdl.update(bit);
-
 #if USE_MMX
 			const bool ret = cur_mixer->update(wp, mixer_p, bit);
 #else
-			const bool ret = cur_mixer->update(p0, p1, p2, p3, p4, p5, p6, p7, mixer_p, bit, 12);
+			const bool ret = cur_mixer->update(mixer_p, bit, 12, 24, opt_var, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9);
 #endif
 
 			if (statistics) {
@@ -526,16 +579,23 @@ public:
 				++mixer_skip[static_cast<uint32_t>(ret)];
 			}
 			
-			if (inputs > 0 && mm_p == 0) *sp0 = nextState(s0, bit, 0);
-			if (inputs > 1) *sp1 = nextState(s1, bit, 1);
-			if (inputs > 2) *sp2 = nextState(s2, bit, 2);
-			if (inputs > 3) *sp3 = nextState(s3, bit, 3);
-			if (inputs > 4) *sp4 = nextState(s4, bit, 4);
-			if (inputs > 5) *sp5 = nextState(s5, bit, 5);
-			if (inputs > 6) *sp6 = nextState(s6, bit, 6);
-			if (inputs > 7) *sp7 = nextState(s7, bit, 7);
-
+			// Only update the states / predictions if the mixer was far enough from the bounds, helps 15k on enwik8 and 1-2sec.
+			if (ret) {
+				if (inputs > 0 && mm_l == 0) *sp0 = nextState(s0, bit, 0);
+				if (inputs > 1) *sp1 = nextState(s1, bit, 1);
+				if (inputs > 2) *sp2 = nextState(s2, bit, 2);
+				if (inputs > 3) *sp3 = nextState(s3, bit, 3);
+				if (inputs > 4) *sp4 = nextState(s4, bit, 4);
+				if (inputs > 5) *sp5 = nextState(s5, bit, 5);
+				if (inputs > 6) *sp6 = nextState(s6, bit, 6);
+				if (inputs > 7) *sp7 = nextState(s7, bit, 7);
+				if (inputs > 8) *sp8 = nextState(s8, bit, 8);
+				if (inputs > 9) *sp9 = nextState(s9, bit, 9);
+			}
 			match_model.updateBit(bit);
+			// *sparse1 = state_trans[*sparse1][bit];
+			// *sparse2 = state_trans[*sparse2][bit];
+			// *sparse3 = state_trans[*sparse3][bit];
 
 			// Encode the bit / decode at the last second.
 			if (decode) {
@@ -567,8 +627,18 @@ public:
 			p3 = static_cast<byte>(owhash >> 24),
 			p4 = static_cast<byte>(buffer[blast - 4]);
 
+		if (use_sparse) {
+			mmask <<= 4;
+			mmask |= sparse_ctx_map[p0];
+			//mmask |= (!p0 ? 0 : isalpha(p0) ? 1 : ispunct(p0) ? 2 : isspace(p0) ? 3 : (p0 == 255) ? 4 : (p0 < 16) ? 5 : (p0 < 64) ? 6 : 7);
+		} else {
+			mmask <<= 3;
+			mmask |= text_ctx_map[p0];
+		}
+		// 
+
 		size_t start = 0;
-		if (inputs > 6) {
+		if (inputs > 8) {
 			base_contexts[start++] = getOrder0();
 		}
 		base_contexts[start++] = getOrder1(p0); // Order 1
@@ -576,29 +646,34 @@ public:
 		if (use_word) {
 			if (start < inputs) {
 				base_contexts[start++] = hash_lookup(word_model.getHash(), false); // Word model
+				if (inputs > 7) {
+					base_contexts[start++] = hash_lookup(word_model.getHash() ^ word_model.getPrevHash(), false); // Word model
+				}
 			}
 		}
+		// if ((inputs > 6 || use_sparse) && start < inputs) base_contexts[start++] = hash_lookup(mmask * 98765431);
 		if (use_sparse) {
 			if (start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p1, 0x4B1BEC1D)); // Order 12
-			// if (opt_var & 2 && start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p2, 0x651A833E)); // Order 23
-			// if (opt_var & 4 && start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p3, 0x4B1BEC1D)); // Order 34
+			// if (start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p2, 0x651A833E)); // Order 23
+			// if (start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p3, 0x37220B98)); // Order 34
 			if (start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p2, hashFunc(p1, 0x37220B98))); // Order 12
 			if (start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p3, hashFunc(p2, 0x651A833E))); // Order 23
 			// if (opt_var & 32 && start < inputs) base_contexts[start++] = hash_lookup(hashFunc(p4, hashFunc(p3, 0x4B1BEC1D))); // Order 34
 		}
 		uint32_t h = hashFunc(p0, 0x32017044);
 		uint32_t order = 2;  // Start at order 2.
+
 		for (;;) {
 			h = hashFunc(buffer[bpos - order], h);
 			if (start >= inputs) {
 				break;
 			}
-			if (!cur_use_word || order != 5) {
+			if (order < 5 || order == 6 || order >= 8) {
 				base_contexts[start++] = hash_lookup(h);
 			}
 			order++;
 		}
-		match_model.setHash(h ^ owhash);
+		match_model.setHash(h);
 		calcMixerBase();
 
 		if (statistics && !decode && match_model.getLength() > 6) {
@@ -617,8 +692,7 @@ public:
 			}
 		} else {
 			size_t n1 = processNibble<decode>(stream, c >> 4, base_contexts, 0);
-			calcMixerBase();
-			size_t n2 = processNibble<decode>(stream, c & 0xF, base_contexts, 16 * (n1 + 3));
+			size_t n2 = processNibble<decode>(stream, c & 0xF, base_contexts, 15 + (n1 * 15));
 			if (decode) {
 				c = n2 | (n1 << 4);
 			}
@@ -638,6 +712,7 @@ public:
 			break;
 		case kText:
 			use_word = true;
+			// use_word = false;
 			use_match = true;
 			use_sparse = false;
 			break;

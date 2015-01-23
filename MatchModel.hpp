@@ -6,25 +6,30 @@
 template <typename Model>
 class MatchModel {
 public:
-	static const size_t min_match = 4; // TODO: Tweak this??????
+	static const size_t kMinMatch = 4; // TODO: Tweak this??????
 	static const size_t small_match = 8;
-	static const size_t max_match = 80;
-	static const size_t char_shift = 2;
-	static const size_t mm_shift = 2;
+	static const size_t kCharShift = 2;
+	static const size_t kCharMax = 256U >> kCharShift;
+	static const size_t mm_shift = 2;  // WTF DIS 4.
 	static const size_t max_value = 1 << 12;
 	static const size_t kMaxCtxLen = 32;
 	static const bool kMultiMatch = false;
 	static const bool kExtendMatch = false;
 private:
 	static const size_t bits_per_char = 16;
-	static const size_t num_length_models = (kMaxCtxLen + 1) * bits_per_char;
-	Model models[(256 >> char_shift) * num_length_models], *model_base; // Bits expected 0 x 8, 1 x 8.
+	std::vector<Model> models;
+	Model* model_base; // Bits expected 0 x 8, 1 x 8.
 
 	// Current minimum match
-	uint32_t cur_min_match;
+	size_t cur_min_match;
+	size_t cur_max_match;
+	size_t dist;
 
 	// Current match.
 	size_t pos, len;
+
+	size_t max_bits_per_char_;
+	size_t num_length_models_;
 
 	// Hash table
 	uint32_t hash_mask;
@@ -56,8 +61,8 @@ public:
 		hash_table = (uint32_t*)hash_storage.getData();
 	}
 
-	forceinline int getP(const short* no_alias st) {
-		if (!len) return 0;;
+	forceinline int getP(const short* st) {
+		if (!len) return 0;
 		int p = st[cur_mdl->getP()];
 		int bit = getExpectedBit();
 		return bit ? -p : p;
@@ -68,20 +73,24 @@ public:
 	}
 
 	forceinline uint32_t getMinMatch() const {
-		return min_match;
+		return kMinMatch;
 	}
 
-	void init() {
+	void init(size_t min_match, size_t max_match, size_t max_bits_per_char = 8) {
+		max_bits_per_char_ = max_bits_per_char;
+		cur_max_match = max_match;
+		num_length_models_ = (cur_max_match + 1) * max_bits_per_char_;
+		models.resize(kCharMax * num_length_models_);
 		h0 = h1 = h2 = h3 = 0;
 		cur_min_match = min_match;
 		expected_code = 0;
-		pos = len = 0;
+		pos = len = dist = 0;
 		for (auto& m : models) m.init();
-		for (size_t c = 0; c < (256U >> char_shift); ++c) {
-			setPrevChar(c << char_shift);
-			for (size_t i = 0; i < num_length_models; ++i) {
+		for (size_t c = 0; c < kCharMax; ++c) {
+			setPrevChar(c << kCharShift);
+			for (size_t i = 0; i < num_length_models_; ++i) {
 				const size_t index = i / bits_per_char;
-				const size_t len = min_match + (index << mm_shift);
+				const size_t len = kMinMatch + (index << mm_shift);
 				model_base[i].setP((max_value / 2) / len); 
 			}
 		}
@@ -99,8 +108,10 @@ public:
 
 	forceinline void setPrevChar(uint32_t c) {
 		prev_char = c;
-		uint32_t base = prev_char >> char_shift;
-		model_base = &models[base * num_length_models];
+		const size_t base = prev_char >> kCharShift;
+		// size_t base = prev_char >> (kCharShift + 1);
+		// base = base * 2 + (dist <= 0x32 * 104);
+		model_base = &models[base * num_length_models_];
 	}
 			
 	void search(Buffer& buffer, uint32_t spos) {
@@ -117,9 +128,11 @@ public:
 						return;
 					}
 				}
-				for (;buffer[spos - len] == buffer[blast - len] && len < max_match; ++len);
+				for (;buffer[spos - len] == buffer[blast - len] && len < cur_max_match; ++len);
 			}
 			// Update our match.
+			const size_t bmask = buffer.getMask();
+			dist = (blast & bmask) - (spos & bmask);
 			this->pos = spos + 1;
 			this->len = len;
 		}
@@ -127,7 +140,7 @@ public:
 
 	forceinline void setHash(uint32_t new_h1) {
 		h0 = new_h1;
-		assert(cur_min_match >= min_match);
+		assert(cur_min_match >= kMinMatch);
 	}
 	
 	forceinline uint32_t hashFunc(uint32_t a, uint32_t b) {
@@ -162,7 +175,7 @@ public:
 			} else
 				b1 = last_pos | (h1 & ~bmask);
 		} else {
-			len += len < max_match;
+			len += len < cur_max_match;
 			++pos;
 		}
 		updateCurMdl();
@@ -170,7 +183,7 @@ public:
 
 	void updateCurMdl() {
 		if (len) {
-			cur_mdl = model_base + bits_per_char * std::min(len - min_match, kMaxCtxLen);
+			cur_mdl = model_base + bits_per_char * std::min(len - kMinMatch, kMaxCtxLen);
 		}
 	}
 
@@ -185,9 +198,10 @@ public:
 	forceinline void updateBit(uint32_t bit) {
 		if (len) {
 			uint32_t diff = (expected_code >> code_bit_shift) ^ bit;
-			(cur_mdl++)->update(diff);
-			expected_code <<= 1;
+			cur_mdl->update(diff);
 			len &= -(1 ^ diff);
+			expected_code <<= 1;
+			cur_mdl++;
 		}
 	}
 };
