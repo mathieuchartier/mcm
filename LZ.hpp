@@ -363,14 +363,11 @@ private:
 	static const size_t extra_match_bits = 5;
 };
 
-#if 0
 class LZ4 : public MemoryCompressor {
 public:
 	virtual uint32_t getMaxExpansion(uint32_t in_size);
 	virtual uint32_t compressBytes(byte* in, byte* out, uint32_t count);
 	virtual void decompressBytes(byte* in, byte* out, uint32_t count);
 };
-#endif
-
 
 #endif

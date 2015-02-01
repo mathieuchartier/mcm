@@ -26,7 +26,11 @@
 #include <fstream>
 #include <intrin.h>
 
-// #include "lz4.h"
+// #define USE_LZ4
+#ifdef USE_LZ4
+#include "lz4.h"
+#endif
+
 #include <mmintrin.h>
 
 // Standard LZW.
@@ -360,19 +364,25 @@ class RLZW : public LZW<true> {
 	}
 };
 
-#if 0
 uint32_t LZ4::getMaxExpansion(uint32_t in_size) {
+#ifdef USE_LZ4
 	return LZ4_COMPRESSBOUND(in_size);
+#else
+	return 0;
+#endif
 }
 
 uint32_t LZ4::compressBytes(byte* in, byte* out, uint32_t count) {
+#ifdef USE_LZ4
 	return LZ4_compress(reinterpret_cast<char*>(in), reinterpret_cast<char*>(out), count);
+#endif
 }
 
 void LZ4::decompressBytes(byte* in, byte* out, uint32_t count) {
+#ifdef USE_LZ4
 	LZ4_decompress_fast(reinterpret_cast<char*>(in), reinterpret_cast<char*>(out), count);
-}
 #endif
+}
 
 size_t MemoryLZ::getMatchLen(byte* m1, byte* m2, byte* limit1) {
 	byte* start = m1;
