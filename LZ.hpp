@@ -288,7 +288,10 @@ public:
 			auto diff = *reinterpret_cast<const ulong*>(in_ptr_ + len) ^ *reinterpret_cast<const ulong*>(match_ptr + len);
 			if (UNLIKELY(diff)) {
 				ulong idx = 0;
+#ifdef WIN32
+				// TODO
 				_BitScanForward(&idx, diff);
+#endif
 				len += idx >> 3;
 				break;
 			}
@@ -360,12 +363,14 @@ private:
 	static const size_t extra_match_bits = 5;
 };
 
+#if 0
 class LZ4 : public MemoryCompressor {
 public:
 	virtual uint32_t getMaxExpansion(uint32_t in_size);
 	virtual uint32_t compressBytes(byte* in, byte* out, uint32_t count);
 	virtual void decompressBytes(byte* in, byte* out, uint32_t count);
 };
+#endif
 
 
 #endif

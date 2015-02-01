@@ -462,7 +462,7 @@ public:
 
 	int open(const std::string& fileName, std::ios_base::open_mode mode = std::ios_base::in | std::ios_base::binary) {
 		close();
-		return file.open(fileName, mode);
+		return file->open(fileName, mode);
 	}
 
 	inline void write(byte ch) {
@@ -474,7 +474,7 @@ public:
 	}
 	
 	void prefetch() {
-		uint64_t readCount = file.read(buffer, size);
+		uint64_t readCount = file->read(buffer, size);
 		if (readCount != size) {
 			eof_pos = total + readCount;
 		}
@@ -495,19 +495,19 @@ public:
 	void restart() {
 		total = 0;
 		eof_pos = (uint32_t)-1;
-		file.rewind();
+		file->rewind();
 	}
 
 	void close() {
-		if (file.isOpen()) {
+		if (file->isOpen()) {
 			flush();
-			file.close();
+			file->close();
 			total = 0;
 		}
 	}
 		
 	void reset() {
-		file.close();
+		file->close();
 		total = 0;
 		eof_pos = (uint32_t)-1;
 	}
@@ -631,7 +631,11 @@ inline WriteStream& operator << (WriteStream& stream, double c) {
 
 inline uint64_t getFileLength(const std::string& name) {
 	FILE* file = nullptr;
+#ifdef WIN32
 	fopen_s(&file, name.c_str(), "rb");
+#else
+	file = fopen(name.c_str(), "rb");
+#endif
 	fseek(file, 0, SEEK_END);
 	auto ret = _ftelli64(file);
 	fclose(file);

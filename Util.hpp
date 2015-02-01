@@ -263,46 +263,6 @@ protected:
 	byte buffer_[kMaxSize];
 };
 
-template<uint32_t kMaxSize>
-class FixedSizeStreamBuffer : public FixedSizeByteBuffer<kMaxSize> {
-public:
-	FixedSizeStreamBuffer() : size_(0), pos_(0) {
-	}
-
-	uint32_t getMaxWrite() const {
-		return kMaxSize - size_;
-	}
-
-	uint32_t getMaxRead() const {
-		return size_ - pos_;
-	}
-
-	uint32_t write(byte* buf, uint32_t count) {
-		assert(count < getMaxWrite());
-		memcpy(&buffer_[size_], buf, count);
-		size_ += count;
-	}
-
-	void read(byte* buf, uint32_t count) {
-		assert(count < getMaxRead());
-		memcpy(buf, &buffer_[pos_], count);
-		pos_ += count;
-	}
-
-	// Delete the already read chars up to pos.
-	void rebase() {
-		memmove(&buffer_[0], &buffer_[pos_], getMaxRead());
-		size_ -= pos_;
-		pos_ = 0;
-	}
-
-private:
-	// Current size.
-	uint32_t size_;
-	// Current position.
-	uint32_t pos_;
-};
-
 template <class T, uint32_t kSize>
 class StaticArray {
 public:

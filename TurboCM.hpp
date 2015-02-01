@@ -103,8 +103,8 @@ public:
 		opt_var = var;
 	}
 
-	void setMemUsage(uint32_t level) {
-		mem_usage = level;
+	void setMemUsage(uint32_t m) {
+		mem_usage = m;
 	}
 
 	void init() {

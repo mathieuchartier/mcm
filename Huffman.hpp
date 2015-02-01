@@ -201,16 +201,6 @@ public:
 		}
 	}
 
-	static HuffTree* buildTreeOptimal(uint32_t* frequencies, uint32_t count = 256) {
-		TreeSet trees;
-		for (uint32_t i = 0; i < count; ++i) {
-			if (frequencies[i]) {
-				trees.insert(new HuffTree(i, frequencies[i]));
-			}
-		}
-		return buildTree(trees);
-	}
-
 	// TODO: Optimize, fix memory leaks.
 	// Based off of example from Introduction to Data Compression.
 	static HuffTree* buildTreePackageMerge(size_t* frequencies, uint32_t count = 256, uint32_t max_depth = 16) {
@@ -384,14 +374,14 @@ public:
 	uint64_t Compress(TOut& sout, TIn& sin) {
 		Range7 ent;
 		uint32_t count = 0;
-		std::vector<uint32_t> freq(alphabet_size, 0);
+		std::vector<size_t> freq(alphabet_size, 0);
 
 		// Get frequencies
 		uint32_t length = 0;
 		for (;;++length) {
 			auto c = sin.read();
 			if (c == EOF) break;
-			++freq[(uint32_t)c];
+			++freq[static_cast<uint32_t>(c)];
 		}
 
 		// Print frequencies
@@ -401,12 +391,7 @@ public:
 		// Build length limited tree with package merge algorithm.
 		auto* tree = buildTreePackageMerge(&freq[0], alphabet_size, max_length);
 		tree->printRatio("LL(16)");
-		
-		if (false) {
-			auto* treeO = buildTreeOptimal(&freq[0], alphabet_size);
-			treeO->printRatio("optimal");
-		}
-		
+
 		ProgressMeter meter;
 		ent.init();
 		writeTree(ent, sout, tree, alphabet_size, max_length);

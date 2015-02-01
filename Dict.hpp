@@ -62,10 +62,10 @@ private:
 
 		class HashCmp {
 		public:
-			size_t operator()(const EncodeEnry& a) {
+			size_t operator()(const EncodeEnry& a) const {
 				return std::hash<std::string>()(a.word);
 			}
-			bool operator()(const EncodeEnry& a, const EncodeEnry& b) {
+			bool operator()(const EncodeEnry& a, const EncodeEnry& b) const {
 				return a.word == b.word;
 			}
 		};

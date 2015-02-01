@@ -239,7 +239,6 @@ private:
 		return block_size_;
 	}
 
-	static const size_t kBlockSize = 0x10000;
 	Stream* const stream_;
 	std::unique_ptr<uint8_t[]> block_;
 	uint8_t* block_data_;
