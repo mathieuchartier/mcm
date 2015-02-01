@@ -27,7 +27,6 @@
 #include <fstream>
 #include <deque>
 #include "CyclicBuffer.hpp"
-#include "Transform.hpp"
 #include "UTF8.hpp"
 #include "Util.hpp"
 

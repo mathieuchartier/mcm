@@ -90,23 +90,6 @@ private:
 	Prob probs_[256];
 };
 
-// Logarithm
-static class Ilog {
-std::vector<uint8_t> t;
-public:
-	int operator()(size_t x) const {
-		return t[x];
-	}
-	Ilog() {
-		t.resize(256 * 256);
-		uint32_t x = 14155776;
-		for (int i = 2; i < 65536; ++i) {
-			x += 774541002 / (i * 2 - 1);
-			t[i] = x >> 24;
-		}
-	}
-};
-
 template <size_t inputs = 6>
 class CM : public Compressor {
 public:
