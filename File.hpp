@@ -34,8 +34,10 @@
 #include "Stream.hpp"
 
 #ifndef WIN32
-extern int __cdecl _fseeki64(FILE *, int64_t, int);
-extern int64_t __cdecl _ftelli64(FILE *);
+#define _fseeki64 fseeko
+#define _ftelli64 ftello
+// extern int __cdecl _fseeki64(FILE *, int64_t, int);
+// extern int64_t __cdecl _ftelli64(FILE *);
 #endif
 
 class FileInfo {

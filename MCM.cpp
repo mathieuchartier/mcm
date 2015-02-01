@@ -31,7 +31,6 @@
 #include <thread>
 
 #include "Archive.hpp"
-#include "CCM.hpp"
 #include "CM.hpp"
 #include "DeltaFilter.hpp"
 #include "Dict.hpp"
@@ -246,6 +245,7 @@ public:
 			else if (arg == "-8") mem_level = 8;
 			else if (arg == "-9") mem_level = 9;
 			else if (arg == "-10") mem_level = 10;
+			else if (arg == "-11") mem_level = 11;
 			else if (arg == "-b") {
 				if  (i + 1 >= argc) {
 					return usage(program);
@@ -420,7 +420,7 @@ int main(int argc, char* argv[]) {
 			comp->compress(&f, &fout);
 		}
 		clock_t time = clock() - start;
-		std::cout << "Compression " << fin.getCount() << "->" << fout.getCount() << " took " << time << "ms" << std::endl;
+		std::cout << "Compression " << fin.getCount() << "->" << fout.getCount() << " took " << clockToSeconds(time) << "s" << std::endl;
 		std::cout << "Rate: " << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fin.getCount()) << " ns/B" << std::endl;
 		std::cout << "Size: " << fout.getCount() << " bytes @ " << double(fout.getCount()) * 8.0 / double(fin.getCount()) << " bpc" << std::endl;
 
@@ -440,7 +440,7 @@ int main(int argc, char* argv[]) {
 		f.flush();
 		verifyStream.summary();
 		time = clock() - start;
-		std::cout << "DeCompression took " << time << " MS" << std::endl;
+		std::cout << "DeCompression took " << clockToSeconds(time) << "s" << std::endl;
 
 		fin.close();
 		break;

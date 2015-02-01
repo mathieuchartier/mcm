@@ -74,7 +74,6 @@ public:
 		// Be sure to empty mmx before printing progress meter.
 		_mm_empty();
 #endif
-		const auto cur_Time = clock();
 		const auto ratio = double(comp_size) / in_size;
 		auto cur_time = clock();
 		auto time_delta = cur_time - start;
@@ -98,7 +97,7 @@ public:
 };
 
 class ProgressReadStream : public ReadStream {
-	static const uint32_t kUpdateInterval = 512 * KB;
+	static const size_t kUpdateInterval = 1 * KB;
 public:
 	ProgressReadStream(Stream* in_stream, Stream* out_stream) : in_stream_(in_stream), out_stream_(out_stream), update_count_(0) {
 	}
@@ -109,7 +108,7 @@ public:
 		}
 		return b;
 	}
-    virtual size_t read(byte* buf, size_t n) {
+  virtual size_t read(byte* buf, size_t n) {
 		size_t ret = in_stream_->read(buf, n);
 		update_count_ += ret;
 		if (update_count_ > kUpdateInterval) {
@@ -126,8 +125,8 @@ public:
 	}
 
 private:
-	Stream* in_stream_;
-	Stream* out_stream_;
+	Stream* const in_stream_;
+	Stream* const out_stream_;
 	ProgressMeter meter_;
 	uint64_t update_count_;
 };

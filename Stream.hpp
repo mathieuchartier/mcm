@@ -1,6 +1,8 @@
 #ifndef STREAM_HPP_
 #define STREAM_HPP_
 
+#include <cstring>
+
 #include "Util.hpp"
 
 class Stream {

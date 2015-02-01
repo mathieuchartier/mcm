@@ -24,7 +24,10 @@
 #include "LZ.hpp"
 
 #include <fstream>
+
+#ifdef WIN32
 #include <intrin.h>
+#endif
 
 // #define USE_LZ4
 #ifdef USE_LZ4
@@ -390,7 +393,7 @@ size_t MemoryLZ::getMatchLen(byte* m1, byte* m2, byte* limit1) {
 		uint32_t diff = *reinterpret_cast<uint32_t*>(m1) ^ *reinterpret_cast<uint32_t*>(m2);
 		if (UNLIKELY(diff)) {
 			unsigned long idx = 0;
-			_BitScanForward(&idx, diff);
+			// TODO: Fix _BitScanForward(&idx, diff);
 			m1 += idx >> 3;
 			break;
 		}
@@ -449,7 +452,7 @@ Match GreedyMatchFinder::findNextMatch() {
 						auto diff = *reinterpret_cast<const ulong*>(in_ptr_ + len) ^ *reinterpret_cast<const ulong*>(match_ptr + len);
 						if (UNLIKELY(diff)) {
 							ulong idx = 0;
-							_BitScanForward(&idx, diff);
+							// TODO: Fix _BitScanForward(&idx, diff);
 							len += idx >> 3;
 							break;
 						}
