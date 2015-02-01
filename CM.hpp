@@ -175,8 +175,8 @@ public:
 	MatchModelType match_model;
 
 	// Hash table
-	uint32_t hash_mask;
-	uint32_t hash_alloc_size;
+	size_t hash_mask;
+	size_t hash_alloc_size;
 	MemMap hash_storage;
 	uint8_t *hash_table;
 

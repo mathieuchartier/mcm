@@ -28,13 +28,13 @@
 
 class MemMap {
 	void* storage;
-	uint32_t size;
+	size_t size;
 public:
-	inline uint32_t getSize() const {
+	inline size_t getSize() const {
 		return size;
 	}
 
-	void resize(uint32_t bytes);
+	void resize(size_t bytes);
 	void release();
 	void zero();
 

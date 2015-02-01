@@ -43,7 +43,7 @@ MemMap::~MemMap() {
 	release();
 }
 
-void MemMap::resize(uint32_t bytes) {
+void MemMap::resize(size_t bytes) {
 	if (bytes == size) {
 		std::fill(reinterpret_cast<uint8_t*>(storage), reinterpret_cast<uint8_t*>(storage) + size, 0);
 		return;
