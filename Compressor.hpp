@@ -83,7 +83,7 @@ public:
 		const uint32_t rate = uint32_t(double(in_size / KB) / (double(time_delta) / double(CLOCKS_PER_SEC)));
 		std::cout
 			<< in_size / KB << "KB " << (encode ? "->" : "<-") << " "
-			<< comp_size / KB << "KB " << rate << "KB/s ratio: " << std::setprecision(5) << std::fixed << ratio << extra.c_str() << "\t\r";
+			<< comp_size / KB << "KB " << rate << "KB/s ratio: " << std::setprecision(5) << std::fixed << ratio << extra.c_str() << "\t\r" << std::flush;
 	}
 
 	forceinline void addBytePrint(uint64_t total, const char* extra = "") {
@@ -97,7 +97,7 @@ public:
 };
 
 class ProgressReadStream : public ReadStream {
-	static const size_t kUpdateInterval = 1 * KB;
+	static const size_t kUpdateInterval = 512 * KB;
 public:
 	ProgressReadStream(Stream* in_stream, Stream* out_stream) : in_stream_(in_stream), out_stream_(out_stream), update_count_(0) {
 	}
