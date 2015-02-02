@@ -48,6 +48,77 @@ typedef X86AdvancedFilter DefaultFilter;
 //typedef SimpleDict DefaultFilter;
 //typedef IdentityFilter DefaultFilter;
 
+class ArchiveHeader {
+public:
+	static const size_t kVersion = 8;
+
+	char magic[3]; // MCM
+	uint16_t version;
+	uint8_t mem_usage;
+	uint8_t algorithm;
+
+	ArchiveHeader() {
+		magic[0] = 'M';
+		magic[1] = 'C';
+		magic[2] = 'M';
+		version = kVersion;
+		mem_usage = 8;
+	}
+
+	template <typename TIn>
+	void read(TIn& sin) {
+		for (auto& c : magic) {
+			c = sin.get();
+		}
+		version = sin.get();
+		version = (version << 8) | sin.get();
+		mem_usage = (byte)sin.get();
+		algorithm = (byte)sin.get();
+	}
+
+	template <typename TOut>
+	void write(TOut& sout) {
+		for (auto& c : magic) {
+			sout.put(c);
+		}
+		sout.put(version >> 8);
+		sout.put(version & 0xFF);
+		sout.put(mem_usage);
+		sout.put(algorithm);
+	}
+
+	bool isValid() const {
+		// Check magic && version.
+		if (magic[0] != 'M' ||
+			magic[1] != 'C' ||
+			magic[2] != 'M' ||
+			version != kVersion) {
+			return false;
+		}
+		return true;
+	}
+
+	Compressor* createCompressor() {
+		switch ((Compressor::Type)algorithm) {
+		case Compressor::kTypeCM6: {
+				auto* ret = new CM<6>;
+				ret->setMemUsage(mem_usage);
+				return ret;
+				break;
+			}
+		case Compressor::kTypeCM8: {
+				auto* ret = new CM<8>;
+				ret->setMemUsage(mem_usage);
+				return ret;
+				break;
+			}
+		default:
+			return new Store;
+		}
+		return nullptr;
+	}
+};
+
 class VerifyStream : public WriteStream {
 public:
 	std::ifstream fin;
@@ -67,17 +138,15 @@ public:
 		auto ref = fin.eof() ? 256 : fin.get();
 		bool diff = ref != c;
 		if (diff) {
-			if (!differences) {
-				std::cerr
-					<< "Difference found at byte! " << total << " b1: "
-					<< "ref: " << (int)ref << " new: " << (int)c << std::endl;
+			if (differences == 0) {
+				std::cerr << "Difference found at byte! " << total << " b1: " << "ref: " << (int)ref << " new: " << (int)c << std::endl;
 			}
 			++differences;
 		}
 		++total;
 	}
 
-	forceinline uint32_t getTotal() const {
+	virtual uint64_t tell() const {
 		return total;
 	}
 
@@ -108,16 +177,18 @@ std::string trimExt(std::string str) {
 
 static int usage(const std::string& name) {
 	std::cout
-		<< "mcm file compressor v0." << CM<6>::version << ", (c)2015 Google Inc" << std::endl
+		<< "mcm file compressor v0." << ArchiveHeader::kVersion << ", by Mathieu Chartier (c)2015 Google Inc" << std::endl
 		<< "Caution: Use only for testing!!" << std::endl
 		<< "Usage: " << name << " [options] <infile> <outfile>" << std::endl
 		<< "Options: -d for decompress" << std::endl
 		<< "-1 ... -9 specifies ~32mb ... ~1500mb memory, " << std::endl
+		<< "-10 -11 for 3GB, ~5.5GB (only supported on 64 bits)" << std::endl
+		<< "modes: -mid -high (default -mid) specifies speed" << std::endl
 		<< "-test tests the file after compression is done" << std::endl
-		<< "-b <mb> specifies block size in MB" << std::endl
-		<< "-t <threads> the number of threads to use (decompression requires the same number of threads" << std::endl
+		// << "-b <mb> specifies block size in MB" << std::endl
+		// << "-t <threads> the number of threads to use (decompression requires the same number of threads" << std::endl
 		<< "Exaples:" << std::endl
-		<< "Compress: " << name << " -9 enwik8 enwik8.mcm" << std::endl
+		<< "Compress: " << name << " -c -9 -high enwik8 enwik8.mcm" << std::endl
 		<< "Decompress: " << name << " -d enwik8.mcm enwik8.ref" << std::endl;
 	return 0;
 }
@@ -163,38 +234,57 @@ public:
 	// Block size of 0 -> file size / #threads.
 	static const uint64_t kDefaultBlockSize = 0;
 	enum Mode {
-		MODE_UNKNOWN,
+		kModeUnknown,
 		// Compress -> Decompress -> Verify.
 		// (File or directory).
-		MODE_TEST,
+		kModeTest,
 		// In memory test.
-		MODE_MEM_TEST,
+		kModeMemTest,
 		// Single file test.
-		MODE_SINGLE_TEST,
+		kModeSingleTest,
 		// Add a single file.
-		MODE_ADD,
-		MODE_EXTRACT,
-		MODE_EXTRACT_ALL,
+		kModeAdd,
+		kModeExtract,
+		kModeExtractAll,
 		// Single hand mode.
-		MODE_COMPRESS,
-		MODE_DECOMPRESS,
+		kModeCompress,
+		kModeDecompress,
+	};
+	enum CompLevel {
+		kCompLevelTurbo,
+		kCompLevelFast,
+		kCompLevelMid,
+		kCompLevelHigh,
+		kCompLevelMax,
 	};
 	Mode mode;
 	bool opt_mode;
 	Compressor* compressor;
 	uint32_t mem_level;
+	CompLevel comp_level;
 	uint32_t threads;
 	uint64_t block_size;
 	FilePath archive_file;
 	std::vector<FilePath> files;
-	
+
 	Options()
-		: mode(MODE_UNKNOWN)
+		: mode(kModeUnknown)
 		, opt_mode(false)
 		, compressor(nullptr)
 		, mem_level(6)
+		, comp_level(kCompLevelMid)
 		, threads(1)
 		, block_size(kDefaultBlockSize) {
+	}
+
+	Compressor::Type compressorType() {
+		switch (comp_level) {
+		case kCompLevelMid:
+			return Compressor::kTypeCM6;
+		case kCompLevelHigh:
+			return Compressor::kTypeCM8;
+		}
+		return Compressor::kTypeStore;
 	}
 
 	int parse(int argc, char* argv[]) {
@@ -204,25 +294,25 @@ public:
 		int i = 1;
 		for (;i < argc;++i) {
 			const std::string arg = argv[i];
-			Mode parsed_mode = MODE_UNKNOWN;
-			if (arg == "-test") parsed_mode = MODE_TEST;
-			else if (arg == "-memtest") parsed_mode = MODE_MEM_TEST;
-			else if (arg == "-stest") parsed_mode = MODE_SINGLE_TEST;
-			else if (arg == "-c") parsed_mode = MODE_COMPRESS;
-			else if (arg == "-d") parsed_mode = MODE_DECOMPRESS;
-			else if (arg == "-a") parsed_mode = MODE_ADD;
-			else if (arg == "-e") parsed_mode = MODE_EXTRACT;
-			else if (arg == "-x") parsed_mode = MODE_EXTRACT_ALL;
-			if (parsed_mode != MODE_UNKNOWN) {
-				if (mode != MODE_UNKNOWN) {
+			Mode parsed_mode = kModeUnknown;
+			if (arg == "-test") parsed_mode = kModeSingleTest; // kModeTest;
+			else if (arg == "-memtest") parsed_mode = kModeMemTest;
+			else if (arg == "-stest") parsed_mode = kModeSingleTest;
+			else if (arg == "-c") parsed_mode = kModeCompress;
+			else if (arg == "-d") parsed_mode = kModeDecompress;
+			else if (arg == "-a") parsed_mode = kModeAdd;
+			else if (arg == "-e") parsed_mode = kModeExtract;
+			else if (arg == "-x") parsed_mode = kModeExtractAll;
+			if (parsed_mode != kModeUnknown) {
+				if (mode != kModeUnknown) {
 					std::cerr << "Multiple commands specified";
 					return 2;
 				}
 				mode = parsed_mode;
 				switch (mode) {
-				case MODE_ADD:
-				case MODE_EXTRACT:
-				case MODE_EXTRACT_ALL:
+				case kModeAdd:
+				case kModeExtract:
+				case kModeExtractAll:
 					{
 						if (++i >= argc) {
 							std::cerr << "Expected archive";
@@ -235,6 +325,10 @@ public:
 				}
 			} else if (arg == "-opt") {
 				opt_mode = true;
+			} else if (arg == "-mid") {
+				comp_level = kCompLevelMid;
+			} else if (arg == "-high") {
+				comp_level = kCompLevelHigh;
 			} else if (arg == "-1") mem_level = 1;
 			else if (arg == "-2") mem_level = 2;
 			else if (arg == "-3") mem_level = 3;
@@ -244,9 +338,19 @@ public:
 			else if (arg == "-7") mem_level = 7;
 			else if (arg == "-8") mem_level = 8;
 			else if (arg == "-9") mem_level = 9;
-			else if (arg == "-10") mem_level = 10;
-			else if (arg == "-11") mem_level = 11;
-			else if (arg == "-b") {
+			else if (arg == "-10") {
+				if (sizeof(void*) == 8) {
+					mem_level = 10;
+				} else {
+					std::cerr << arg << " only supported with 64 bit";
+				}
+			} else if (arg == "-11") {
+				if (sizeof(void*) == 8) {
+					mem_level = 11;
+				} else {
+					std::cerr << arg << " only supported with 64 bit";
+				}
+			} else if (arg == "-b") {
 				if  (i + 1 >= argc) {
 					return usage(program);
 				}
@@ -260,7 +364,7 @@ public:
 				std::cerr << "Unknown option " << arg << std::endl;
 				return 4;
 			} else {
-				if (mode == MODE_ADD || mode == MODE_EXTRACT) {
+				if (mode == kModeAdd || mode == kModeExtract) {
 					// Read in files.
 					files.push_back(FilePath(argv[i]));
 				} else {
@@ -270,7 +374,7 @@ public:
 			}
 		}
 		const bool single_file_mode =
-			mode == MODE_COMPRESS || mode == MODE_DECOMPRESS || mode == MODE_TEST || mode == MODE_MEM_TEST;
+			mode == kModeCompress || mode == kModeDecompress || mode == kModeSingleTest || mode == kModeMemTest;
 		if (single_file_mode) {
 			std::string in_file, out_file;
 			// Read in file and outfile.
@@ -280,16 +384,16 @@ public:
 			if (i < argc) {
 				out_file = argv[i++];
 			} else {
-				if (mode == MODE_DECOMPRESS) {
+				if (mode == kModeDecompress) {
 					out_file = in_file + ".decomp";
 				} else {
 					out_file = in_file + ".mcm";
 				}
 			}
-			if (mode == MODE_MEM_TEST) {
+			if (mode == kModeMemTest) {
 				// No out file for memtest.
 				files.push_back(FilePath(in_file));
-			} else if (mode == MODE_COMPRESS || mode == MODE_TEST) {
+			} else if (mode == kModeCompress || mode == kModeSingleTest) {
 				archive_file = FilePath(out_file);
 				files.push_back(FilePath(in_file));
 			} else {
@@ -300,6 +404,22 @@ public:
 		return 0;
 	}
 };
+
+void decompress(Stream* in, Stream* out) {
+	ArchiveHeader header;
+	header.read(*in);
+	if (!header.isValid()) {
+		std::cerr << "Invalid archive or invalid version";
+		return;
+	}
+	DefaultFilter f(out);
+	auto start = clock();
+	std::unique_ptr<Compressor> comp(header.createCompressor());
+	comp->decompress(in, &f);
+	f.flush();
+	auto time = clock() - start;
+	std::cout << std::endl << "DeCompression took " << clockToSeconds(time) << "s" << std::endl;
+}
 
 int main(int argc, char* argv[]) {
 	CompressorFactories::init();
@@ -312,7 +432,7 @@ int main(int argc, char* argv[]) {
 	}
 	Archive archive;
 	switch (options.mode) {
-	case Options::MODE_MEM_TEST: {
+	case Options::kModeMemTest: {
 		const uint32_t iterations = kIsDebugBuild ? 1 : 1;
 		// Read in the whole file.
 		size_t length = 0;
@@ -390,10 +510,11 @@ int main(int argc, char* argv[]) {
 		std::cout << "Decompression verified" << std::endl;
 		break;
 	}
-	case Options::MODE_SINGLE_TEST: {
+	case Options::kModeSingleTest: {
 		
 	}
-	case Options::MODE_TEST: {
+	case Options::kModeCompress:
+	case Options::kModeTest: {
 		int err = 0;
 		ReadFileStream fin;
 		WriteFileStream fout;
@@ -410,12 +531,15 @@ int main(int argc, char* argv[]) {
 
 		clock_t start = clock();
 		std::cout << "Compressing to " << out_file << " mem level=" << options.mem_level << std::endl;
-		std::unique_ptr<Compressor> comp;
-		comp.reset(new CM<6>);
-		//comp.reset(new TurboCM<6>);
-		comp->setMemUsage(options.mem_level);
+
+		ArchiveHeader header;
+		header.mem_usage = options.mem_level;
+		header.algorithm = options.compressorType();
+		header.write(fout);
+
+		std::unique_ptr<Compressor> comp(header.createCompressor());
 		{
-			ProgressReadStream rms(&fin, &fout);
+			ProgressStream rms(&fin, &fout);
 			DefaultFilter f(&rms);
 			comp->compress(&f, &fout);
 		}
@@ -426,23 +550,21 @@ int main(int argc, char* argv[]) {
 
 		fout.close();
 		fin.close();
+		comp.reset(nullptr);
 
-		if (err = fin.open(out_file, std::ios_base::in | std::ios_base::binary)) {
-			std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
-			return 1;
-		}
+		if (options.mode == Options::kModeSingleTest) {
+			if (err = fin.open(out_file, std::ios_base::in | std::ios_base::binary)) {
+				std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
+				return 1;
+			}
 			
-		std::cout << "Decompresing & verifying file" << std::endl;		
-		VerifyStream verifyStream(in_file);
-		DefaultFilter f(&verifyStream);
-		start = clock();
-		comp->decompress(&fin, &f);
-		f.flush();
-		verifyStream.summary();
-		time = clock() - start;
-		std::cout << "DeCompression took " << clockToSeconds(time) << "s" << std::endl;
-
-		fin.close();
+			std::cout << "Decompresing & verifying file" << std::endl;		
+			VerifyStream verifyStream(in_file);
+			ProgressStream rms(&fin, &verifyStream, false);
+			decompress(&fin, &rms);
+			verifyStream.summary();
+			fin.close();
+		}
 		break;
 #if 0
 		// Note: Using overwrite, this is dangerous.
@@ -459,23 +581,37 @@ int main(int argc, char* argv[]) {
 		break;
 #endif
 	}
-	case Options::MODE_ADD: {
+	case Options::kModeAdd: {
 		// Add a single file.
 		break;
 	}
-	case Options::MODE_COMPRESS: {
-		// Single file mode, compress to a file with no name (the only file in the archive).
-		break;
-	}
-	case Options::MODE_DECOMPRESS: {
+	case Options::kModeDecompress: {
+		auto in_file = options.archive_file.getName();
+		auto out_file = options.files.back().getName();
+		ReadFileStream fin;
+		WriteFileStream fout;
+		int err = 0;
+		if (err = fin.open(in_file, std::ios_base::in | std::ios_base::binary)) {
+			std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
+			return 1;
+		}
+		if (err = fout.open(out_file, std::ios_base::out | std::ios_base::binary)) {
+			std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
+			return 2;
+		}
+		std::cout << "Decompresing & verifying file" << std::endl;		
+		ProgressStream rms(&fin, &fout, false);
+		decompress(&fin, &rms);
+		fin.close();
+		fout.close();
 		// Decompress the single file in the archive to the output out.
 		break;
 	}
-	case Options::MODE_EXTRACT: {
+	case Options::kModeExtract: {
 		// Extract a single file from multi file archive .
 		break;
 	}
-	case Options::MODE_EXTRACT_ALL: {
+	case Options::kModeExtractAll: {
 		// Extract all the files in the archive.
 		break;
 	}

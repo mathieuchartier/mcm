@@ -72,7 +72,7 @@ public:
 		return expected_code >> code_bit_shift;
 	}
 
-	forceinline uint32_t getMinMatch() const {
+	forceinline size_t getMinMatch() const {
 		return kMinMatch;
 	}
 
@@ -98,7 +98,7 @@ public:
 		updateCurMdl();
 	}
 
-	forceinline uint32_t getLength() const {
+	forceinline size_t getLength() const {
 		return len;
 	}
 

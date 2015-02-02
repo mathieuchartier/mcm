@@ -63,6 +63,10 @@ public:
 		return ++count;
 	}
 
+	bool isEncode() const {
+		return encode;
+	}
+
 	// Surprisingly expensive to call...
 	void printRatio(uint64_t comp_size, const std::string& extra) {
 		printRatio(comp_size, count, extra);
@@ -96,10 +100,11 @@ public:
 	}
 };
 
-class ProgressReadStream : public ReadStream {
+class ProgressStream : public Stream {
 	static const size_t kUpdateInterval = 512 * KB;
 public:
-	ProgressReadStream(Stream* in_stream, Stream* out_stream) : in_stream_(in_stream), out_stream_(out_stream), update_count_(0) {
+	ProgressStream(Stream* in_stream, Stream* out_stream, bool encode = true)
+		: in_stream_(in_stream), out_stream_(out_stream), meter_(encode), update_count_(0) {
 	}
 	virtual int get() {
 		byte b;
@@ -108,7 +113,7 @@ public:
 		}
 		return b;
 	}
-  virtual size_t read(byte* buf, size_t n) {
+	virtual size_t read(byte* buf, size_t n) {
 		size_t ret = in_stream_->read(buf, n);
 		update_count_ += ret;
 		if (update_count_ > kUpdateInterval) {
@@ -117,11 +122,30 @@ public:
 		}
 		return ret;
 	}
+	virtual void put(int c) {
+		byte b = c;
+		write(&b, 1);
+	}
+	virtual void write(const byte* buf, size_t n) {
+		out_stream_->write(buf, n);
+		addCount(n);
+	}
+	void addCount(size_t delta) {
+		update_count_ += delta;
+		if (update_count_ > kUpdateInterval) {
+			update_count_ -= kUpdateInterval;
+			size_t comp_size = out_stream_->tell(), other_size = in_stream_->tell();
+			if (!meter_.isEncode()) {
+				std::swap(comp_size, other_size);
+			}
+			meter_.printRatio(comp_size, other_size, "");
+		}
+	}
 	virtual uint64_t tell() const {
-		return in_stream_->tell();
+		return meter_.isEncode() ? in_stream_->tell() : out_stream_->tell();
 	}
 	virtual void seek(uint64_t pos) {
-		in_stream_->seek(pos);
+		(meter_.isEncode() ? in_stream_ : out_stream_)->seek(pos);
 	}
 
 private:
@@ -184,6 +208,12 @@ private:
 // Generic compressor interface.
 class Compressor {
 public:
+	enum Type {
+		kTypeStore,
+		kTypeCM6,
+		kTypeCM8,
+	};
+
 	class Factory {
 	public:
 		virtual Compressor* create() = 0;

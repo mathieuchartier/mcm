@@ -150,6 +150,7 @@ public:
 	byte buffer[buffer_size];
 
 	BufferedStreamReader(Stream* stream) {
+		assert(stream != nullptr);
 		init(stream);
 	}
 
@@ -182,6 +183,7 @@ template <const uint32_t kBufferSize>
 class BufferedStreamWriter {
 public:
 	BufferedStreamWriter(Stream* stream) {
+		assert(stream != nullptr);
 		init(stream);
 	}
 	virtual ~BufferedStreamWriter() {

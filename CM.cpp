@@ -33,14 +33,11 @@ void CM<inputs>::compress(Stream* in_stream, Stream* out_stream) {
 	detector.setOptVar(opt_var);
 	detector.init();
 
-	match_count_ = non_match_count_ = 0;
-
 	// Compression profiles.
 	std::vector<uint32_t> profile_counts((uint32_t)kProfileCount, 0);
 	std::vector<uint32_t> profile_len((uint32_t)kProfileCount, 0);
 
 	// Start by writing out archive header.
-	archive_header.write(sout);
 	init();
 	ent.init();
 
@@ -180,17 +177,6 @@ template <size_t inputs>
 void CM<inputs>::decompress(Stream* in_stream, Stream* out_stream) {
 	BufferedStreamReader<4 * KB> sin(in_stream);
 	BufferedStreamWriter<4 * KB> sout(out_stream);
-	assert(in_stream != nullptr);
-	assert(out_stream != nullptr);
-	// Read the header from the input stream.
-	archive_header.read(sin);
-	// Check magic && version.
-	if (archive_header.magic[0] != 'M' ||
-		archive_header.magic[1] != 'C' ||
-		archive_header.magic[2] != 'M' ||
-		archive_header.version != version) {
-		return; // TODO: Fatal error!
-	}
 	ProgressMeter meter(false);
 	init();
 	ent.initDecoder(sin);

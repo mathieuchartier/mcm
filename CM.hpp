@@ -93,49 +93,11 @@ private:
 template <size_t inputs = 6>
 class CM : public Compressor {
 public:
-	static const short version = 6;
-
-	static const bool statistics = true;
+	static const bool statistics = false;
 	static const bool use_prefetch = true;
 	static const bool fixed_probs = false;
 	// Currently, LZP sux, need to improve.
 	static const bool use_lzp = false;
-
-	// Archive header.
-	class ArchiveHeader {
-	public:
-		char magic[3]; // MCM
-		unsigned short version;
-		byte mem_usage;
-
-		ArchiveHeader() {
-			magic[0] = 'M';
-			magic[1] = 'C';
-			magic[2] = 'M';
-			version = CM::version;
-			mem_usage = 8;
-		}
-
-		template <typename TIn>
-		void read(TIn& sin) {
-			for (auto& c : magic) {
-				c = sin.get();
-			}
-			version = sin.get();
-			version = (version << 8) | sin.get();
-			mem_usage = (byte)sin.get();
-		}
-
-		template <typename TOut>
-		void write(TOut& sout) {
-			for (auto& c : magic) {
-				sout.put(c);
-			}
-			sout.put(version >> 8);
-			sout.put(version & 0xFF);
-			sout.put(mem_usage);
-		}
-	} archive_header;
 
 	class SubBlockHeader {
 		friend class CM;
@@ -253,6 +215,9 @@ public:
 	// APM apm;
 	size_t apm_ctx;
 
+	// Memory usage
+	size_t mem_usage;
+
 	static const uint32_t eof_char = 126;
 	
 	forceinline uint32_t hash_lookup(hash_t hash, bool prefetch_addr = use_prefetch) {
@@ -265,10 +230,10 @@ public:
 	}
 
 	void setMemUsage(uint32_t usage) {
-		archive_header.mem_usage = usage;
+		mem_usage = usage;
 	}
 
-	CM() {
+	CM() : mem_usage(8) {
 		opt_var = 0;
 	}
 
@@ -295,7 +260,7 @@ public:
 		// apm.init(table, 0x10100);
 		apm_ctx = 0;
 
-		hash_mask = ((2 * MB) << archive_header.mem_usage) / sizeof(hash_table[0]) - 1;
+		hash_mask = ((2 * MB) << mem_usage) / sizeof(hash_table[0]) - 1;
 		hash_alloc_size = hash_mask + o0size + o1size + (1 << huffman_len_limit);
 		hash_storage.resize(hash_alloc_size); // Add extra space for ctx.
 		order0 = reinterpret_cast<uint8_t*>(hash_storage.getData());
@@ -304,7 +269,7 @@ public:
 
 		word_model.init();
 
-		buffer.resize((MB / 4) << archive_header.mem_usage, sizeof(uint32_t));
+		buffer.resize((MB / 4) << mem_usage, sizeof(uint32_t));
 
 		// Models.
 		end_of_block_mdl.init();
@@ -370,6 +335,7 @@ public:
 		// Statistics
 		if (statistics) {
 			for (auto& c : mixer_skip) c = 0;
+			match_count_ = non_match_count_ = 0;
 		}
 	}
 
@@ -706,7 +672,7 @@ public:
 			}
 			// Non match, do normal encoding.
 		}
-		\
+
 		size_t huff_state = 0;
 		if (use_huffman) {
 			huff_state = processNibble<decode>(stream, c, base_contexts, 0);
