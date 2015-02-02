@@ -106,7 +106,7 @@ public:
 		len = 0;
 	}
 
-	forceinline void setPrevChar(uint32_t c) {
+	forceinline void setPrevChar(size_t c) {
 		prev_char = c;
 		const size_t base = prev_char >> kCharShift;
 		// size_t base = prev_char >> (kCharShift + 1);

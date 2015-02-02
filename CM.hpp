@@ -40,7 +40,7 @@
 #include "Util.hpp"
 #include "WordModel.hpp"
 
-// #include "APM.hpp"
+#include "APM.hpp"
 
 // Options.
 #define USE_MMX 0
@@ -95,9 +95,11 @@ class CM : public Compressor {
 public:
 	static const short version = 6;
 
-	static const bool statistics = false;
-	static const bool use_prefetch = false;
+	static const bool statistics = true;
+	static const bool use_prefetch = true;
 	static const bool fixed_probs = false;
+	// Currently, LZP sux, need to improve.
+	static const bool use_lzp = false;
 
 	// Archive header.
 	class ArchiveHeader {
@@ -152,7 +154,6 @@ public:
 
 	// Statistics
 	uint32_t mixer_skip[2];
-	uint32_t skip_count;
 	uint32_t match_count_;
 	uint32_t non_match_count_;
 
@@ -235,9 +236,11 @@ public:
 	typedef bitContextModel<BitModel, (uint32_t)kProfileCount+1> BlockProfileModel;
 	BlockProfileModel block_profile_models[(uint32_t)kProfileCount];
 
-
 	// Magic mask (tangelo).
 	uint32_t mmask;
+
+	// Fast bit model.
+	HPStationaryModel lzp_match[256 * 256];
 
 	// SM
 	typedef StationaryModel PredModel;
@@ -245,6 +248,10 @@ public:
 	typedef PredModel PredArray[kProbCtx][256];
 	PredArray preds[(uint32_t)kProfileCount];
 	PredArray* cur_preds;
+
+	// SSE
+	// APM apm;
+	size_t apm_ctx;
 
 	static const uint32_t eof_char = 126;
 	
@@ -281,11 +288,13 @@ public:
 		}
 	
 		for (auto& s : mixer_skip) s = 0;
-		skip_count = 0;
-
+		
 		NSStateMap<12> sm;
 		sm.build();
 		
+		// apm.init(table, 0x10100);
+		apm_ctx = 0;
+
 		hash_mask = ((2 * MB) << archive_header.mem_usage) / sizeof(hash_table[0]) - 1;
 		hash_alloc_size = hash_mask + o0size + o1size + (1 << huffman_len_limit);
 		hash_storage.resize(hash_alloc_size); // Add extra space for ctx.
@@ -303,6 +312,8 @@ public:
 		for (auto& m : block_profile_models) m.init();
 
 		mmask = 0;
+
+		for (auto& m : lzp_match) m.init();
 
 		// Match model.
 		match_model.resize(buffer.getSize() / 2);
@@ -437,11 +448,126 @@ public:
 	}
 
 	template <const bool decode, typename TStream>
-	uint32_t processNibble(TStream& stream, uint32_t c, uint32_t* base_contexts, size_t ctx_add) {
-		// Maximize performance!
+	forceinline size_t processBit(TStream& stream, size_t bit, size_t* base_contexts, size_t ctx, bool use_match_p_override = false, int match_p_override = 0, size_t mixer_ctx = 0) {
+		if (!use_match_p_override) {
+			mixer_ctx = ctx;
+		}
+		auto* const cur_mixer = &mixer_base[mixer_ctx];
+		const auto mm_l = match_model.getLength();
+	
 		byte* const ht = hash_table;
-
 		const short* st = table.getStretchPtr();
+
+		uint8_t 
+			*no_alias sp0 = nullptr, *no_alias sp1 = nullptr, *no_alias sp2 = nullptr, *no_alias sp3 = nullptr, *no_alias sp4 = nullptr,
+			*no_alias sp5 = nullptr, *no_alias sp6 = nullptr, *no_alias sp7 = nullptr, *no_alias sp8 = nullptr, *no_alias sp9 = nullptr;
+		size_t s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, s5 = 0, s6 = 0, s7 = 0, s8 = 0, s9 = 0;
+
+		uint32_t p;
+		int p0 = 0, p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0, p8 = 0, p9 = 0;
+		if (inputs > 1) { sp1 = &ht[base_contexts[1] ^ ctx]; s1 = *sp1; p1 = getP(s1, 1, st); }
+		if (inputs > 2) { sp2 = &ht[base_contexts[2] ^ ctx]; s2 = *sp2; p2 = getP(s2, 2, st); }
+		if (inputs > 3) { sp3 = &ht[base_contexts[3] ^ ctx]; s3 = *sp3; p3 = getP(s3, 3, st); }
+		if (inputs > 4) { sp4 = &ht[base_contexts[4] ^ ctx]; s4 = *sp4; p4 = getP(s4, 4, st); }
+		if (inputs > 5) { sp5 = &ht[base_contexts[5] ^ ctx]; s5 = *sp5; p5 = getP(s5, 5, st); }
+		if (inputs > 6) { sp6 = &ht[base_contexts[6] ^ ctx]; s6 = *sp6; p6 = getP(s6, 6, st); }
+		if (inputs > 7) { sp7 = &ht[base_contexts[7] ^ ctx]; s7 = *sp7; p7 = getP(s7, 7, st); }
+		if (inputs > 8) { sp8 = &ht[base_contexts[8] ^ ctx]; s8 = *sp8; p8 = getP(s8, 8, st); }
+		if (inputs > 9) { sp9 = &ht[base_contexts[9] ^ ctx]; s9 = *sp9; p9 = getP(s9, 9, st); }
+		if (inputs > 0) {
+			if (mm_l == 0) {
+				sp0 = &ht[base_contexts[0] ^ ctx]; s0 = *sp0;
+				assert(sp0 >= ht && sp0 <= ht + hash_alloc_size);
+				p0 = getP(s0, 0, st);
+			} else {
+				p0 = use_match_p_override ? match_p_override : match_model.getP(st);
+			}
+		}
+
+#if 0
+		uint8_t* const sparse1 = &spar1[(owhash & 0xFF00) + ctx];
+		uint8_t* const sparse2 = &spar2[((owhash & 0xFF0000) >> 8) + ctx];
+		uint8_t* const sparse3 = &spar3[((owhash & 0xFF000000) >> 16) + ctx];
+		if (false && use_sparse) {
+			int sparsep =
+				16 * table.st((*cur_preds)[1][*sparse1].getP()) +
+				13 * table.st((*cur_preds)[1][*sparse2].getP()) +
+				18 * table.st((*cur_preds)[1][*sparse3].getP());
+			p6 = sparsep / 16;
+		}
+#endif
+
+#if USE_MMX
+		__m128i wa = _mm_cvtsi32_si128(static_cast<unsigned short>(((inputs > 0) ? (mm_p ? mm_p : getP(*s0, 0, st)) : 0)));
+		__m128i wb = _mm_cvtsi32_si128((inputs > 1) ? (int(getP(*s1, 1, st)) << 16) : 0);
+		if (inputs > 2) wa = _mm_insert_epi16(wa, getP(*s2, 2, st), 2);
+		if (inputs > 3) wb = _mm_insert_epi16(wb, getP(*s3, 3, st), 3);
+		if (inputs > 4) wa = _mm_insert_epi16(wa, getP(*s4, 4, st), 4);
+		if (inputs > 5) wb = _mm_insert_epi16(wb, getP(*s5, 5, st), 5);
+		if (inputs > 6) wa = _mm_insert_epi16(wa, getP(*s6, 6, st), 6);
+		if (inputs > 7) wb = _mm_insert_epi16(wb, getP(*s7, 7, st), 7);
+		__m128i wp = _mm_or_si128(wa, wb);
+		int stp = cur_mixer->p(wp);
+		int mixer_p = table.sq(stp); // Mix probabilities.
+#else
+		int stp = cur_mixer->p(11, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9);
+		int mixer_p = table.sq(stp); // Mix probabilities.
+#endif
+		p = mixer_p;
+		// p = std::max(pr.getP(), 1U);
+		// p = (p + apm1.pp(table, p, ctx * 256 + (owhash & 0xFF))) / 2;
+#if 0
+		if (apm_ctx) {
+			p = apm.pp(table, p, apm_ctx + mixer_ctx);
+		} else {
+			p = (p + apm.pp(table, p, mixer_ctx)) / 2;
+		}
+		p = std::max(p, 1U);
+#endif
+
+		if (decode) { 
+			bit = ent.getDecodedBit(p, shift);
+		}
+
+#if USE_MMX
+		const bool ret = cur_mixer->update(wp, mixer_p, bit);
+#else
+		const bool ret = cur_mixer->update(mixer_p, bit, 12, 24, opt_var, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9);
+#endif
+		// apm.update(bit);
+		if (statistics) {
+			// Returns false if we skipped the update due to a low error,
+			// should happen frequently on highly compressible files.
+			++mixer_skip[ret];
+		}
+			
+		// Only update the states / predictions if the mixer was far enough from the bounds, helps 15k on enwik8 and 1-2sec.
+		if (ret) {
+			if (inputs > 0 && mm_l == 0) *sp0 = nextState(s0, bit, 0);
+			if (inputs > 1) *sp1 = nextState(s1, bit, 1);
+			if (inputs > 2) *sp2 = nextState(s2, bit, 2);
+			if (inputs > 3) *sp3 = nextState(s3, bit, 3);
+			if (inputs > 4) *sp4 = nextState(s4, bit, 4);
+			if (inputs > 5) *sp5 = nextState(s5, bit, 5);
+			if (inputs > 6) *sp6 = nextState(s6, bit, 6);
+			if (inputs > 7) *sp7 = nextState(s7, bit, 7);
+			if (inputs > 8) *sp8 = nextState(s8, bit, 8);
+			if (inputs > 9) *sp9 = nextState(s9, bit, 9);
+		}
+		if (!use_match_p_override) {
+			match_model.updateBit(bit);
+		}
+		if (decode) {
+			ent.Normalize(stream);
+		} else {
+			ent.encode(stream, bit, p, shift);
+		}
+		return bit;
+	}
+
+	template <const bool decode, typename TStream>
+	size_t processNibble(TStream& stream, size_t c, size_t* base_contexts, size_t ctx_add) {
+		// Maximize performance!
 		uint32_t huff_state = huff.start_state, code = 0;
 		if (!decode) {
 			if (use_huffman) {
@@ -460,130 +586,17 @@ public:
 			} else {
 				ctx = ctx_add + base_ctx;
 			}
-			auto* const cur_mixer = &mixer_base[ctx];
-			const auto mm_l = match_model.getLength();
-	
-			uint8_t 
-				*no_alias sp0 = nullptr, *no_alias sp1 = nullptr, *no_alias sp2 = nullptr, *no_alias sp3 = nullptr, *no_alias sp4 = nullptr,
-				*no_alias sp5 = nullptr, *no_alias sp6 = nullptr, *no_alias sp7 = nullptr, *no_alias sp8 = nullptr, *no_alias sp9 = nullptr;
-			size_t s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, s5 = 0, s6 = 0, s7 = 0, s8 = 0, s9 = 0;
-
-			uint32_t p;
-			int p0 = 0, p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0, p8 = 0, p9 = 0;
-			if (inputs > 1) { sp1 = &ht[base_contexts[1] ^ ctx]; s1 = *sp1; p1 = getP(s1, 1, st); }
-			if (inputs > 2) { sp2 = &ht[base_contexts[2] ^ ctx]; s2 = *sp2; p2 = getP(s2, 2, st); }
-			if (inputs > 3) { sp3 = &ht[base_contexts[3] ^ ctx]; s3 = *sp3; p3 = getP(s3, 3, st); }
-			if (inputs > 4) { sp4 = &ht[base_contexts[4] ^ ctx]; s4 = *sp4; p4 = getP(s4, 4, st); }
-			if (inputs > 5) { sp5 = &ht[base_contexts[5] ^ ctx]; s5 = *sp5; p5 = getP(s5, 5, st); }
-			if (inputs > 6) { sp6 = &ht[base_contexts[6] ^ ctx]; s6 = *sp6; p6 = getP(s6, 6, st); }
-			if (inputs > 7) { sp7 = &ht[base_contexts[7] ^ ctx]; s7 = *sp7; p7 = getP(s7, 7, st); }
-			if (inputs > 8) { sp8 = &ht[base_contexts[8] ^ ctx]; s8 = *sp8; p8 = getP(s8, 8, st); }
-			if (inputs > 9) { sp9 = &ht[base_contexts[9] ^ ctx]; s9 = *sp9; p9 = getP(s9, 9, st); }
-			if (inputs > 0) {
-				if (mm_l == 0) {
-					sp0 = &ht[base_contexts[0] ^ ctx]; s0 = *sp0;
-					assert(sp0 >= ht && sp0 <= ht + hash_alloc_size);
-					p0 = getP(s0, 0, st);
-				} else {
-					p0 = match_model.getP(st);
-				}
-			}
-#if USE_MMX
-			__m128i wa = _mm_cvtsi32_si128(static_cast<unsigned short>(((inputs > 0) ? (mm_p ? mm_p : getP(*s0, 0, st)) : 0)));
-			__m128i wb = _mm_cvtsi32_si128((inputs > 1) ? (int(getP(*s1, 1, st)) << 16) : 0);
-			if (inputs > 2) wa = _mm_insert_epi16(wa, getP(*s2, 2, st), 2);
-			if (inputs > 3) wb = _mm_insert_epi16(wb, getP(*s3, 3, st), 3);
-			if (inputs > 4) wa = _mm_insert_epi16(wa, getP(*s4, 4, st), 4);
-			if (inputs > 5) wb = _mm_insert_epi16(wb, getP(*s5, 5, st), 5);
-			if (inputs > 6) wa = _mm_insert_epi16(wa, getP(*s6, 6, st), 6);
-			if (inputs > 7) wb = _mm_insert_epi16(wb, getP(*s7, 7, st), 7);
-			__m128i wp = _mm_or_si128(wa, wb);
-			int stp = cur_mixer->p(wp);
-			int mixer_p = table.sq(stp); // Mix probabilities.
-#else
-
-#if 0
-			uint8_t* const sparse1 = &spar1[(owhash & 0xFF00) + ctx];
-			uint8_t* const sparse2 = &spar2[((owhash & 0xFF0000) >> 8) + ctx];
-			uint8_t* const sparse3 = &spar3[((owhash & 0xFF000000) >> 16) + ctx];
-			if (false && use_sparse) {
-				int sparsep =
-					16 * table.st((*cur_preds)[1][*sparse1].getP()) +
-					13 * table.st((*cur_preds)[1][*sparse2].getP()) +
-					18 * table.st((*cur_preds)[1][*sparse3].getP());
-				p6 = sparsep / 16;
-			}
-#endif
-			// p6 = table.st((*cur_preds)[0][*sparse1].getP());
-			// p7 = table.st((*cur_preds)[0][*sparse2].getP());
-			// p8 = table.st((*cur_preds)[0][*sparse3].getP());
-			// p6 = mm_p;
-			// p8 = table.st();
-			if (false && mm_l) {
-				p8 = table.st((2048 - 752) / (mm_l - 3));
-				// p8 = opt_var * std::min(mm_l, 32);
-				// p8 = ilog(mm_l) * 32;
-				if (match_model.getExpectedBit()) {
-					p8 = -p8;
-				}
-			}
-
-			int stp = cur_mixer->p(11, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9);
-			int mixer_p = table.sq(stp); // Mix probabilities.
-#endif
-			p = mixer_p;
-			// p = std::max(pr.getP(), 1U);
-			// p = (p + apm1.pp(table, p, ctx * 256 + (owhash & 0xFF))) / 2;
-			// p = (p + apm2.pp(table, p, ctx)) / 2;
-			// p = std::max(p, 1U);
-			// p = std::min(std::max(p, 1U), 4095U);
-			// p = std::max(p, 1U);
-			// p = mixer_p; // stp;
-			// p = std::max(mixer_p / 8 * 8, 1);
-			
-			uint32_t bit;
-			if (decode) { 
-				bit = ent.getDecodedBit(p, shift);
-			} else {
+			size_t bit = 0;
+			if (!decode) {
 				bit = code >> (sizeof(uint32_t) * 8 - 1);
 				code <<= 1;
-				ent.encode(stream, bit, p, shift);
 			}
-
-#if USE_MMX
-			const bool ret = cur_mixer->update(wp, mixer_p, bit);
-#else
-			const bool ret = cur_mixer->update(mixer_p, bit, 12, 24, opt_var, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9);
-#endif
-
-			if (statistics) {
-				// Returns false if we skipped the update due to a low error,
-				// should happen frequently on highly compressible files.
-				++mixer_skip[static_cast<uint32_t>(ret)];
-			}
-			
-			// Only update the states / predictions if the mixer was far enough from the bounds, helps 15k on enwik8 and 1-2sec.
-			if (ret) {
-				if (inputs > 0 && mm_l == 0) *sp0 = nextState(s0, bit, 0);
-				if (inputs > 1) *sp1 = nextState(s1, bit, 1);
-				if (inputs > 2) *sp2 = nextState(s2, bit, 2);
-				if (inputs > 3) *sp3 = nextState(s3, bit, 3);
-				if (inputs > 4) *sp4 = nextState(s4, bit, 4);
-				if (inputs > 5) *sp5 = nextState(s5, bit, 5);
-				if (inputs > 6) *sp6 = nextState(s6, bit, 6);
-				if (inputs > 7) *sp7 = nextState(s7, bit, 7);
-				if (inputs > 8) *sp8 = nextState(s8, bit, 8);
-				if (inputs > 9) *sp9 = nextState(s9, bit, 9);
-			}
-			match_model.updateBit(bit);
+			bit = processBit<decode>(stream, bit, base_contexts, ctx);
 			// *sparse1 = state_trans[*sparse1][bit];
 			// *sparse2 = state_trans[*sparse2][bit];
 			// *sparse3 = state_trans[*sparse3][bit];
 
 			// Encode the bit / decode at the last second.
-			if (decode) {
-				ent.Normalize(stream);
-			}
 			if (use_huffman) {
 				huff_state = huff.getTransition(huff_state, bit);
 				if (huff.isLeaf(huff_state)) {
@@ -599,7 +612,7 @@ public:
 
 	template <const bool decode, typename TStream>
 	uint32_t processByte(TStream& stream, uint32_t c = 0) {
-		uint32_t base_contexts[inputs]; // Base contexts
+		size_t base_contexts[inputs]; // Base contexts
 
 		const size_t bpos = buffer.getPos();
 		const size_t blast = bpos - 1; // Last seen char
@@ -657,16 +670,43 @@ public:
 			order++;
 		}
 		match_model.setHash(h);
+
+		const size_t mm_len = match_model.getLength();
+		size_t expected_char = 0;
+		size_t extra_add = 0;
+		apm_ctx = 0;
 		calcMixerBase();
-
-		if (statistics && !decode && match_model.getLength() > 6) {
-			if (match_model.getExpectedChar(buffer) == c) {
-				++match_count_;
-			} else {
-				++non_match_count_;
+		if (mm_len > 0) {
+			// mixer_base = getProfileMixers(profile) + (mm_len * 256);
+			// mixer_base = getProfileMixers(profile) + (mm_len - match_model.getMinMatch()) * 256;
+			expected_char = match_model.getExpectedChar(buffer);
+			if (statistics && !decode) {
+				++(expected_char == c ? match_count_ : non_match_count_);
 			}
-		}
+			if (use_lzp) {
+				apm_ctx = 256 * (1 + expected_char);
+				size_t bit = decode ? 0 : expected_char == c;
 
+				auto& m = lzp_match[expected_char * 256 + mm_len];
+				if (true) {
+					int match_p2 = table.st(m.getP());
+					bit = processBit<decode>(stream, bit, base_contexts, 256 + expected_char, true, match_p2, 0);
+				} else {
+					if (decode) {
+						bit = ent.decode(stream, m.getP(), shift);
+					} else {
+						ent.encode(stream, bit, m.getP(), shift);
+					}
+				}
+				m.update(bit);
+
+				if (bit) {
+					return match_model.getExpectedChar(buffer);
+				}
+			}
+			// Non match, do normal encoding.
+		}
+		\
 		size_t huff_state = 0;
 		if (use_huffman) {
 			huff_state = processNibble<decode>(stream, c, base_contexts, 0);

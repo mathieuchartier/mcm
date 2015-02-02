@@ -129,8 +129,6 @@ void CM<inputs>::compress(Stream* in_stream, Stream* out_stream) {
 		std::cout << "Total huffman: " << total << std::endl;
 	}
 
-	std::cout << skip_count << std::endl;
-	std::cout << "match " << match_count_ << " non match " << non_match_count_ << std::endl;
 	if (statistics) {
 		// Dump weights
 		std::ofstream fout("probs.txt");
@@ -174,6 +172,7 @@ void CM<inputs>::compress(Stream* in_stream, Stream* out_stream) {
 		}
 		std::cout << "zero " << z << " nz " << nz << std::endl;
 		std::cout << "mixer skip " << mixer_skip[0] << " " << mixer_skip[1] << std::endl;
+		std::cout << "match " << match_count_ << " non match " << non_match_count_ << std::endl;
 	}
 }
 
@@ -224,7 +223,7 @@ void CM<inputs>::decompress(Stream* in_stream, Stream* out_stream) {
 }	
 
 template class CM<4>;
-// template class CM<5>;
+template class CM<5>;
 template class CM<6>;
 // template class CM<7>;
 template class CM<8>;

@@ -378,6 +378,8 @@ uint32_t LZ4::getMaxExpansion(uint32_t in_size) {
 uint32_t LZ4::compressBytes(byte* in, byte* out, uint32_t count) {
 #ifdef USE_LZ4
 	return LZ4_compress(reinterpret_cast<char*>(in), reinterpret_cast<char*>(out), count);
+#else
+	return 0;
 #endif
 }
 
