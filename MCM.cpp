@@ -401,6 +401,11 @@ public:
 				files.push_back(FilePath(out_file));
 			}
 		}
+		if (archive_file.isEmpty() || files.empty()) {
+			std::cerr << "Error, input or output files missing" << std::endl;
+			usage(program);
+			return 5;
+		}
 		return 0;
 	}
 };
@@ -616,14 +621,6 @@ int main(int argc, char* argv[]) {
 		break;
 	}
 	}
-
-	/* 
-	if (in_file.empty() || out_file.empty()) {
-		std::cerr << "Error, input or output files missing" << std::endl;
-		usage(program);
-		return 5;
-	}
-	*/
 
 #if 0
 	
