@@ -39,8 +39,7 @@
 #include "StateMap.hpp"
 #include "Util.hpp"
 #include "WordModel.hpp"
-
-#include "APM.hpp"
+#include "SSE.hpp"
 
 // Options.
 #define USE_MMX 0
@@ -93,11 +92,13 @@ private:
 template <size_t inputs = 6>
 class CM : public Compressor {
 public:
-	static const bool statistics = false;
+	// Flags
+	static const bool statistics = true;
 	static const bool use_prefetch = true;
 	static const bool fixed_probs = false;
 	// Currently, LZP sux, need to improve.
-	static const bool use_lzp = false;
+	static const bool use_lzp = true;
+	static const bool kUseSSE = true;
 
 	class SubBlockHeader {
 		friend class CM;
@@ -113,11 +114,6 @@ public:
 			profile = kBinary;
 		}
 	};
-
-	// Statistics
-	uint32_t mixer_skip[2];
-	uint32_t match_count_;
-	uint32_t non_match_count_;
 
 	// SS table
 	static const uint32_t shift = 12;
@@ -153,6 +149,7 @@ public:
 	uint8_t spar2[256 * 256];
 	uint8_t spar3[256 * 256];
 	StationaryModel sparse_probs[256];
+
 	// Maps from char to 4 bit identifier.
 	uint8_t sparse_ctx_map[256];
 	uint8_t text_ctx_map[256];
@@ -201,8 +198,10 @@ public:
 	// Magic mask (tangelo).
 	uint32_t mmask;
 
-	// Fast bit model.
+	// LZP
 	HPStationaryModel lzp_match[256 * 256];
+	SSE lzp_sse;
+	std::vector<CMMixer> lzp_mixers;
 
 	// SM
 	typedef StationaryModel PredModel;
@@ -212,12 +211,20 @@ public:
 	PredArray* cur_preds;
 
 	// SSE
-	// APM apm;
 	size_t apm_ctx;
+	SSE sse;
+	size_t mixer_sse_ctx;
 
 	// Memory usage
 	size_t mem_usage;
 
+	// Statistics
+	uint32_t mixer_skip[2];
+	uint32_t match_count_;
+	uint32_t non_match_count_;
+	uint32_t other_count_;
+
+	// TODO: Get rid of this.
 	static const uint32_t eof_char = 126;
 	
 	forceinline uint32_t hash_lookup(hash_t hash, bool prefetch_addr = use_prefetch) {
@@ -248,16 +255,18 @@ public:
 		
 		mixer_mask = 0xFFFF;
 		mixers.resize(static_cast<uint32_t>(kProfileCount) * (mixer_mask + 1));
-		for (auto& mixer : mixers) {
-			mixer.init(382);
-		}
+		for (auto& mixer : mixers) mixer.init(382);
+		lzp_mixers.resize(256);
+		for (auto& mixer : lzp_mixers) mixer.init(382);
 	
 		for (auto& s : mixer_skip) s = 0;
 		
 		NSStateMap<12> sm;
 		sm.build();
 		
-		// apm.init(table, 0x10100);
+		sse.init(0x10100, &table);
+		lzp_sse.init(0x10100, &table);
+		mixer_sse_ctx = 0;
 		apm_ctx = 0;
 
 		hash_mask = ((2 * MB) << mem_usage) / sizeof(hash_table[0]) - 1;
@@ -335,7 +344,7 @@ public:
 		// Statistics
 		if (statistics) {
 			for (auto& c : mixer_skip) c = 0;
-			match_count_ = non_match_count_ = 0;
+			other_count_ = match_count_ = non_match_count_ = 0;
 		}
 	}
 
@@ -480,27 +489,43 @@ public:
 		int mixer_p = table.sq(stp); // Mix probabilities.
 #endif
 		p = mixer_p;
-		// p = std::max(pr.getP(), 1U);
-		// p = (p + apm1.pp(table, p, ctx * 256 + (owhash & 0xFF))) / 2;
-#if 0
-		if (apm_ctx) {
-			p = apm.pp(table, p, apm_ctx + mixer_ctx);
-		} else {
-			p = (p + apm.pp(table, p, mixer_ctx)) / 2;
+		if (kUseSSE) {
+			if (use_lzp) {
+				if (use_match_p_override) {
+					p = p * 3 + 13 * lzp_sse.p(st[p] + 2048, apm_ctx + mm_l);
+					p /= 16;
+				}
+				if (apm_ctx) {
+					p = sse.p(st[p] + 2048, apm_ctx + mixer_ctx);
+				} else {
+					p = p * 3 + 13 * sse.p(st[p] + 2048, mixer_ctx);
+					p /= 16;
+				}
+			} else {
+				p = (2 * p + 2 * sse.p(st[p] + 2048, (mixer_sse_ctx & 0xFF) * 256 + mixer_ctx)) / 4;
+			}
+			p += p < 2048;
 		}
-		p = std::max(p, 1U);
-#endif
 
 		if (decode) { 
 			bit = ent.getDecodedBit(p, shift);
 		}
+		dcheck(bit < 2);
 
 #if USE_MMX
 		const bool ret = cur_mixer->update(wp, mixer_p, bit);
 #else
 		const bool ret = cur_mixer->update(mixer_p, bit, 12, 24, opt_var, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9);
 #endif
-		// apm.update(bit);
+
+		if (kUseSSE) {
+			if (use_match_p_override) {
+				lzp_sse.update(bit);
+			}
+			sse.update(bit);
+			mixer_sse_ctx = mixer_sse_ctx * 2 + ret;
+		}
+
 		if (statistics) {
 			// Returns false if we skipped the update due to a low error,
 			// should happen frequently on highly compressible files.
@@ -641,7 +666,6 @@ public:
 		size_t expected_char = 0;
 		size_t extra_add = 0;
 		apm_ctx = 0;
-		calcMixerBase();
 		if (mm_len > 0) {
 			// mixer_base = getProfileMixers(profile) + (mm_len * 256);
 			// mixer_base = getProfileMixers(profile) + (mm_len - match_model.getMinMatch()) * 256;
@@ -650,6 +674,7 @@ public:
 				++(expected_char == c ? match_count_ : non_match_count_);
 			}
 			if (use_lzp) {
+				mixer_base = &lzp_mixers[mm_len];
 				apm_ctx = 256 * (1 + expected_char);
 				size_t bit = decode ? 0 : expected_char == c;
 
@@ -670,9 +695,12 @@ public:
 					return match_model.getExpectedChar(buffer);
 				}
 			}
-			// Non match, do normal encoding.
+		} else if (statistics) {
+			++other_count_;
 		}
+		calcMixerBase();
 
+		// Non match, do normal encoding.
 		size_t huff_state = 0;
 		if (use_huffman) {
 			huff_state = processNibble<decode>(stream, c, base_contexts, 0);

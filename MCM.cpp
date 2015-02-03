@@ -428,7 +428,7 @@ void decompress(Stream* in, Stream* out) {
 
 int main(int argc, char* argv[]) {
 	CompressorFactories::init();
-	//runAllTests();
+	// runAllTests();
 	Options options;
 	auto ret = options.parse(argc, argv);
 	if (ret) {
