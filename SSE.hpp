@@ -40,22 +40,27 @@ public:
 
 	template <typename Table>
 	void init(size_t num_ctx, const Table* table) {
+		check(num_ctx > 0);
 		models.resize(num_ctx * kStems);
-		for (size_t ctx = 0; ctx < num_ctx; ++ctx) {
-			for (size_t i = 0; i < kStems; ++i) {
-				auto& const m = models[ctx * kStems + i];
-				m.init();
-				int p = std::min(static_cast<uint32_t>(i << (kProbBits - kStemBits)), static_cast<uint32_t>(kMaxP)); 
-				m.setP(table != nullptr ? table->sq(p - 2048) : p);
-				// m.setP(p);
-			}
+		for (size_t i = 0; i < kStems; ++i) {
+			auto& m = models[i];
+			int p = std::min(static_cast<uint32_t>(i << (kProbBits - kStemBits)), static_cast<uint32_t>(kMaxP)); 
+			m.init(table != nullptr ? table->sq(p - 2048) : p);
+		}
+		size_t ctx = 1;
+		while (ctx * 2 <= num_ctx) {
+			std::copy(&models[0], &models[kStems * ctx], &models[kStems * ctx]);
+			ctx *= 2;
+		}
+		for (; ctx < num_ctx; ++ctx) {
+			std::copy(&models[0], &models[kStems], &models[ctx * kStems]);
 		}
 	}
 
 	int p(size_t p, size_t ctx) {
-		check(p < kMaxP);
+		dcheck(p < kMaxP);
 		const size_t idx = p >> (kProbBits - kStemBits);
-		check(idx < kStems);
+		dcheck(idx < kStems);
 		size_t s1 = ctx * kStems + idx;
 		size_t mask = p & kProbMask;
 		pw = s1 + (mask >= kProbMask / 2);

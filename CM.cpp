@@ -126,46 +126,46 @@ void CM<inputs>::compress(Stream* in_stream, Stream* out_stream) {
 		std::cout << "Total huffman: " << total << std::endl;
 	}
 
-	if (statistics) {
-		// Dump weights
-		std::ofstream fout("probs.txt");
-		for (uint32_t i = 0; i < inputs; ++i) {
-			fout << "{";
-			for (uint32_t j = 0; j < 256; ++j) fout << preds[0][i][j].getP() << ",";
-			fout << "}," << std::endl;
-		}
-
-		// Print average weights so that we find out which contexts are good and which are not.
-		for (size_t cur_p = 0; cur_p < static_cast<uint32_t>(kProfileCount); ++cur_p) {
-			auto cur_profile = (DataProfile)cur_p;
-			CMMixer* mixers = getProfileMixers(cur_profile);
-			std::cout << "Mixer weights for profile " << cur_profile << std::endl;
-			for (size_t i = 0; i < 256; ++i) {
-				double weights[inputs+2] = { 0 };
-				uint32_t count = 0;
-				for (size_t j = 0; j < 256; ++j) {
-					// Only mixers which have been used at least a few times.
-					auto& m = mixers[i * 256 + j];
-					if (m.getLearn() < 30) {
-						for (size_t k = 0; k < m.size(); ++k) {
-							weights[k] += double(m.getWeight(k)) / double(1 << m.shift());
+	if (kStatistics) {
+		if (!kFastStats) {
+			std::ofstream fout("probs.txt");
+			for (uint32_t i = 0; i < inputs; ++i) {
+				fout << "{";
+				for (uint32_t j = 0; j < 256; ++j) fout << preds[0][i][j].getP() << ",";
+				fout << "}," << std::endl;
+			}
+			// Print average weights so that we find out which contexts are good and which are not.
+			for (size_t cur_p = 0; cur_p < static_cast<uint32_t>(kProfileCount); ++cur_p) {
+				auto cur_profile = (DataProfile)cur_p;
+				CMMixer* mixers = getProfileMixers(cur_profile);
+				std::cout << "Mixer weights for profile " << cur_profile << std::endl;
+				for (size_t i = 0; i < 256; ++i) {
+					double weights[inputs+2] = { 0 };
+					uint32_t count = 0;
+					for (size_t j = 0; j < 256; ++j) {
+						// Only mixers which have been used at least a few times.
+						auto& m = mixers[i * 256 + j];
+						if (m.getLearn() < 30) {
+							for (size_t k = 0; k < m.size(); ++k) {
+								weights[k] += double(m.getWeight(k)) / double(1 << m.shift());
+							}
+							++count;
 						}
-						++count;
+					}
+					if (count != 0) {
+						std::cout << "Weights " << i << ":";
+						for (auto& w : weights) std::cout << w / double(count) << " ";
+						std::cout << std::endl;
 					}
 				}
-				if (count != 0) {
-					std::cout << "Weights " << i << ":";
-					for (auto& w : weights) std::cout << w / double(count) << " ";
-					std::cout << std::endl;
-				}
 			}
+			// State count.
+			size_t z = 0, nz = 0;
+			for (size_t i = 0;i <= hash_mask;++i) {
+				++(hash_table[i] != 0 ? nz : z);
+			}
+			std::cout << "zero=" << z << " nonzero=" << nz << std::endl;
 		}
-		// State count.
-		size_t z = 0, nz = 0;
-		for (size_t i = 0;i <= hash_mask;++i) {
-			++(hash_table[i] != 0 ? nz : z);
-		}
-		std::cout << "zero=" << z << " nonzero=" << nz << std::endl;
 		std::cout << "mixer skip=" << mixer_skip[0] << " nonskip=" << mixer_skip[1] << std::endl;
 		std::cout << "match=" << match_count_ << " matchfail=" << non_match_count_ << " nonmatch=" << other_count_ << std::endl;
 	}

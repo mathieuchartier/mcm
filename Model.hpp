@@ -98,37 +98,35 @@ template <typename T, const uint32_t _shift, const uint32_t _learn_rate = 5, con
 class fastBitModel {
 protected:
 	T p;
+	static const bool kUseRounding = false;
 	static const T pmax = (1 << _bits) - 1;
 public:
 	static const uint32_t shift = _shift;
 	static const uint32_t learn_rate = _learn_rate;
 	static const uint32_t max = 1 << shift;
 
-	void init() {
-		p = pmax / 2;
+	forceinline void init(int new_p = (1 << _shift - 1)) {
+		p = new_p << (_bits - shift);
 	}
 
-	fastBitModel() {
+	forceinline fastBitModel() {
 		init();
 	}
 
 	forceinline void update(T bit) {
-		// update(bit, _learn_rate);
-		int round = 1 << (_learn_rate - 1);
-		p += ((static_cast<int>(bit) << _bits) - static_cast<int>(p) + round) >> _learn_rate;
+		update(bit, learn_rate);
 	}
 
 	forceinline void update(T bit, int32_t learn_rate) {
-		// const int round = 1 << (learn_rate - 1);
-		const int round = 0;
+		const int round = kUseRounding ? (1 << (learn_rate - 1)) : 0;
 		p += ((static_cast<int>(bit) << _bits) - static_cast<int>(p) + round) >> learn_rate;
 	}
 
-	inline void setP(uint32_t new_p) {
+	forceinline void setP(uint32_t new_p) {
 		p = new_p << (_bits - shift);
 	}
 
-	inline uint32_t getP() const {
+	forceinline uint32_t getP() const {
 		return p >> (_bits - shift);
 	}
 };

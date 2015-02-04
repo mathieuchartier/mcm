@@ -13,7 +13,7 @@ public:
 	UTF8Decoder<false> decoder;
 
 	// Length of the model.
-	uint32_t len;
+	size_t len;
 
 	// Transform table.
 	static const uint32_t transform_table_size = 256;

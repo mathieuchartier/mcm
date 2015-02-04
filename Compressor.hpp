@@ -239,6 +239,8 @@ public:
 	virtual void compress(Stream* in, Stream* out) = 0;
 	// Decompress n bytes, the calls must line up. You can't do C(20)C(30)D(50)
 	virtual void decompress(Stream* in, Stream* out) = 0;
+	virtual ~Compressor() {
+	}
 };
 
 // In memory compressor.

@@ -183,7 +183,7 @@ static int usage(const std::string& name) {
 		<< "Options: -d for decompress" << std::endl
 		<< "-1 ... -9 specifies ~32mb ... ~1500mb memory, " << std::endl
 		<< "-10 -11 for 3GB, ~5.5GB (only supported on 64 bits)" << std::endl
-		<< "modes: -mid -high (default -mid) specifies speed" << std::endl
+		<< "modes: -mid -high (default -high) specifies speed" << std::endl
 		<< "-test tests the file after compression is done" << std::endl
 		// << "-b <mb> specifies block size in MB" << std::endl
 		// << "-t <threads> the number of threads to use (decompression requires the same number of threads" << std::endl
@@ -272,7 +272,7 @@ public:
 		, opt_mode(false)
 		, compressor(nullptr)
 		, mem_level(6)
-		, comp_level(kCompLevelMid)
+		, comp_level(kCompLevelHigh)
 		, threads(1)
 		, block_size(kDefaultBlockSize) {
 	}

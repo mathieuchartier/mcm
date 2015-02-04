@@ -27,7 +27,7 @@
 #include "Memory.hpp"
 #include "Util.hpp"
 
-#define USE_MALLOC !defined(WIN32)
+#define USE_MALLOC 1
 
 #ifdef WIN32
 #include <Windows.h>
@@ -50,10 +50,10 @@ void MemMap::resize(size_t bytes) {
 	}
 	release();
 	size = bytes;
-#if WIN32
-	storage = (void*)VirtualAlloc(nullptr, size, MEM_COMMIT, PAGE_READWRITE);
-#elif USE_MALLOC
+#if USE_MALLOC
 	storage = std::calloc(1, bytes);
+#elif WIN32
+	storage = (void*)VirtualAlloc(nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 #else
 #error UNIMPLEMENTED
 #endif
@@ -61,22 +61,22 @@ void MemMap::resize(size_t bytes) {
 
 void MemMap::release() {
 	if (storage != nullptr) {
-#if WIN32
-		VirtualFree((LPVOID)storage, size, MEM_RELEASE);
-#elif USE_MALLOC
+#if USE_MALLOC
 		std::free(storage);
+#elif WIN32
+		BOOL result = VirtualFree((LPVOID)storage, size, MEM_DECOMMIT);
 #else
-
+#error UNIMPLEMENTED
 #endif
 		storage = nullptr;
 	}
 }
 
 void MemMap::zero() {
-#ifdef WIN32
-	storage = (void*)VirtualAlloc(storage, size, MEM_RESET, PAGE_READWRITE);
-#elif USE_MALLOC
+#ifdef USE_MALLOC
 	std::memset(storage, 0, size);
+#elif WIN32
+	storage = (void*)VirtualAlloc(storage, size, MEM_RESET, PAGE_READWRITE);
 #else
 	madvise(storage, size, MADV_DONTNEED);
 #endif
