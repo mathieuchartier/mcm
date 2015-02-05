@@ -93,8 +93,8 @@ template <size_t inputs = 6>
 class CM : public Compressor {
 public:
 	// Flags
-	static const bool kStatistics = false;
-	static const bool kFastStats = true;
+	static const bool kStatistics = true;
+	static const bool kFastStats = false;
 	static const bool use_prefetch = false;
 	static const bool fixed_probs = false;
 	// Currently, LZP isn't great, need to improve.
@@ -201,7 +201,6 @@ public:
 
 	// LZP
 	HPStationaryModel lzp_match[256 * 256];
-	SSE lzp_sse;
 	std::vector<CMMixer> lzp_mixers;
 
 	// SM
@@ -213,8 +212,10 @@ public:
 	PredArray* cur_preds;
 
 	// SSE
-	size_t apm_ctx;
-	SSE sse;
+	SSE<shift> sse;
+	size_t sse_ctx;
+	SSE<shift> sse2;
+	size_t sse2_ctx;
 	size_t mixer_sse_ctx;
 
 	// Memory usage
@@ -248,6 +249,7 @@ public:
 		opt_var = var;
 		word_model.setOpt(var);
 		match_model.setOpt(var);
+		sse.setOpt(var);
 	}
 
 	void init() {
@@ -267,9 +269,9 @@ public:
 		sm.build();
 
 		sse.init(257 * 256 * 16, &table);
-		lzp_sse.init(0x10100, &table);
+		sse2.init(257 * 256, &table);
 		mixer_sse_ctx = 0;
-		apm_ctx = 0;
+		sse_ctx = sse2_ctx = 0;
 
 		hash_mask = ((2 * MB) << mem_usage) / sizeof(hash_table[0]) - 1;
 		hash_alloc_size = hash_mask + o0size + o1size + (1 << huffman_len_limit);
@@ -311,8 +313,8 @@ public:
 		for (auto& c : spar3) c = 0;
 		for (auto& m : sparse_probs) m.init();
 		for (size_t i = 0; i < 256; ++i) {
-			sparse_ctx_map[i] = (i < 1) + (i < 32) + (i < 59) + (i < 64) + (i < 91) + (i < 128) + (i < 137) + (i < 139) + 
-				(i < 140) + (i < 142) + (i < 255) + (i < 131); // + (i < 58) + (i < 48);
+			sparse_ctx_map[i] = (i < 1) + (i < 32) + (i < 59) + (i < 64) + (i < 91) + (i < 142) + (i < 255); // + (i < 58) + (i < 48);
+			sparse_ctx_map[i] += (i < 128) + (i < 131) + (i < 137) + (i < 139) + (i < 140) + (i < 142);
 			text_ctx_map[i] = (i < 95) + (i < 123) + (i < 47) + (i < 64) + (i < 46) + (i < 33) + (i < 58);
 		}
 		// Optimization
@@ -399,10 +401,13 @@ public:
 				(wlen >= 6) +
 				(wlen >= 8) +
 				0;
+			mixer_ctx <<= 2;
 		} else {
 			mixer_ctx = sparse_ctx_map[p0];
+			// mixer_ctx = sparse_ctx_map[p1];
+			mixer_ctx <<= 3;
 		}
-		mixer_ctx <<= 2;
+		
 		if (mm_len) {
 			if (use_word) {
 				mixer_ctx |= 1 +
@@ -413,6 +418,8 @@ public:
 				mixer_ctx |= 1 +
 					(mm_len >= match_model.kMinMatch + 1) + 
 					(mm_len >= match_model.kMinMatch + 4) + 
+					(mm_len >= match_model.kMinMatch + 5) + 
+					(mm_len >= match_model.kMinMatch + 8) + 
 					0;
 			}
 		}		
@@ -436,7 +443,7 @@ public:
 	}
 
 	template <const bool decode, typename TStream>
-	forceinline size_t processBit(TStream& stream, size_t bit, size_t* base_contexts, size_t ctx, bool use_match_p_override = false, int match_p_override = 0, size_t mixer_ctx = 0) {
+	size_t processBit(TStream& stream, size_t bit, size_t* base_contexts, size_t ctx, bool use_match_p_override = false, int match_p_override = 0, size_t mixer_ctx = 0) {
 		if (!use_match_p_override) {
 			mixer_ctx = ctx;
 		}
@@ -506,17 +513,16 @@ public:
 		p = mixer_p;
 		if (kUseSSE) {
 			if (kUseLZP) {
-				if (false && use_match_p_override) {
-					p = p * 3 + 13 * lzp_sse.p(st[p] + 2048, apm_ctx);
-					p /= 16;
-				}
-				if (apm_ctx) {
-					if (use_match_p_override) {
-						p = sse.p(st[p] + 2048, apm_ctx);
-					} else {
-						p = sse.p(st[p] + 2048, apm_ctx + mixer_ctx);
-						// p = sse.p(st[p] + 2048, apm_ctx + mixer_ctx);
+				if (sse2_ctx) {
+					if (true) {
+						if (use_match_p_override) {
+							p = sse.p(st[p] + 2048, sse2_ctx);
+						} else {
+							p = sse.p(st[p] + 2048, sse2_ctx + mixer_ctx);
+							// p = sse.p(st[p] + 2048, apm_ctx + mixer_ctx);
+						}
 					}
+					//p = sse2.p(st[p] + 2048, sse2_ctx + mixer_ctx);
 					p += p < 2048;
 				} else if (false) {
 					// This SSE is disabled for speed.
@@ -542,11 +548,9 @@ public:
 #endif
 
 		if (kUseSSE) {
-			if (use_match_p_override) {
-				// lzp_sse.update(bit);
-			}
-			if (apm_ctx) {
-			sse.update(bit);
+			if (sse2_ctx) {
+				sse.update(bit);
+				//sse2.update(bit);
 			}
 			mixer_sse_ctx = mixer_sse_ctx * 2 + ret;
 		}
@@ -686,7 +690,7 @@ public:
 		match_model.setHash(h);
 
 		const size_t mm_len = match_model.getLength();
-		apm_ctx = 0;
+		sse_ctx = 0;
 		calcMixerBase();
 		if (mm_len > 0) {
 			const size_t expected_char = match_model.getExpectedChar(buffer);
@@ -701,38 +705,35 @@ public:
 				
 				size_t bit = decode ? 0 : expected_char == c;
 
+				sse2_ctx = 256 * (1 + expected_char);
 				if (false) {
-					apm_ctx = std::min(extra_len, static_cast<size_t>(2));
-					apm_ctx *= 257;
-					apm_ctx += 1 + expected_char;
-					apm_ctx *= 256;
-				} else {
-					apm_ctx = 256 * (1 + expected_char);
+					sse_ctx = sse2_ctx + 256 * 257 * std::min(extra_len, static_cast<size_t>(15));
 				}
 
 				auto& m = lzp_match[expected_char * 256 + mm_len];
 				int p = m.getP();
 				// mixer_base = getProfileMixers(profile) + std::min(mm_len, static_cast<size_t>(15)) * 256 * 16 + std::min(word_model.len, static_cast<size_t>(15)) * 16;
 				// p = lzp_sse.p(table.st(p) + 2048, mm_len); 
+				// size_t bit_hash = hash_lookup(h ^ expected_char);
+				// std::swap(bit_hash, base_contexts[inputs - 1]);
 				if (true) {
 					int match_p2 = table.st(p);
 					bit = processBit<decode>(stream, bit, base_contexts, 256 ^ expected_char, true, match_p2, 0);
 				} else {
 					int p = m.getP();
-					// p = lzp_sse.p(table.st(p) + 2048, mm_len); 
 					if (decode) {
 						bit = ent.decode(stream, p, shift);
 					} else {
 						ent.encode(stream, bit, p, shift);
 					}
 				}
-				// lzp_sse.update(bit);
 				m.update(bit);
 
 				if (bit) {
 					return expected_char;
 				}
 
+				// std::swap(bit_hash, base_contexts[inputs - 1]);
 				calcMixerBase();
 			}
 		} else if (kStatistics) {

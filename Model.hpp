@@ -93,6 +93,54 @@ public:
 	}
 };
 
+template <const uint32_t _shift, const uint32_t _learn_rate = 5, const uint32_t _bits = 15> 
+class bitLearnModel{
+	static const uint32_t kCountBits = 8;
+	static const uint32_t kCountMask = (1 << kCountBits) - 1;
+	static const uint32_t kInitialCount = 2;
+	// Count is in low kCountBits.
+	uint32_t p;
+public:
+	static const uint32_t shift = _shift;
+	static const uint32_t learn_rate = _learn_rate;
+	static const uint32_t max = 1 << shift;
+
+	forceinline void init(int new_p = 1 << (_shift - 1)) {
+		setP(new_p, kInitialCount << 5);
+	}
+
+	forceinline bitLearnModel() {
+		init();
+	}
+
+	forceinline void update(uint32_t bit) {
+		const size_t count = p & kCountMask;
+		const size_t learn_rate = 2 + (count >> 5);
+#if 0
+		auto delta = ((static_cast<int>(bit) << 31) - static_cast<int>(p & ~kCountMask)) >> learn_rate;
+		p += delta & ~kCountMask;
+		p += count < kCountMask;
+		p &= 0x7FFFFFFF;
+#else
+		const int m[2] = {kCountMask, (1 << 31) - 1};
+		p = p + (((m[bit] - static_cast<int>(p)) >> learn_rate) & ~kCountMask);
+		p += count < kCountMask;
+#endif
+	}
+
+	forceinline uint32_t getCount() {
+		return w & kCountMask;
+	}
+
+	forceinline void setP(uint32_t new_p, uint32_t count) {
+		p = new_p << (31 - shift) | count;
+	}
+
+	forceinline uint32_t getP() const {
+		return p >> (31 - shift);
+	}
+};
+
 // Bit probability model (should be rather fast).
 template <typename T, const uint32_t _shift, const uint32_t _learn_rate = 5, const uint32_t _bits = 15>
 class fastBitModel {

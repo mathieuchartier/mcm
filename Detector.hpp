@@ -163,7 +163,7 @@ public:
 			// This is pretty bad, need a clean way to do it.
 			uint32_t fpos = 0;
 			uint32_t w0 = readBytes(fpos); fpos += 4;
-			if (w0 == 0x52494646) {
+			if (false && w0 == 0x52494646) {
 				uint32_t chunk_size = readBytes(fpos); fpos += 4;
 				uint32_t format = readBytes(fpos); fpos += 4;
 				// Format subchunk.
