@@ -95,8 +95,8 @@ public:
 	// Flags
 	static const bool kStatistics = true;
 	static const bool kFastStats = false;
-	static const bool use_prefetch = false;
-	static const bool fixed_probs = false;
+	static const bool kUsePrefetch = false;
+	static const bool kFixedProbs = false;
 	// Currently, LZP isn't great, need to improve.
 	static const bool kUseLZP = true;
 	static const bool kUseSSE = true;
@@ -202,6 +202,7 @@ public:
 	// LZP
 	HPStationaryModel lzp_match[256 * 256];
 	std::vector<CMMixer> lzp_mixers;
+	int last_p;
 
 	// SM
 	typedef StationaryModel PredModel;
@@ -228,7 +229,7 @@ public:
 	// TODO: Get rid of this.
 	static const uint32_t eof_char = 126;
 	
-	forceinline uint32_t hash_lookup(hash_t hash, bool prefetch_addr = use_prefetch) {
+	forceinline uint32_t hash_lookup(hash_t hash, bool prefetch_addr = kUsePrefetch) {
 		hash &= hash_mask;
 		uint32_t ret = hash + (o0size + o1size);
 		if (prefetch_addr) {	
@@ -268,10 +269,11 @@ public:
 		NSStateMap<12> sm;
 		sm.build();
 
-		sse.init(257 * 256 * 16, &table);
-		sse2.init(257 * 256, &table);
+		sse.init(257 * 256, &table);
+		sse2.init(257 * 256 * 16, &table);
 		mixer_sse_ctx = 0;
 		sse_ctx = sse2_ctx = 0;
+		last_p = max_value / 2;
 
 		hash_mask = ((2 * MB) << mem_usage) / sizeof(hash_table[0]) - 1;
 		hash_alloc_size = hash_mask + o0size + o1size + (1 << huffman_len_limit);
@@ -343,7 +345,7 @@ public:
 				for (uint32_t k = 0; k < num_states; ++k) {
 					auto& pr = preds[i][j][k];
 					pr.init();
-					if (fixed_probs) {
+					if (kFixedProbs) {
 						pr.setP(table.st(initial_probs[std::min(j, 9U)][k]));
 					} else {
 						pr.setP(initial_probs[std::min(j, 9U)][k]);
@@ -386,10 +388,13 @@ public:
 	void calcMixerBase() {
 		const uint32_t p0 = static_cast<uint8_t>(buffer[buffer.getPos() - 1]);
 		const uint32_t p1 = static_cast<uint8_t>(buffer[buffer.getPos() - 2]);
-		uint32_t mixer_ctx; // >> 5;
+		uint32_t mixer_ctx = 0; // >> 5;
 		const uint32_t mm_len = match_model.getLength();
+		// mixer_ctx |= sse2_ctx != 0;
+		// mixer_ctx <<= 1;
+
 		if (use_word) {
-			mixer_ctx = text_ctx_map[p0];
+			mixer_ctx |= text_ctx_map[p0];
 			mixer_ctx <<= 3;
 			auto wlen = word_model.getLength();
 			mixer_ctx |=
@@ -405,7 +410,7 @@ public:
 		} else {
 			mixer_ctx = sparse_ctx_map[p0];
 			// mixer_ctx = sparse_ctx_map[p1];
-			mixer_ctx <<= 3;
+			mixer_ctx <<= 2;
 		}
 		
 		if (mm_len) {
@@ -428,7 +433,7 @@ public:
 	}
 
 	forceinline byte nextState(byte state, uint32_t bit, uint32_t ctx) {
-		if (!fixed_probs) {
+		if (!kFixedProbs) {
 			(*cur_preds)[ctx][state].update(bit, 9);
 		}
 		return state_trans[state][bit];
@@ -436,7 +441,7 @@ public:
 	
 	forceinline int getP(byte state, uint32_t ctx, const short* st) const {
 		int p = (*cur_preds)[ctx][state].getP();
-		if (!fixed_probs) {
+		if (!kFixedProbs) {
 			p = st[p];
 		}
 		return p;
@@ -513,16 +518,16 @@ public:
 		p = mixer_p;
 		if (kUseSSE) {
 			if (kUseLZP) {
-				if (sse2_ctx) {
+				if (sse_ctx) {
 					if (true) {
 						if (use_match_p_override) {
-							p = sse.p(st[p] + 2048, sse2_ctx);
+							p = sse.p(st[p] + 2048, sse_ctx);
 						} else {
-							p = sse.p(st[p] + 2048, sse2_ctx + mixer_ctx);
+							p = sse.p(st[p] + 2048, sse_ctx + mixer_ctx);
 							// p = sse.p(st[p] + 2048, apm_ctx + mixer_ctx);
 						}
 					}
-					//p = sse2.p(st[p] + 2048, sse2_ctx + mixer_ctx);
+					// p = sse2.p(st[p] + 2048, sse2_ctx + mixer_ctx);
 					p += p < 2048;
 				} else if (false) {
 					// This SSE is disabled for speed.
@@ -548,9 +553,9 @@ public:
 #endif
 
 		if (kUseSSE) {
-			if (sse2_ctx) {
+			if (!kUseLZP || sse_ctx) {
 				sse.update(bit);
-				//sse2.update(bit);
+				// sse2.update(bit);
 			}
 			mixer_sse_ctx = mixer_sse_ctx * 2 + ret;
 		}
@@ -687,11 +692,25 @@ public:
 			}
 			order++;
 		}
-		match_model.setHash(h);
+		h = hashFunc(buffer[bpos - ++order], h);
+		if (kUseLZP) {
+			// Add a few more for good measure.
+			// h = hashFunc(buffer[bpos - ++order], h);
+			h = hashFunc(buffer[bpos - ++order], h);
+		}
 
-		const size_t mm_len = match_model.getLength();
-		sse_ctx = 0;
-		calcMixerBase();
+		size_t mm_len = 0;
+		if (use_match) {
+			match_model.update(buffer, h);
+			if (mm_len = match_model.getLength()) {
+				uint32_t expected_char = match_model.getExpectedChar(buffer);
+				uint32_t expected_bits = use_huffman ? huff.getCode(expected_char).length : 8;
+				if (use_huffman) expected_char = huff.getCode(expected_char).value;
+				match_model.updateExpectedCode(expected_char, expected_bits);
+			}
+		}
+
+		sse2_ctx = sse_ctx = 0;
 		if (mm_len > 0) {
 			const size_t expected_char = match_model.getExpectedChar(buffer);
 			if (kStatistics && !decode) {
@@ -699,16 +718,17 @@ public:
 			}
 			if (kUseLZP) {
 				size_t extra_len = mm_len - match_model.getMinMatch();
-				cur_preds = &preds[kPredArrays - 1];
+				auto* lzp_preds = &preds[kPredArrays - 1];
 				// mixer_base = &lzp_mixers[mm_len];
 				dcheck(mm_len >= match_model.getMinMatch());
 				
 				size_t bit = decode ? 0 : expected_char == c;
 
-				sse2_ctx = 256 * (1 + expected_char);
-				if (false) {
-					sse_ctx = sse2_ctx + 256 * 257 * std::min(extra_len, static_cast<size_t>(15));
+				sse_ctx = 256 * (1 + expected_char);
+				if (true) {
+					sse2_ctx = sse_ctx + 256 * 257 * std::min(extra_len, static_cast<size_t>(15));
 				}
+				calcMixerBase();
 
 				auto& m = lzp_match[expected_char * 256 + mm_len];
 				int p = m.getP();
@@ -716,28 +736,84 @@ public:
 				// p = lzp_sse.p(table.st(p) + 2048, mm_len); 
 				// size_t bit_hash = hash_lookup(h ^ expected_char);
 				// std::swap(bit_hash, base_contexts[inputs - 1]);
+				/*
+				Match model:
+				Stats
+				O(8)9: 44975700 / 19422575 / 35601881
+				O(6)8: 49811847 / 22860328 / 27327981
+				O(6)7: 54109622 / 26313310 / 19577224 
+				Costs:
+				opt: 4698728
+				O(8):3478345
+				O(6):4718134
+				h(c):5482321 5239981
+				h:5866000
+				lzp_match:7904782
+				pos:8839769
+				0.5:10053001
+				*/
+				// include.tar
+				// O(6): 244703
+				// oth: 251450
+
 				if (true) {
 					int match_p2 = table.st(p);
 					bit = processBit<decode>(stream, bit, base_contexts, 256 ^ expected_char, true, match_p2, 0);
 				} else {
-					int p = m.getP();
+					// auto pos = hash_lookup(match_model.getPos());
+					// auto& st0 = hash_table[hash_lookup(hashFunc(expected_char, word_model.getHash()))];
+					auto& st0 = hash_table[hash_lookup(h)];
+					auto& st1 = hash_table[hash_lookup(hashFunc(expected_char, h))];
+					auto& st2 = hash_table[hash_lookup(hashFunc(expected_char, owhash))];
+					auto& st3 = hash_table[hash_lookup(hashFunc(expected_char, 0x8765321 + (owhash & 0xFFFF)))];
+					auto& pr0 = (*lzp_preds)[0][st0];
+					auto& pr1 = (*lzp_preds)[1][st1];
+					auto& pr2 = (*lzp_preds)[2][st2];
+					auto& pr3 = (*lzp_preds)[3][st3];
+					auto p0 = table.st(m.getP());
+					auto p1 = table.st(pr0.getP());
+					auto p2 = 0; //table.st(pr1.getP());
+					auto p3 = table.st(pr2.getP());
+					auto p4 = table.st(pr3.getP());
+					auto p5 = table.st(last_p);
+					// auto p5 = 0;
+					CMMixer* mixer = mixer_base;	
+					int mixer_p = table.sq(mixer->p(11, p0, p1, p2, p3, p4, p5));
+					int p = mixer_p;
+
+					// p = m.getP();
+					p = (p + sse.p(table.st(p) + 2048, sse_ctx + mm_len)) / 2;
+					p += p < 2048;
 					if (decode) {
 						bit = ent.decode(stream, p, shift);
 					} else {
 						ent.encode(stream, bit, p, shift);
 					}
+					if (mixer->update(p, bit, shift, 24, 1, p0, p1, p2, p3, p4, p5)) {
+						st0 = state_trans[st0][bit];
+						st1 = state_trans[st1][bit];
+						st2 = state_trans[st2][bit];
+						st3 = state_trans[st3][bit];
+						pr0.update(bit);
+						pr1.update(bit);
+						pr2.update(bit);
+						pr3.update(bit);
+						sse.update(bit);
+					}
+					last_p = p;
 				}
 				m.update(bit);
 
 				if (bit) {
 					return expected_char;
 				}
-
-				// std::swap(bit_hash, base_contexts[inputs - 1]);
+				last_p = 2048;
+			} else {
 				calcMixerBase();
 			}
-		} else if (kStatistics) {
-			++other_count_;
+		} else {
+			calcMixerBase();
+			if (kStatistics) ++other_count_;
 		}
 		if (false) {
 			match_model.resetMatch();
@@ -789,21 +865,12 @@ public:
 		if (use_word) {
 			word_model.updateUTF(c);
 			if (word_model.getLength()) {
-				if (use_prefetch) hash_lookup(word_model.getHash());
+				if (kUsePrefetch) {
+					hash_lookup(word_model.getHash());
+				}
 			}
 		}
 		buffer.push(c);
-		if (use_match) {
-			match_model.update(buffer);
-			if (match_model.getLength()) {
-				uint32_t expected_char = match_model.getExpectedChar(buffer);
-				uint32_t expected_bits = use_huffman ? huff.getCode(expected_char).length : 8;
-				if (use_huffman) expected_char = huff.getCode(expected_char).value;
-				match_model.updateExpectedCode(expected_char, expected_bits);
-			}
-		} else {
-			match_model.resetMatch();
-		}
 		owhash = (owhash << 8) | static_cast<byte>(c);
 	}
 

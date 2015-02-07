@@ -44,7 +44,7 @@
 CompressorFactories* CompressorFactories::instance = nullptr;
 
 typedef X86AdvancedFilter DefaultFilter;
-//typedef FixedDeltaFilter<2, 1> DefaultFilter;
+//typedef FixedDeltaFilter<2, 2> DefaultFilter;
 //typedef SimpleDict DefaultFilter;
 //typedef IdentityFilter DefaultFilter;
 

@@ -142,7 +142,7 @@ void CM<inputs>::compress(Stream* in_stream, Stream* out_stream) {
 				for (size_t i = 0; i < 256; ++i) {
 					double weights[inputs+2] = { 0 };
 					double lzp_weights[inputs+2] = { 0 };
-					uint32_t count = 0;
+					size_t count = 0, lzp_count = 0;
 					for (size_t j = 0; j < 256; ++j) {
 						// Only mixers which have been used at least a few times.
 						auto& m = mixers[i * 256 + j];
@@ -156,6 +156,7 @@ void CM<inputs>::compress(Stream* in_stream, Stream* out_stream) {
 								for (size_t k = 0; k < m.size(); ++k) {
 									lzp_weights[k] += double(m.getWeight(k)) / double(1 << m.shift());
 								}
+								++lzp_count;
 							}
 						}
 					}
@@ -163,6 +164,8 @@ void CM<inputs>::compress(Stream* in_stream, Stream* out_stream) {
 						std::cout << "Weights " << i << ":";
 						for (auto& w : weights) std::cout << w / double(count) << " ";
 						std::cout << std::endl;
+					}
+					if (lzp_count) {
 						std::cout << "LZP " << i << ":";
 						for (auto& w : lzp_weights) std::cout << w << " ";
 						std::cout << std::endl;

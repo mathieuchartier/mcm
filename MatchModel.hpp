@@ -38,9 +38,6 @@ private:
 	Model* cur_mdl;
 	uint32_t expected_code, prev_char;
 	static const uint32_t code_bit_shift = sizeof(uint32_t) * 8 - 1;
-
-	// Hashes.
-	uint32_t h0, h1, h2, h3;
 public:
 	typedef CyclicBuffer<uint8_t> Buffer;
 	uint32_t opt_var;
@@ -68,6 +65,10 @@ public:
 		return bit ? -p : p;
 	}
 
+	forceinline size_t getPos() const {
+		return pos;
+	}
+
 	forceinline uint32_t getExpectedBit() const {
 		return expected_code >> code_bit_shift;
 	}
@@ -81,7 +82,6 @@ public:
 		cur_max_match = max_match;
 		num_length_models_ = (cur_max_match + 1) * max_bits_per_char_;
 		models.resize(kCharMax * num_length_models_);
-		h0 = h1 = h2 = h3 = 0;
 		cur_min_match = min_match;
 		expected_code = 0;
 		pos = len = dist = 0;
@@ -138,46 +138,21 @@ public:
 		}
 	}
 
-	forceinline void setHash(uint32_t new_h1) {
-		h0 = new_h1;
-		assert(cur_min_match >= kMinMatch);
-	}
-	
-	forceinline uint32_t hashFunc(uint32_t a, uint32_t b) {
-		b += a;
-		b += rotate_left(b, 9);
-		return b ^ (b >> 6);
-	}
-
-	void update(Buffer& buffer) {
+	void update(Buffer& buffer, uint32_t h) {
 		const auto blast = buffer.getPos() - 1;
 		const auto bmask = buffer.getMask();
 		const auto last_pos = blast & bmask;
 		setPrevChar(buffer(last_pos));
-		// Update hashes.	
-		if (kMultiMatch) {
-			h3 = hashFunc(prev_char, h2); // order n + 2
-			h2 = hashFunc(prev_char, h1); // order n + 1
-		}
-		h1 = hashFunc(prev_char, h0); // order n
 		// Update the existing match.
+		auto& b1 = hash_table[h & hash_mask];
 		if (!len) {
-			auto& b1 = hash_table[h1 & hash_mask];
-			if (((b1 ^ h1) & ~bmask) == 0) {
-				search(buffer, b1);
-			}
-			if (kMultiMatch && len < small_match) {
-				auto& b2 = hash_table[h3 & hash_mask];
-				if (((b2 ^ h3) & ~bmask) == 0) {
-					search(buffer, b2);
-				}
-				b2 = last_pos | (h3 & ~bmask);
-			} else
-				b1 = last_pos | (h1 & ~bmask);
+			search(buffer, b1);
+			// b1 = last_pos;
 		} else {
 			len += len < cur_max_match;
 			++pos;
 		}
+		b1 = last_pos;
 		updateCurMdl();
 	}
 

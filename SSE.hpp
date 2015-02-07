@@ -26,8 +26,8 @@
 
 #include "Model.hpp"
 
-template <size_t kProbBits, size_t kStemBits = 5, class StationaryModel = fastBitModel<int, kProbBits, 8, 30>>
-// template <size_t kProbBits, size_t kStemBits = 5, class StationaryModel = bitLearnModel<kProbBits, 8, 30>>
+// template <size_t kProbBits, size_t kStemBits = 5, class StationaryModel = fastBitModel<int, kProbBits, 8, 30>>
+template <size_t kProbBits, size_t kStemBits = 5, class StationaryModel = bitLearnModel<kProbBits, 8, 30>>
 class SSE {
 	static const size_t kStems = (1 << kStemBits) + 1;
 	static const size_t kMaxP = 1 << kProbBits;
@@ -40,7 +40,6 @@ public:
 	std::vector<StationaryModel> models;
 
 	SSE() : opt(0) {
-
 	}
 
 	void setOpt(size_t var) {
@@ -102,10 +101,15 @@ class FastSSE {
 	static const size_t kStems = 1 << kStemBits;
 	static const size_t kMaxP = 1 << kProbBits;
 	size_t pw;
+	size_t opt;
 public:
 	std::vector<StationaryModel> models;
 
-	FastSSE() : pw(0) {
+	FastSSE() : pw(0), opt(0) {
+	}
+
+	void setOpt(size_t var) {
+		opt = var;
 	}
 
 	template <typename Table>
