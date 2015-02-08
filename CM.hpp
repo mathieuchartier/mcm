@@ -331,7 +331,7 @@ public:
 	
 		for (auto& s : mixer_skip) s = 0;
 		
-		NSStateMap<12> sm;
+		NSStateMap<kShift> sm;
 		sm.build();
 
 		sse.init(257 * 256, &table);
@@ -358,7 +358,7 @@ public:
 			for (size_t len = 0; len < 256; ++len) {
 				auto& m = lzp_match[expected * 256 + len];
 				if (len > 0) {
-					m.init(4096 - 2048 / len);
+					m.init(kMaxValue - kMaxValue / (2 * len));
 				} else {
 					m.init();
 				}
@@ -367,7 +367,7 @@ public:
 
 		// Match model.
 		match_model.resize(buffer.getSize() / 2);
-		match_model.init(MatchModelType::kMinMatch, 80U, use_huffman ? 16U : 8U);
+		match_model.init(MatchModelType::kMinMatch, 80U);
 		match_model_order_ = 0;
 
 		for (size_t i = 0; i < 256; ++i) {
@@ -730,7 +730,7 @@ public:
 
 		size_t mm_len = 0;
 		if (match_model_order_ != 0) {
-			match_model.update(buffer, h);
+			match_model.update(buffer, h, p0);
 			if (mm_len = match_model.getLength()) {
 				uint32_t expected_char = match_model.getExpectedChar(buffer);
 				uint32_t expected_bits = use_huffman ? huff.getCode(expected_char).length : 8;

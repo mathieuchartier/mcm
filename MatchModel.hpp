@@ -7,16 +7,15 @@ template <typename Model>
 class MatchModel {
 public:
 	static const size_t kMinMatch = 4; // TODO: Tweak this??????
-	static const size_t small_match = 8;
-	static const size_t kCharShift = 2;
-	static const size_t kCharMax = 256U >> kCharShift;
-	static const size_t mm_shift = 2;  // WTF DIS 4.
-	static const size_t max_value = 1 << 12;
+	static const size_t kSmallMatch = 8;
+	static const size_t kMaxCtx = 256U;
+	static const size_t kMMShift = 2;  // WTF DIS 4.
+	static const size_t kMaxValue = 1 << 12;
 	static const size_t kMaxCtxLen = 32;
 	static const bool kMultiMatch = false;
 	static const bool kExtendMatch = false;
 private:
-	static const size_t bits_per_char = 16;
+	static const size_t kBitsPerChar = 16;
 	std::vector<Model> models;
 	Model* model_base; // Bits expected 0 x 8, 1 x 8.
 
@@ -28,7 +27,6 @@ private:
 	// Current match.
 	size_t pos, len;
 
-	size_t max_bits_per_char_;
 	size_t num_length_models_;
 
 	// Hash table
@@ -36,8 +34,8 @@ private:
 	MemMap hash_storage;
 	uint32_t* hash_table;
 	Model* cur_mdl;
-	uint32_t expected_code, prev_char;
-	static const uint32_t code_bit_shift = sizeof(uint32_t) * 8 - 1;
+	uint32_t expected_code;
+	static const uint32_t kCodeBitShift = sizeof(uint32_t) * 8 - 1;
 public:
 	typedef CyclicBuffer<uint8_t> Buffer;
 	uint32_t opt_var;
@@ -59,10 +57,8 @@ public:
 	}
 
 	forceinline int getP(const short* st) {
-		if (!len) return 0;
-		int p = st[cur_mdl->getP()];
-		int bit = getExpectedBit();
-		return bit ? -p : p;
+		dcheck(len != 0);
+		return st[cur_mdl[getExpectedBit()].getP()];
 	}
 
 	forceinline size_t getPos() const {
@@ -70,31 +66,33 @@ public:
 	}
 
 	forceinline uint32_t getExpectedBit() const {
-		return expected_code >> code_bit_shift;
+		return expected_code >> kCodeBitShift;
 	}
 
 	forceinline size_t getMinMatch() const {
 		return kMinMatch;
 	}
 
-	void init(size_t min_match, size_t max_match, size_t max_bits_per_char = 8) {
-		max_bits_per_char_ = max_bits_per_char;
+	void init(size_t min_match, size_t max_match) {
 		cur_max_match = max_match;
-		num_length_models_ = (cur_max_match + 1) * max_bits_per_char_;
-		models.resize(kCharMax * num_length_models_);
+		num_length_models_ = (cur_max_match + 1) * 2;
+		models.resize(kMaxCtx * num_length_models_);
 		cur_min_match = min_match;
 		expected_code = 0;
 		pos = len = dist = 0;
 		for (auto& m : models) m.init();
-		for (size_t c = 0; c < kCharMax; ++c) {
-			setPrevChar(c << kCharShift);
+		for (size_t c = 0; c < kMaxCtx; ++c) {
+			setCtx(c);
 			for (size_t i = 0; i < num_length_models_; ++i) {
-				const size_t index = i / bits_per_char;
-				const size_t len = kMinMatch + (index << mm_shift);
-				model_base[i].setP((max_value / 2) / len); 
+				const size_t len = kMinMatch + 4 + i / 2;
+				if ((i & 1) != 0) {
+					model_base[i].setP(kMaxValue - 1 - (kMaxValue / 2) / len); 
+				} else {
+					model_base[i].setP((kMaxValue / 2) / len); 
+				}
 			}
 		}
-		setPrevChar(0);
+		setCtx(0);
 		updateCurMdl();
 	}
 
@@ -106,12 +104,8 @@ public:
 		len = 0;
 	}
 
-	forceinline void setPrevChar(size_t c) {
-		prev_char = c;
-		const size_t base = prev_char >> kCharShift;
-		// size_t base = prev_char >> (kCharShift + 1);
-		// base = base * 2 + (dist <= 0x32 * 104);
-		model_base = &models[base * num_length_models_];
+	forceinline void setCtx(size_t ctx) {
+		model_base = &models[ctx * num_length_models_];
 	}
 			
 	void search(Buffer& buffer, uint32_t spos) {
@@ -138,11 +132,11 @@ public:
 		}
 	}
 
-	void update(Buffer& buffer, uint32_t h) {
+	void update(Buffer& buffer, uint32_t h, size_t ctx) {
 		const auto blast = buffer.getPos() - 1;
 		const auto bmask = buffer.getMask();
 		const auto last_pos = blast & bmask;
-		setPrevChar(buffer(last_pos));
+		setCtx(ctx);
 		// Update the existing match.
 		auto& b1 = hash_table[h & hash_mask];
 		if (!len) {
@@ -158,7 +152,7 @@ public:
 
 	void updateCurMdl() {
 		if (len) {
-			cur_mdl = model_base + bits_per_char * std::min(len - kMinMatch, kMaxCtxLen);
+			cur_mdl = model_base + 2 * std::min(len - kMinMatch, cur_max_match);
 		}
 	}
 
@@ -167,16 +161,15 @@ public:
 	}
 
 	void updateExpectedCode(uint32_t code, uint32_t bit_len = 8) {
-		expected_code = code << (code_bit_shift - bit_len + 1);
+		expected_code = code << (kCodeBitShift + 1 - bit_len);
 	}
 
 	forceinline void updateBit(uint32_t bit) {
 		if (len) {
-			uint32_t diff = (expected_code >> code_bit_shift) ^ bit;
-			cur_mdl->update(diff);
+			uint32_t diff = (expected_code >> kCodeBitShift) ^ bit;
+			cur_mdl[getExpectedBit()].update(bit);
 			len &= -(1 ^ diff);
 			expected_code <<= 1;
-			cur_mdl++;
 		}
 	}
 };
