@@ -131,7 +131,7 @@ void CM<inputs>::compress(Stream* in_stream, Stream* out_stream) {
 			std::ofstream fout("probs.txt");
 			for (uint32_t i = 0; i < inputs; ++i) {
 				fout << "{";
-				for (uint32_t j = 0; j < 256; ++j) fout << preds[0][i][j].getP() << ",";
+				for (uint32_t j = 0; j < 256; ++j) fout << preds[kText][i][j].getP() << ",";
 				fout << "}," << std::endl;
 			}
 			// Print average weights so that we find out which contexts are good and which are not.
