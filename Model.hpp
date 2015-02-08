@@ -129,7 +129,7 @@ public:
 	}
 
 	forceinline uint32_t getCount() {
-		return w & kCountMask;
+		return p & kCountMask;
 	}
 
 	forceinline void setP(uint32_t new_p, uint32_t count) {

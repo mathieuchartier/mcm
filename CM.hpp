@@ -100,6 +100,7 @@ public:
 	// Currently, LZP isn't great, need to improve.
 	static const bool kUseLZP = true;
 	static const bool kUseSSE = true;
+	static const bool kUseSSEOnlyLZP = true;
 
 	class SubBlockHeader {
 		friend class CM;
@@ -117,15 +118,17 @@ public:
 	};
 
 	// SS table
-	static const uint32_t shift = 12;
-	static const uint32_t max_value = 1 << shift;
-	typedef ss_table<short, max_value, -2 * int(KB), 2 * int(KB), 8> SSTable;
+	static const uint32_t kShift = 12;
+	static const int kMaxValue = 1 << kShift;
+	static const int kMinST = -kMaxValue / 2;
+	static const int kMaxST = kMaxValue / 2;
+	typedef ss_table<short, kMaxValue, kMinST, kMaxST, 8> SSTable;
 	SSTable table;
 	
 	//typedef slowBitModel<unsigned short, shift> StationaryModel;
-	typedef safeBitModel<unsigned short, shift, 5, 15> BitModel;
-	typedef fastBitModel<int, shift, 9, 30> StationaryModel;
-	typedef fastBitModel<int, shift, 9, 30> HPStationaryModel;
+	typedef safeBitModel<unsigned short, kShift, 5, 15> BitModel;
+	typedef fastBitModel<int, kShift, 9, 30> StationaryModel;
+	typedef fastBitModel<int, kShift, 9, 30> HPStationaryModel;
 
 	WordModel word_model;
 
@@ -212,9 +215,9 @@ public:
 	PredArray* cur_preds;
 
 	// SSE
-	SSE<shift> sse;
+	SSE<kShift> sse;
 	size_t sse_ctx;
-	SSE<shift> sse2;
+	SSE<kShift> sse2;
 	size_t sse2_ctx;
 	size_t mixer_sse_ctx;
 
@@ -332,10 +335,10 @@ public:
 		sm.build();
 
 		sse.init(257 * 256, &table);
-		sse2.init(257 * 256 * 16, &table);
+		sse2.init(257 * 256, &table);
 		mixer_sse_ctx = 0;
 		sse_ctx = sse2_ctx = 0;
-		last_p = max_value / 2;
+		last_p = kMaxValue / 2;
 
 		hash_mask = ((2 * MB) << mem_usage) / sizeof(hash_table[0]) - 1;
 		hash_alloc_size = hash_mask + hashStart + (1 << huffman_len_limit);
@@ -481,7 +484,7 @@ public:
 	}
 
 	template <const bool decode, typename TStream>
-	size_t processBit(TStream& stream, size_t bit, size_t* base_contexts, size_t ctx, bool use_match_p_override = false, int match_p_override = 0, size_t mixer_ctx = 0) {
+	forceinline size_t processBit(TStream& stream, size_t bit, size_t* base_contexts, size_t ctx, bool use_match_p_override = false, int match_p_override = 0, size_t mixer_ctx = 0) {
 		if (!use_match_p_override) {
 			mixer_ctx = ctx;
 		}
@@ -546,35 +549,34 @@ public:
 		int mixer_p = table.sq(stp); // Mix probabilities.
 #else
 		int stp = cur_mixer->p(11, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9);
-		int mixer_p = table.sq(stp); // Mix probabilities.
+		if (stp < kMinST) stp = kMinST;
+		if (stp >= kMaxST) stp = kMaxST - 1;
+		int mixer_p = table.squnsafe(stp); // Mix probabilities.
 #endif
 		p = mixer_p;
 		if (kUseSSE) {
 			if (kUseLZP) {
-				if (sse_ctx) {
-					if (true) {
-						if (use_match_p_override) {
-							p = sse.p(st[p] + 2048, sse_ctx);
-						} else {
-							p = sse.p(st[p] + 2048, sse_ctx + mixer_ctx);
-							// p = sse.p(st[p] + 2048, apm_ctx + mixer_ctx);
-						}
+				if (!kUseSSEOnlyLZP || sse_ctx != 0) {
+					if (use_match_p_override) {
+						p = sse2.p(stp + kMaxValue / 2, sse_ctx + mm_l);
+					} else {
+						p = sse.p(stp + kMaxValue / 2, sse_ctx + mixer_ctx);
 					}
 					// p = sse2.p(st[p] + 2048, sse2_ctx + mixer_ctx);
-					p += p < 2048;
+					p += p == 0;
 				} else if (false) {
 					// This SSE is disabled for speed.
-					p = (p + sse.p(st[p] + 2048, mixer_sse_ctx & 0xFF)) / 2;
-					p += p < 2048;
+					p = (p + sse.p(stp, mixer_sse_ctx & 0xFF)) / 2;
+					p += p == 0;
 				}
 			} else {
-				p = (2 * p + 2 * sse.p(st[p] + 2048, (mixer_sse_ctx & 0xFF) * 256 + mixer_ctx)) / 4;
-				p += p < 2048;
+				p = (p + sse.p(st[p] + 2048, (mixer_sse_ctx & 0xFF) * 256 + mixer_ctx)) / 2;
+				p += p == 0;
 			}
 		}
 
 		if (decode) { 
-			bit = ent.getDecodedBit(p, shift);
+			bit = ent.getDecodedBit(p, kShift);
 		}
 		dcheck(bit < 2);
 
@@ -586,11 +588,17 @@ public:
 #endif
 
 		if (kUseSSE) {
-			if (!kUseLZP || sse_ctx) {
-				sse.update(bit);
-				// sse2.update(bit);
+			if (kUseLZP) {
+				if (!kUseSSEOnlyLZP || sse_ctx != 0) {
+					if (use_match_p_override) {
+						sse2.update(bit);
+					} else {
+						sse.update(bit);
+					}
+				}
+			} else {
+				mixer_sse_ctx = mixer_sse_ctx * 2 + ret;
 			}
-			mixer_sse_ctx = mixer_sse_ctx * 2 + ret;
 		}
 
 		if (kStatistics) ++mixer_skip[ret];
@@ -616,7 +624,7 @@ public:
 		if (decode) {
 			ent.Normalize(stream);
 		} else {
-			ent.encode(stream, bit, p, shift);
+			ent.encode(stream, bit, p, kShift);
 		}
 		return bit;
 	}
@@ -806,11 +814,11 @@ public:
 					p = (p + sse.p(table.st(p) + 2048, sse_ctx + mm_len)) / 2;
 					p += p < 2048;
 					if (decode) {
-						bit = ent.decode(stream, p, shift);
+						bit = ent.decode(stream, p, kShift);
 					} else {
-						ent.encode(stream, bit, p, shift);
+						ent.encode(stream, bit, p, kShift);
 					}
-					if (mixer->update(p, bit, shift, 24, 1, p0, p1, p2, p3, p4, p5)) {
+					if (mixer->update(p, bit, kShift, 24, 1, p0, p1, p2, p3, p4, p5)) {
 						st0 = state_trans[st0][bit];
 						st1 = state_trans[st1][bit];
 						st2 = state_trans[st2][bit];

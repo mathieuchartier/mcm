@@ -106,6 +106,11 @@ public:
 		}
 		return squashPtr[p];
 	}
+	inline uint32_t squnsafe(int p) const {
+		dcheck(p >= minInt);
+		dcheck(p < maxInt);
+		return squashPtr[p];
+	}
 };
 
 #endif

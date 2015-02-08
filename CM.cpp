@@ -90,7 +90,7 @@ void CM<inputs>::compress(Stream* in_stream, Stream* out_stream) {
 			processByte<false>(sout, c);
 			update(c);
 			if (UNLIKELY(c == eof_char)) {
-				ent.encode(sout, is_end_of_block, end_of_block_mdl.getP(), shift);
+				ent.encode(sout, is_end_of_block, end_of_block_mdl.getP(), kShift);
 				end_of_block_mdl.update(is_end_of_block);
 				if (is_end_of_block) break;
 			}
@@ -207,7 +207,7 @@ void CM<inputs>::decompress(Stream* in_stream, Stream* out_stream) {
 			update(c);
 
 			if (c == eof_char) {
-				int eob = ent.decode(sin, end_of_block_mdl.getP(), shift);
+				int eob = ent.decode(sin, end_of_block_mdl.getP(), kShift);
 				end_of_block_mdl.update(eob);
 				if (eob) {
 					break; // Hit end of block, go to next block.
