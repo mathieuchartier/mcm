@@ -27,6 +27,10 @@ private:
 	// Current match.
 	size_t pos, len;
 
+	// Hash
+	uint32_t hash_;
+	uint32_t old_word_;
+
 	size_t num_length_models_;
 
 	// Hash table
@@ -41,7 +45,6 @@ public:
 	uint32_t opt_var;
 
 	MatchModel() : opt_var(0) {
-
 	}
 
 	void setOpt(uint32_t var) {
@@ -74,6 +77,7 @@ public:
 	}
 
 	void init(size_t min_match, size_t max_match) {
+		hash_ = 0;
 		cur_max_match = max_match;
 		num_length_models_ = (cur_max_match + 1) * 2;
 		models.resize(kMaxCtx * num_length_models_);
@@ -107,7 +111,13 @@ public:
 	forceinline void setCtx(size_t ctx) {
 		model_base = &models[ctx * num_length_models_];
 	}
-			
+	
+	forceinline uint32_t hashFunc(uint32_t a, uint32_t b) {
+		b += a;
+		b += rotate_left(b, 9);
+		return b ^ (b >> 6);
+	}
+
 	void search(Buffer& buffer, uint32_t spos) {
 		// Reverse match.
 		uint32_t blast = buffer.getPos() - 1;
@@ -132,25 +142,44 @@ public:
 		}
 	}
 
-	void update(Buffer& buffer, uint32_t h, size_t ctx) {
-		const auto blast = buffer.getPos() - 1;
+	void findMatch(Buffer& buffer) {
 		const auto bmask = buffer.getMask();
-		const auto last_pos = blast & bmask;
-		setCtx(ctx);
-		// Update the existing match.
-		auto& b1 = hash_table[h & hash_mask];
-		if (!len) {
-			search(buffer, b1);
-			// b1 = last_pos;
-		} else {
-			len += len < cur_max_match;
-			++pos;
+		if ((old_word_ & ~bmask) == (hash_ & ~bmask)) {
+			search(buffer, old_word_);
+			if (len) {
+				updateCurMdl();
+			}
 		}
-		b1 = last_pos;
-		updateCurMdl();
 	}
 
-	void updateCurMdl() {
+	void setHash(uint32_t h) {
+		hash_ = h;
+	}
+
+	void fetch(uint32_t xor) {
+		prefetch(&hash_table[(hash_ ^ xor) & hash_mask]);
+	}
+
+	void update(Buffer& buffer) {
+		const auto blast = buffer.getPos() - 1;
+		const auto bmask = buffer.getMask();
+		// hash_ = hashFunc(buffer[blast], hash_);
+		hash_ = hash_ ^ buffer[blast];
+		const auto last_pos = blast & bmask;
+		const auto hmask = hash_ & ~bmask;
+		// Update the existing match.
+		auto& b1 = hash_table[hash_ & hash_mask];
+		if (len) {
+			len += len < cur_max_match;
+			++pos;
+			updateCurMdl();
+		} else {
+			old_word_ = b1;
+		}
+		b1 = last_pos | hmask;
+	}
+
+	forceinline void updateCurMdl() {
 		if (len) {
 			cur_mdl = model_base + 2 * std::min(len - kMinMatch, cur_max_match);
 		}

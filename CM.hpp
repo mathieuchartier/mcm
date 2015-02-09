@@ -110,12 +110,14 @@ public:
 	// Flags
 	static const bool kStatistics = true;
 	static const bool kFastStats = true;
-	static const bool kUsePrefetch = false;
 	static const bool kFixedProbs = false;
-	// Currently, LZP isn't great, need to improve.
+	// Currently, LZP isn't as great as it coul be.
 	static const bool kUseLZP = true;
 	static const bool kUseSSE = true;
 	static const bool kUseSSEOnlyLZP = true;
+	// Prefetching related flags.
+	static const bool kUsePrefetch = false;
+	static const bool kPrefetchMatchModel = true;
 
 	class SubBlockHeader {
 		friend class CM;
@@ -329,7 +331,7 @@ public:
 	}
 
 	void setMatchModelOrder(size_t order) {
-		match_model_order_ = order;
+		match_model_order_ = order - 1;
 		calculateMaxOrder();
 	}
 	
@@ -749,7 +751,11 @@ public:
 		}
 		size_t mm_len = 0;
 		if (match_model_order_ != 0) {
-			match_model.update(buffer, h, p0);
+			match_model.setCtx(p0);
+			if (match_model.getLength() == 0) {
+				match_model.findMatch(buffer);
+			}
+			match_model.setHash(h);
 			if (mm_len = match_model.getLength()) {
 				uint32_t expected_char = match_model.getExpectedChar(buffer);
 				uint32_t expected_bits = use_huffman ? huff.getCode(expected_char).length : 8;
@@ -883,6 +889,9 @@ public:
 			}
 		} else {
 			size_t n1 = processNibble<decode>(stream, c >> 4, ctx_start, 0);
+			if (kPrefetchMatchModel) {
+				match_model.fetch(n1 << 4);
+			}
 			size_t n2 = processNibble<decode>(stream, c & 0xF, ctx_start, 15 + (n1 * 15));
 			if (decode) {
 				c = n2 | (n1 << 4);
@@ -942,6 +951,9 @@ public:
 			}
 		}
 		buffer.push(c);
+		if (match_model_order_ != 0) {
+			match_model.update(buffer);
+		}
 		owhash = (owhash << 8) | static_cast<byte>(c);
 	}
 
