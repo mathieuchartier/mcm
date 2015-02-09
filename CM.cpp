@@ -23,8 +23,8 @@
 
 #include "CM.hpp"
 
-template <size_t inputs>
-void CM<inputs>::compress(Stream* in_stream, Stream* out_stream) {
+template <CMType kCMType>
+void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 	BufferedStreamReader<4 * KB> sin(in_stream);
 	BufferedStreamWriter<4 * KB> sout(out_stream);
 	assert(in_stream != nullptr);
@@ -184,8 +184,8 @@ void CM<inputs>::compress(Stream* in_stream, Stream* out_stream) {
 	}
 }
 
-template <size_t inputs>
-void CM<inputs>::decompress(Stream* in_stream, Stream* out_stream) {
+template <CMType kCMType>
+void CM<kCMType>::decompress(Stream* in_stream, Stream* out_stream) {
 	BufferedStreamReader<4 * KB> sin(in_stream);
 	BufferedStreamWriter<4 * KB> sout(out_stream);
 	ProgressMeter meter(false);
@@ -219,10 +219,8 @@ void CM<inputs>::decompress(Stream* in_stream, Stream* out_stream) {
 	}
 }	
 
-template class CM<4>;
-template class CM<5>;
-template class CM<6>;
-// template class CM<7>;
-template class CM<8>;
-// template class CM<9>;
-// template class CM<10>;
+template class CM<kCMTypeTurbo>;
+template class CM<kCMTypeFast>;
+template class CM<kCMTypeMid>;
+template class CM<kCMTypeHigh>;
+template class CM<kCMTypeMax>;

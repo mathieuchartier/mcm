@@ -254,8 +254,7 @@ void testFilter() {
 
 template<class FilterType>
 void benchFilter(const std::vector<byte>& data) {
-	CM<8> comp;
-	comp.setMemUsage(6);
+	CM<kCMTypeMax> comp(6);
 	// data = randomArray(kBenchDataSize);
 	check(!data.empty());
 	const uint64_t expected_sum = std::accumulate(data.begin(), data.end(), 0UL);
@@ -328,14 +327,14 @@ void runFilterTests() {
 	//std::vector<byte> data = loadFile("vcfiu.hlp", 4 * MB);
 	//std::vector<byte> data = loadFile("rafale.bmp", 4 * MB);
 	//std::vector<byte> data = loadFile("ohs.doc", 5 * MB);
-	std::vector<byte> data = loadFile("world95.txt", 4 * MB);
+	//std::vector<byte> data = loadFile("world95.txt", 4 * MB);
 	//std::vector<byte> data = loadFile("english.dic", 4 * MB);
 	//std::vector<byte> data = loadFile("enwik8.txt", 12 * MB );
 	//std::vector<byte> data = loadFile("fp.log", 24 * MB);
 	//std::vector<byte> data = loadFile("mso97.dll", 24 * MB);
 	//std::vector<byte> data = loadFile("acrord32.exe", 24 * MB);
 	//std::vector<byte> data = loadFile("flashmx.pdf", 5 * MB);
-	//std::vector<byte> data = loadFile("enwik46.txt", 5 * MB);
+	std::vector<byte> data = loadFile("enwik46.txt", 5 * MB);
 	//std::vector<byte> data = loadFile("A10.jpg", 5 * MB);
 	//std::vector<byte> data = loadFile("include.tar", 25 * MB);
 	//std::vector<byte> data = loadFile("calgary.tar", 5 * MB);

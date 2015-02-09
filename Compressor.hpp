@@ -210,8 +210,11 @@ class Compressor {
 public:
 	enum Type {
 		kTypeStore,
-		kTypeCM6,
-		kTypeCM8,
+		kTypeCMTurbo,
+		kTypeCMFast,
+		kTypeCMMid,
+		kTypeCMHigh,
+		kTypeCMMax,
 	};
 
 	class Factory {

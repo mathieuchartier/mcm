@@ -89,9 +89,24 @@ private:
 	Prob probs_[256];
 };
 
-template <size_t inputs = 6>
+enum CMType {
+	kCMTypeTurbo,
+	kCMTypeFast,
+	kCMTypeMid,
+	kCMTypeHigh,
+	kCMTypeMax,
+};
+
+template <CMType kCMType = kCMTypeHigh>
 class CM : public Compressor {
 public:
+	static const size_t inputs =
+		kCMType == kCMTypeTurbo ? 3 : 
+		kCMType == kCMTypeFast ? 4 : 
+		kCMType == kCMTypeMid ? 6 : 
+		kCMType == kCMTypeHigh ? 8 : 
+		kCMType == kCMTypeMax ? 10 :
+		0;
 	// Flags
 	static const bool kStatistics = true;
 	static const bool kFastStats = true;
@@ -252,6 +267,7 @@ public:
 
 		kModelWord12,
 		kModelMask,
+		kModelMatchHashE,
 		kModelCount,
 	};
 	static_assert(kModelCount <= 32, "no room in word");
@@ -279,8 +295,7 @@ public:
 		mem_usage = usage;
 	}
 
-	CM() : mem_usage(8) {
-		opt_var = 0;
+	CM(uint32_t mem = 8) : mem_usage(mem), opt_var(0) {
 	}
 
 	void setOpt(uint32_t var) {
@@ -371,9 +386,13 @@ public:
 		match_model_order_ = 0;
 
 		for (size_t i = 0; i < 256; ++i) {
-			binary_mask_map_[i] = (i < 1) + (i < 32) + (i < 59) + (i < 64) + (i < 91) + (i < 142) + (i < 255); // + (i < 58) + (i < 48);
-			binary_mask_map_[i] += (i < 128) + (i < 131) + (i < 137) + (i < 139) + (i < 140) + (i < 142);
+			binary_mask_map_[i] = (i < 1) + (i < 32) + (i < 64) + (i < 128) + (i < 255) + (i < 142) + (i < 138) +
+				(i < 140) + (i < 137) + (i < 97);
+			// binary_mask_map_[i] = (i < 1) + (i < 32) + (i < 59) + (i < 64) + (i < 91) + (i < 142) + (i < 255); // + (i < 58) + (i < 48);
+			// binary_mask_map_[i] += (i < 128) + (i < 131) + (i < 137) + (i < 139) + (i < 140) + (i < 142);
+			// binary_mask_map_[i] += (i < opt_var);
 			text_mask_map_[i] = (i < 95) + (i < 123) + (i < 47) + (i < 64) + (i < 46) + (i < 33) + (i < 58);
+			text_mask_map_[i] += (i < 43) + (i < 14) + (i < 45) + (i < 40);
 		}
 		current_mask_map_ = binary_mask_map_;
 
@@ -673,7 +692,7 @@ public:
 
 	template <const bool decode, typename TStream>
 	uint32_t processByte(TStream& stream, uint32_t c = 0) {
-		size_t base_contexts[inputs] = { 0 }; // Base contexts
+		size_t base_contexts[inputs + 1] = { o0pos }; // Base contexts
 		auto* ctx_ptr = base_contexts;
 
 		const size_t bpos = buffer.getPos();
@@ -683,9 +702,8 @@ public:
 			p1 = static_cast<byte>(owhash >> 8),
 			p2 = static_cast<byte>(owhash >> 16),
 			p3 = static_cast<byte>(owhash >> 24);
-		if (modelEnabled(kModelOrder0)) {
-			*(ctx_ptr++) = o0pos;
-		}
+		const bool o0enabled = modelEnabled(kModelOrder0);
+		*(ctx_ptr++) = o0pos;
 		if (modelEnabled(kModelOrder1)) {
 			*(ctx_ptr++) = o1pos + p0 * o0size;
 		}
@@ -717,17 +735,18 @@ public:
 		if (modelEnabled(kModelWord1)) {
 			*(ctx_ptr++) = hash_lookup(word_model.getHash(), false);
 		}
+		if (modelEnabled(kModelWord2)) {
+			*(ctx_ptr++) = hash_lookup(word_model.getPrevHash(), false);
+		}
 		if (modelEnabled(kModelWord12)) {
 			*(ctx_ptr++) = hash_lookup(word_model.getHash() ^ word_model.getPrevHash(), false);
 		}
-		check(ctx_ptr - base_contexts <= inputs);
-
 		if (modelEnabled(kModelMask)) {
+			// Idea from tangelo, thanks Jan Ondrus.
 			mask_model_ <<= 4;
 			mask_model_ |= current_mask_map_[p0];
 			*(ctx_ptr++) = hash_lookup(mask_model_ * 98765431);
 		}
-
 		size_t mm_len = 0;
 		if (match_model_order_ != 0) {
 			match_model.update(buffer, h, p0);
@@ -739,6 +758,11 @@ public:
 			}
 		}
 
+		if (modelEnabled(kModelMatchHashE)) {
+			*(ctx_ptr++) = hash_lookup(hashFunc(match_model.getExpectedChar(buffer), h));
+		}
+		dcheck(ctx_ptr - base_contexts <= inputs + 1);
+
 		sse2_ctx = sse_ctx = 0;
 		if (mm_len > 0) {
 			const size_t expected_char = match_model.getExpectedChar(buffer);
@@ -747,7 +771,9 @@ public:
 			}
 			if (kUseLZP) {
 				size_t extra_len = mm_len - match_model.getMinMatch();
+				calcMixerBase();
 				auto* lzp_preds = &preds[kPredArrays - 1];
+				cur_preds = lzp_preds;
 				// mixer_base = &lzp_mixers[mm_len];
 				dcheck(mm_len >= match_model.getMinMatch());
 				
@@ -757,7 +783,6 @@ public:
 				if (true) {
 					sse2_ctx = sse_ctx + 256 * 257 * std::min(extra_len, static_cast<size_t>(15));
 				}
-				calcMixerBase();
 
 				auto& m = lzp_match[expected_char * 256 + mm_len];
 				int p = m.getP();
@@ -787,7 +812,7 @@ public:
 
 				if (true) {
 					int match_p2 = table.st(p);
-					bit = processBit<decode>(stream, bit, base_contexts, 256 ^ expected_char, true, match_p2, 0);
+					bit = processBit<decode>(stream, bit, base_contexts + (o0enabled ? 0 : 1), 256 ^ expected_char, true, match_p2, 0);
 				} else {
 					// auto pos = hash_lookup(match_model.getPos());
 					// auto& st0 = hash_table[hash_lookup(hashFunc(expected_char, word_model.getHash()))];
@@ -837,9 +862,8 @@ public:
 					return expected_char;
 				}
 				last_p = 2048;
-			} else {
-				calcMixerBase();
-			}
+			} 
+			calcMixerBase();
 		} else {
 			calcMixerBase();
 			if (kStatistics) ++other_count_;
@@ -851,14 +875,15 @@ public:
 
 		// Non match, do normal encoding.
 		size_t huff_state = 0;
+		auto* ctx_start = base_contexts + (o0enabled ? 0 : 1);
 		if (use_huffman) {
-			huff_state = processNibble<decode>(stream, c, base_contexts, 0);
+			huff_state = processNibble<decode>(stream, c, ctx_start, 0);
 			if (decode) {
 				c = huff.getChar(huff_state);
 			}
 		} else {
-			size_t n1 = processNibble<decode>(stream, c >> 4, base_contexts, 0);
-			size_t n2 = processNibble<decode>(stream, c & 0xF, base_contexts, 15 + (n1 * 15));
+			size_t n1 = processNibble<decode>(stream, c >> 4, ctx_start, 0);
+			size_t n2 = processNibble<decode>(stream, c & 0xF, ctx_start, 15 + (n1 * 15));
 			if (decode) {
 				c = n2 | (n1 << 4);
 			}
@@ -874,8 +899,7 @@ public:
 		setEnabledModels(0);
 		size_t idx = 0;
 		switch (profile) {
-		case kText:
-			// Text data types (tuned for xml)
+		case kText: // Text data types (tuned for xml)
 			if (inputs > idx++) enableModel(kModelOrder1);
 			if (inputs > idx++) enableModel(kModelWord1);
 			if (inputs > idx++) enableModel(kModelOrder4);
@@ -884,11 +908,13 @@ public:
 			if (inputs > idx++) enableModel(kModelMask);
 			if (inputs > idx++) enableModel(kModelOrder3);
 			if (inputs > idx++) enableModel(kModelOrder8);
+			if (inputs > idx++) enableModel(kModelWord2);
+			if (inputs > idx++) enableModel(kModelOrder0);
 			// if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
 			setMatchModelOrder(10);
 			current_mask_map_ = text_mask_map_;
 			break;
-		default:
+		default: // Binary, tuned for exe + other.
 			// Binary data types (tuned for exe)
 			if (inputs > idx++) enableModel(kModelOrder1);
 			if (inputs > idx++) enableModel(kModelOrder2);
@@ -898,6 +924,8 @@ public:
 			if (inputs > idx++) enableModel(kModelSparse4);
 			if (inputs > idx++) enableModel(kModelOrder3);
 			if (inputs > idx++) enableModel(kModelSparse2);
+			if (inputs > idx++) enableModel(kModelSparse3);
+			if (inputs > idx++) enableModel(kModelOrder0);
 			setMatchModelOrder(7);
 			current_mask_map_ = binary_mask_map_;
 			break;

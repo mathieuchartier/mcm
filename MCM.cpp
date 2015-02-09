@@ -100,18 +100,16 @@ public:
 
 	Compressor* createCompressor() {
 		switch ((Compressor::Type)algorithm) {
-		case Compressor::kTypeCM6: {
-				auto* ret = new CM<6>;
-				ret->setMemUsage(mem_usage);
-				return ret;
-				break;
-			}
-		case Compressor::kTypeCM8: {
-				auto* ret = new CM<8>;
-				ret->setMemUsage(mem_usage);
-				return ret;
-				break;
-			}
+		case Compressor::kTypeCMTurbo:
+			return new CM<kCMTypeTurbo>(mem_usage);
+		case Compressor::kTypeCMFast:
+			return new CM<kCMTypeFast>(mem_usage);
+		case Compressor::kTypeCMMid:
+			return new CM<kCMTypeMid>(mem_usage);
+		case Compressor::kTypeCMHigh:
+			return new CM<kCMTypeHigh>(mem_usage);
+		case Compressor::kTypeCMMax:
+			return new CM<kCMTypeMax>(mem_usage);
 		default:
 			return new Store;
 		}
@@ -183,7 +181,7 @@ static int usage(const std::string& name) {
 		<< "Options: -d for decompress" << std::endl
 		<< "-1 ... -9 specifies ~32mb ... ~1500mb memory, " << std::endl
 		<< "-10 -11 for 3GB, ~5.5GB (only supported on 64 bits)" << std::endl
-		<< "modes: -mid -high (default -high) specifies speed" << std::endl
+		<< "modes: -turbo -fast -mid -high -max (default -high) specifies speed" << std::endl
 		<< "-test tests the file after compression is done" << std::endl
 		// << "-b <mb> specifies block size in MB" << std::endl
 		// << "-t <threads> the number of threads to use (decompression requires the same number of threads" << std::endl
@@ -279,10 +277,11 @@ public:
 
 	Compressor::Type compressorType() {
 		switch (comp_level) {
-		case kCompLevelMid:
-			return Compressor::kTypeCM6;
-		case kCompLevelHigh:
-			return Compressor::kTypeCM8;
+		case kCompLevelTurbo: return Compressor::kTypeCMTurbo;
+		case kCompLevelFast: return Compressor::kTypeCMFast;
+		case kCompLevelMid: return Compressor::kTypeCMMid;
+		case kCompLevelHigh: return Compressor::kTypeCMHigh;
+		case kCompLevelMax: return Compressor::kTypeCMMax;
 		}
 		return Compressor::kTypeStore;
 	}
@@ -325,11 +324,13 @@ public:
 				}
 			} else if (arg == "-opt") {
 				opt_mode = true;
-			} else if (arg == "-mid") {
-				comp_level = kCompLevelMid;
-			} else if (arg == "-high") {
-				comp_level = kCompLevelHigh;
-			} else if (arg == "-1") mem_level = 1;
+			}
+			else if (arg == "-turbo") comp_level = kCompLevelTurbo;
+			else if (arg == "-fast") comp_level = kCompLevelFast;
+			else if (arg == "-mid") comp_level = kCompLevelMid;
+			else if (arg == "-high") comp_level = kCompLevelHigh;
+			else if (arg == "-max") comp_level = kCompLevelMax;
+			else if (arg == "-1") mem_level = 1;
 			else if (arg == "-2") mem_level = 2;
 			else if (arg == "-3") mem_level = 3;
 			else if (arg == "-4") mem_level = 4;
