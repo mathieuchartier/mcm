@@ -14,6 +14,7 @@ public:
 
 	// Length of the model.
 	size_t len;
+	static const size_t kMaxLen = 31;
 
 	// Transform table.
 	static const uint32_t transform_table_size = 256;
@@ -126,7 +127,7 @@ public:
 		if (cur != transform_table_size || (cur >= 128 && cur != transform_table_size)) {
 			h1 = (h1 + cur) * 54;
 			h2 = h1 >> 7;
-			++len;
+			len += len < kMaxLen;
 		} else {
 			prev = rotate_left(getHash(), 13);
 			reset();
@@ -148,7 +149,7 @@ public:
 			if (LIKELY(cur != transform_table_size)) {
 				h1 = hashFunc(cur, h1);
 				h2 = h1 * 8;
-				++len;
+				len += len < kMaxLen;
 			} else {
 				if (len) {
 					prev = rotate_left(getHash(), 13);

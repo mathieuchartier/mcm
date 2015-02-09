@@ -118,6 +118,7 @@ public:
 	// Prefetching related flags.
 	static const bool kUsePrefetch = false;
 	static const bool kPrefetchMatchModel = true;
+	static const bool kPrefetchWordModel = true;
 
 	class SubBlockHeader {
 		friend class CM;
@@ -147,7 +148,9 @@ public:
 	typedef fastBitModel<int, kShift, 9, 30> StationaryModel;
 	typedef fastBitModel<int, kShift, 9, 30> HPStationaryModel;
 
+	// Word model
 	WordModel word_model;
+	size_t word_model_ctx_map_[WordModel::kMaxLen + 1];
 
 	Range7 ent;
 	
@@ -186,6 +189,7 @@ public:
 #endif
 	std::vector<CMMixer> mixers;
 	CMMixer *mixer_base;
+	CMMixer *cur_profile_mixers_;
 
 	// Contexts
 	uint32_t owhash; // Order of sizeof(uint32_t) hash.
@@ -221,8 +225,7 @@ public:
 	// LZP
 	HPStationaryModel lzp_match[256 * 256];
 	std::vector<CMMixer> lzp_mixers;
-	int last_p;
-
+	
 	// SM
 	typedef StationaryModel PredModel;
 	static const size_t kProbCtx = inputs;
@@ -288,7 +291,7 @@ public:
 		hash &= hash_mask;
 		uint32_t ret = hash + hashStart;
 		if (prefetch_addr) {	
-			prefetch(hash_table + (ret & (uint32_t)~(kCacheLineSize - 1)));
+			prefetch(hash_table + ret);
 		}
 		return ret;
 	}
@@ -355,14 +358,11 @@ public:
 		sse2.init(257 * 256, &table);
 		mixer_sse_ctx = 0;
 		sse_ctx = sse2_ctx = 0;
-		last_p = kMaxValue / 2;
-
+		
 		hash_mask = ((2 * MB) << mem_usage) / sizeof(hash_table[0]) - 1;
 		hash_alloc_size = hash_mask + hashStart + (1 << huffman_len_limit);
 		hash_storage.resize(hash_alloc_size); // Add extra space for ctx.
 		hash_table = reinterpret_cast<uint8_t*>(hash_storage.getData()); // Here is where the real hash table starts
-
-		word_model.init();
 
 		buffer.resize((MB / 4) << mem_usage, sizeof(uint32_t));
 
@@ -397,6 +397,11 @@ public:
 			text_mask_map_[i] += (i < 43) + (i < 14) + (i < 45) + (i < 40);
 		}
 		current_mask_map_ = binary_mask_map_;
+
+		word_model.init();
+		for (size_t i = 0; i <= WordModel::kMaxLen; ++i) {
+			word_model_ctx_map_[i] = (i >= 1) + (i >= 2) + (i >= 3) + (i >= 4) + (i >= 5) + (i >= 6) + (i >= 8);
+		}
 
 		// Optimization
 		for (uint32_t i = 0; i < num_states; ++i) {
@@ -458,16 +463,7 @@ public:
 		const bool word_enabled = modelEnabled(kModelWord1);
 		if (word_enabled) {
 			mixer_ctx <<= 3;
-			auto wlen = word_model.getLength();
-			mixer_ctx |=
-				(wlen >= 1) +
-				(wlen >= 2) +
-				(wlen >= 3) +
-				(wlen >= 4) +
-				(wlen >= 5) +
-				(wlen >= 6) +
-				(wlen >= 8) +
-				0;
+			mixer_ctx |= word_model_ctx_map_[word_model.getLength()];
 		}
 		
 		const uint32_t mm_len = match_model.getLength();
@@ -485,7 +481,10 @@ public:
 					0;
 			}
 		}		
-		mixer_base = getProfileMixers(profile) + (mixer_ctx << 8);
+		mixer_base = cur_profile_mixers_ + (mixer_ctx << 8);
+	}
+
+	void calcProbBase() {
 		cur_preds = &preds[static_cast<size_t>(profile)];
 	}
 
@@ -505,7 +504,7 @@ public:
 	}
 
 	template <const bool decode, typename TStream>
-	forceinline size_t processBit(TStream& stream, size_t bit, size_t* base_contexts, size_t ctx, bool use_match_p_override = false, int match_p_override = 0, size_t mixer_ctx = 0) {
+	size_t processBit(TStream& stream, size_t bit, size_t* base_contexts, size_t ctx, bool use_match_p_override = false, int match_p_override = 0, size_t mixer_ctx = 0) {
 		if (!use_match_p_override) {
 			mixer_ctx = ctx;
 		}
@@ -686,7 +685,7 @@ public:
 				}
 			} else {
 				base_ctx = base_ctx * 2 + bit;
-				if (base_ctx >= 16) break;
+				if ((base_ctx & 16) != 0) break;
 			}
 		}
 		return base_ctx ^ 16;
@@ -752,10 +751,7 @@ public:
 		size_t mm_len = 0;
 		if (match_model_order_ != 0) {
 			match_model.setCtx(p0);
-			if (match_model.getLength() == 0) {
-				match_model.findMatch(buffer);
-			}
-			match_model.setHash(h);
+			match_model.update(buffer, h);
 			if (mm_len = match_model.getLength()) {
 				uint32_t expected_char = match_model.getExpectedChar(buffer);
 				uint32_t expected_bits = use_huffman ? huff.getCode(expected_char).length : 8;
@@ -770,6 +766,7 @@ public:
 		dcheck(ctx_ptr - base_contexts <= inputs + 1);
 
 		sse2_ctx = sse_ctx = 0;
+		calcMixerBase();
 		if (mm_len > 0) {
 			const size_t expected_char = match_model.getExpectedChar(buffer);
 			if (kStatistics && !decode) {
@@ -777,9 +774,7 @@ public:
 			}
 			if (kUseLZP) {
 				size_t extra_len = mm_len - match_model.getMinMatch();
-				calcMixerBase();
-				auto* lzp_preds = &preds[kPredArrays - 1];
-				cur_preds = lzp_preds;
+				cur_preds = &preds[kPredArrays - 1];
 				// mixer_base = &lzp_mixers[mm_len];
 				dcheck(mm_len >= match_model.getMinMatch());
 				
@@ -792,86 +787,17 @@ public:
 
 				auto& m = lzp_match[expected_char * 256 + mm_len];
 				int p = m.getP();
-				// mixer_base = getProfileMixers(profile) + std::min(mm_len, static_cast<size_t>(15)) * 256 * 16 + std::min(word_model.len, static_cast<size_t>(15)) * 16;
-				// p = lzp_sse.p(table.st(p) + 2048, mm_len); 
-				// size_t bit_hash = hash_lookup(h ^ expected_char);
-				// std::swap(bit_hash, base_contexts[inputs - 1]);
-				/*
-				Match model:
-				Stats
-				O(8)9: 44975700 / 19422575 / 35601881
-				O(6)8: 49811847 / 22860328 / 27327981
-				O(6)7: 54109622 / 26313310 / 19577224 
-				Costs:
-				opt: 4698728
-				O(8):3478345
-				O(6):4718134
-				h(c):5482321 5239981
-				h:5866000
-				lzp_match:7904782
-				pos:8839769
-				0.5:10053001
-				*/
-				// include.tar
-				// O(6): 244703
-				// oth: 251450
 
-				if (true) {
-					int match_p2 = table.st(p);
-					bit = processBit<decode>(stream, bit, base_contexts + (o0enabled ? 0 : 1), 256 ^ expected_char, true, match_p2, 0);
-				} else {
-					// auto pos = hash_lookup(match_model.getPos());
-					// auto& st0 = hash_table[hash_lookup(hashFunc(expected_char, word_model.getHash()))];
-					auto& st0 = hash_table[hash_lookup(h)];
-					auto& st1 = hash_table[hash_lookup(hashFunc(expected_char, h))];
-					auto& st2 = hash_table[hash_lookup(hashFunc(expected_char, owhash))];
-					auto& st3 = hash_table[hash_lookup(hashFunc(expected_char, 0x8765321 + (owhash & 0xFFFF)))];
-					auto& pr0 = (*lzp_preds)[0][st0];
-					auto& pr1 = (*lzp_preds)[1][st1];
-					auto& pr2 = (*lzp_preds)[2][st2];
-					auto& pr3 = (*lzp_preds)[3][st3];
-					auto p0 = table.st(m.getP());
-					auto p1 = table.st(pr0.getP());
-					auto p2 = 0; //table.st(pr1.getP());
-					auto p3 = table.st(pr2.getP());
-					auto p4 = table.st(pr3.getP());
-					auto p5 = table.st(last_p);
-					// auto p5 = 0;
-					CMMixer* mixer = mixer_base;	
-					int mixer_p = table.sq(mixer->p(11, p0, p1, p2, p3, p4, p5));
-					int p = mixer_p;
-
-					// p = m.getP();
-					p = (p + sse.p(table.st(p) + 2048, sse_ctx + mm_len)) / 2;
-					p += p < 2048;
-					if (decode) {
-						bit = ent.decode(stream, p, kShift);
-					} else {
-						ent.encode(stream, bit, p, kShift);
-					}
-					if (mixer->update(p, bit, kShift, 24, 1, p0, p1, p2, p3, p4, p5)) {
-						st0 = state_trans[st0][bit];
-						st1 = state_trans[st1][bit];
-						st2 = state_trans[st2][bit];
-						st3 = state_trans[st3][bit];
-						pr0.update(bit);
-						pr1.update(bit);
-						pr2.update(bit);
-						pr3.update(bit);
-						sse.update(bit);
-					}
-					last_p = p;
-				}
+				int match_p2 = table.st(p);
+				bit = processBit<decode>(stream, bit, base_contexts + (o0enabled ? 0 : 1), 256 ^ expected_char, true, match_p2, 0);
 				m.update(bit);
 
 				if (bit) {
 					return expected_char;
 				}
-				last_p = 2048;
 			} 
-			calcMixerBase();
+			calcProbBase();
 		} else {
-			calcMixerBase();
 			if (kStatistics) ++other_count_;
 		}
 		if (false) {
@@ -903,6 +829,7 @@ public:
 
 	void setDataProfile(DataProfile new_profile) {
 		profile = new_profile;
+		cur_profile_mixers_ = getProfileMixers(profile);
 		mask_model_ = 0;
 		word_model.reset();
 		setEnabledModels(0);
@@ -939,21 +866,19 @@ public:
 			current_mask_map_ = binary_mask_map_;
 			break;
 		}
+		calcProbBase();
 	};
 
 	void update(uint32_t c) {
 		if (modelEnabled(kModelWord1) || modelEnabled(kModelWord2) || modelEnabled(kModelWord12)) {
 			word_model.updateUTF(c);
 			if (word_model.getLength()) {
-				if (kUsePrefetch) {
-					hash_lookup(word_model.getHash());
+				if (kPrefetchWordModel) {
+					hash_lookup(word_model.getHash(), true);
 				}
 			}
 		}
 		buffer.push(c);
-		if (match_model_order_ != 0) {
-			match_model.update(buffer);
-		}
 		owhash = (owhash << 8) | static_cast<byte>(c);
 	}
 

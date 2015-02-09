@@ -29,8 +29,7 @@ private:
 
 	// Hash
 	uint32_t hash_;
-	uint32_t old_word_;
-
+	
 	size_t num_length_models_;
 
 	// Hash table
@@ -111,12 +110,6 @@ public:
 	forceinline void setCtx(size_t ctx) {
 		model_base = &models[ctx * num_length_models_];
 	}
-	
-	forceinline uint32_t hashFunc(uint32_t a, uint32_t b) {
-		b += a;
-		b += rotate_left(b, 9);
-		return b ^ (b >> 6);
-	}
 
 	void search(Buffer& buffer, uint32_t spos) {
 		// Reverse match.
@@ -142,28 +135,13 @@ public:
 		}
 	}
 
-	void findMatch(Buffer& buffer) {
-		const auto bmask = buffer.getMask();
-		if ((old_word_ & ~bmask) == (hash_ & ~bmask)) {
-			search(buffer, old_word_);
-			if (len) {
-				updateCurMdl();
-			}
-		}
+	void fetch(uint32_t ctx) {
+		prefetch(&hash_table[(hash_ ^ ctx) & hash_mask]);
 	}
 
-	void setHash(uint32_t h) {
-		hash_ = h;
-	}
-
-	void fetch(uint32_t xor) {
-		prefetch(&hash_table[(hash_ ^ xor) & hash_mask]);
-	}
-
-	void update(Buffer& buffer) {
+	void update(Buffer& buffer, uint32_t h) {
 		const auto blast = buffer.getPos() - 1;
 		const auto bmask = buffer.getMask();
-		// hash_ = hashFunc(buffer[blast], hash_);
 		hash_ = hash_ ^ buffer[blast];
 		const auto last_pos = blast & bmask;
 		const auto hmask = hash_ & ~bmask;
@@ -172,11 +150,14 @@ public:
 		if (len) {
 			len += len < cur_max_match;
 			++pos;
-			updateCurMdl();
 		} else {
-			old_word_ = b1;
+			if ((b1 & ~bmask) == hmask) {
+				search(buffer, b1);
+			}
 		}
+		updateCurMdl();
 		b1 = last_pos | hmask;
+		hash_ = h;
 	}
 
 	forceinline void updateCurMdl() {
