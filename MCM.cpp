@@ -50,7 +50,7 @@ typedef X86AdvancedFilter DefaultFilter;
 
 class ArchiveHeader {
 public:
-	static const size_t kVersion = 8;
+	static const size_t kVersion = 81;
 
 	char magic[3]; // MCM
 	uint16_t version;
@@ -173,9 +173,13 @@ std::string trimExt(std::string str) {
 	return str.substr(static_cast<uint32_t>(start));
 }
 
+static void printHeader() {
+	std::cout << "mcm file compressor v0." << ArchiveHeader::kVersion << ", by Mathieu Chartier (c)2015 Google Inc" << std::endl;
+}
+
 static int usage(const std::string& name) {
+	printHeader();
 	std::cout
-		<< "mcm file compressor v0." << ArchiveHeader::kVersion << ", by Mathieu Chartier (c)2015 Google Inc" << std::endl
 		<< "Caution: Use only for testing!!" << std::endl
 		<< "Usage: " << name << " [options] <infile> <outfile>" << std::endl
 		<< "Options: -d for decompress" << std::endl
@@ -429,7 +433,7 @@ void decompress(Stream* in, Stream* out) {
 
 int main(int argc, char* argv[]) {
 	CompressorFactories::init();
-	// runAllTests();
+	//runAllTests();
 	Options options;
 	auto ret = options.parse(argc, argv);
 	if (ret) {
@@ -521,6 +525,8 @@ int main(int argc, char* argv[]) {
 	}
 	case Options::kModeCompress:
 	case Options::kModeTest: {
+		printHeader();
+
 		int err = 0;
 		ReadFileStream fin;
 		WriteFileStream fout;
@@ -605,7 +611,8 @@ int main(int argc, char* argv[]) {
 			std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
 			return 2;
 		}
-		std::cout << "Decompresing & verifying file" << std::endl;		
+		printHeader();
+		std::cout << "Decompresing file " << in_file << std::endl;
 		ProgressStream rms(&fin, &fout, false);
 		decompress(&fin, &rms);
 		fin.close();
