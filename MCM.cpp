@@ -240,6 +240,8 @@ public:
 		// Compress -> Decompress -> Verify.
 		// (File or directory).
 		kModeTest,
+		// Compress infinite times with different opt vars.
+		kModeOpt,
 		// In memory test.
 		kModeMemTest,
 		// Single file test.
@@ -300,6 +302,7 @@ public:
 			Mode parsed_mode = kModeUnknown;
 			if (arg == "-test") parsed_mode = kModeSingleTest; // kModeTest;
 			else if (arg == "-memtest") parsed_mode = kModeMemTest;
+			else if (arg == "-opt") parsed_mode = kModeOpt;
 			else if (arg == "-stest") parsed_mode = kModeSingleTest;
 			else if (arg == "-c") parsed_mode = kModeCompress;
 			else if (arg == "-d") parsed_mode = kModeDecompress;
@@ -379,7 +382,8 @@ public:
 			}
 		}
 		const bool single_file_mode =
-			mode == kModeCompress || mode == kModeDecompress || mode == kModeSingleTest || mode == kModeMemTest;
+			mode == kModeCompress || mode == kModeDecompress || mode == kModeSingleTest ||
+			mode == kModeMemTest || mode == kModeOpt;
 		if (single_file_mode) {
 			std::string in_file, out_file;
 			// Read in file and outfile.
@@ -398,7 +402,7 @@ public:
 			if (mode == kModeMemTest) {
 				// No out file for memtest.
 				files.push_back(FilePath(in_file));
-			} else if (mode == kModeCompress || mode == kModeSingleTest) {
+			} else if (mode == kModeCompress || mode == kModeSingleTest || mode == kModeOpt) {
 				archive_file = FilePath(out_file);
 				files.push_back(FilePath(in_file));
 			} else {
@@ -433,7 +437,7 @@ void decompress(Stream* in, Stream* out) {
 
 int main(int argc, char* argv[]) {
 	CompressorFactories::init();
-	//runAllTests();
+	// runAllTests();
 	Options options;
 	auto ret = options.parse(argc, argv);
 	if (ret) {
@@ -523,6 +527,7 @@ int main(int argc, char* argv[]) {
 	case Options::kModeSingleTest: {
 		
 	}
+	case Options::kModeOpt:
 	case Options::kModeCompress:
 	case Options::kModeTest: {
 		printHeader();
@@ -532,50 +537,82 @@ int main(int argc, char* argv[]) {
 		WriteFileStream fout;
 		auto in_file = options.files.back().getName();
 		auto out_file = options.archive_file.getName();
-		if (err = fin.open(in_file, std::ios_base::in | std::ios_base::binary)) {
-			std::cerr << "Error opening: " << in_file << " (" << errstr(err) << ")" << std::endl;
-			return 1;
-		}
-		if (err = fout.open(out_file, std::ios_base::out | std::ios_base::binary)) {
-			std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
-			return 2;
-		}
-
-		clock_t start = clock();
-		std::cout << "Compressing to " << out_file << " mem level=" << options.mem_level << std::endl;
 
 		ArchiveHeader header;
 		header.mem_usage = options.mem_level;
 		header.algorithm = options.compressorType();
-		header.write(fout);
 
-		std::unique_ptr<Compressor> comp(header.createCompressor());
-		{
-			ProgressStream rms(&fin, &fout);
-			DefaultFilter f(&rms);
-			comp->compress(&f, &fout);
+		if (err = fin.open(in_file, std::ios_base::in | std::ios_base::binary)) {
+			std::cerr << "Error opening: " << in_file << " (" << errstr(err) << ")" << std::endl;
+			return 1;
 		}
-		clock_t time = clock() - start;
-		std::cout << "Compression " << fin.getCount() << "->" << fout.getCount() << " took " << clockToSeconds(time) << "s" << std::endl;
-		std::cout << "Rate: " << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fin.getCount()) << " ns/B" << std::endl;
-		std::cout << "Size: " << fout.getCount() << " bytes @ " << double(fout.getCount()) * 8.0 / double(fin.getCount()) << " bpc" << std::endl;
 
-		fout.close();
-		fin.close();
-		comp.reset(nullptr);
-
-		if (options.mode == Options::kModeSingleTest) {
-			if (err = fin.open(out_file, std::ios_base::in | std::ios_base::binary)) {
-				std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
-				return 1;
+		if (options.mode == Options::kModeOpt) {
+			std::cout << "Optimizing " << in_file << std::endl;
+			uint64_t best_size = std::numeric_limits<uint64_t>::max();
+			size_t best_var = 0;
+			for (size_t opt_var = 0; ; ++opt_var) {
+				const clock_t start = clock();
+				fin.seek(0);
+				VoidWriteStream fout;
+				header.write(fout);
+				std::unique_ptr<Compressor> comp(header.createCompressor());
+				if (!comp->setOpt(opt_var)) {
+					continue;
+				}
+				{
+					ProgressStream rms(&fin, &fout);
+					DefaultFilter f(&rms);
+					comp->compress(&f, &fout);
+				}
+				clock_t time = clock() - start;
+				const auto size = fout.tell();
+				if (size < best_size) {
+					best_size = size;
+					best_var = opt_var;
+				}
+				std::cout << "opt_var=" << opt_var << " best=" << best_var << "(" << best_size << ") "
+					<< fin.getCount() << "->" << size << " took " << clockToSeconds(time) << "s" << std::endl;
 			}
-			
-			std::cout << "Decompresing & verifying file" << std::endl;		
-			VerifyStream verifyStream(in_file);
-			ProgressStream rms(&fin, &verifyStream, false);
-			decompress(&fin, &rms);
-			verifyStream.summary();
+		} else {
+			const clock_t start = clock();
+			if (err = fout.open(out_file, std::ios_base::out | std::ios_base::binary)) {
+				std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
+				return 2;
+			}
+
+			std::cout << "Compressing to " << out_file << " mem level=" << options.mem_level << std::endl;
+
+			header.write(fout);
+
+			std::unique_ptr<Compressor> comp(header.createCompressor());
+			{
+				ProgressStream rms(&fin, &fout);
+				DefaultFilter f(&rms);
+				comp->compress(&f, &fout);
+			}
+			clock_t time = clock() - start;
+			std::cout << "Compression " << fin.getCount() << "->" << fout.getCount() << " took " << clockToSeconds(time) << "s" << std::endl;
+			std::cout << "Rate: " << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fin.getCount()) << " ns/B" << std::endl;
+			std::cout << "Size: " << fout.getCount() << " bytes @ " << double(fout.getCount()) * 8.0 / double(fin.getCount()) << " bpc" << std::endl;
+
+			fout.close();
 			fin.close();
+			comp.reset(nullptr);
+
+			if (options.mode == Options::kModeSingleTest) {
+				if (err = fin.open(out_file, std::ios_base::in | std::ios_base::binary)) {
+					std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
+					return 1;
+				}
+			
+				std::cout << "Decompresing & verifying file" << std::endl;		
+				VerifyStream verifyStream(in_file);
+				ProgressStream rms(&fin, &verifyStream, false);
+				decompress(&fin, &rms);
+				verifyStream.summary();
+				fin.close();
+			}
 		}
 		break;
 #if 0

@@ -229,7 +229,9 @@ public:
 	};
 
 	// Optimization variable for brute forcing.
-	virtual void setOpt(uint32_t opt) {}
+	virtual bool setOpt(uint32_t opt) {
+		return true;
+	}
 	virtual uint32_t getOpt() const {
 		return 0;
 	}

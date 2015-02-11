@@ -97,7 +97,7 @@ public:
 	}
 
 	// minInt <= p < maxInt
-	inline uint32_t sq(int p) const {
+	forceinline uint32_t sq(int p) const {
 		if (p <= minInt) {
 			return 1;
 		}
@@ -106,7 +106,7 @@ public:
 		}
 		return squashPtr[p];
 	}
-	inline uint32_t squnsafe(int p) const {
+	forceinline uint32_t squnsafe(int p) const {
 		dcheck(p >= minInt);
 		dcheck(p < maxInt);
 		return squashPtr[p];

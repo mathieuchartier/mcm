@@ -148,7 +148,7 @@ public:
 		int p0 = 0, int p1 = 0, int p2 = 0, int p3 = 0, int p4 = 0,
 		int p5 = 0, int p6 = 0, int p7 = 0, int p8 = 0, int p9 = 0) {
 		const int err = ((bit << pshift) - pr) * learn;
-		const int delta_round = round >> (pshift - 1);
+		const int delta_round = round >> (pshift - 3);
 		const bool ret = err < -delta_round || err > delta_round;
 		if (ret) { // Branch is around 50 / 50.
 			updateRec<0>(p0, err);

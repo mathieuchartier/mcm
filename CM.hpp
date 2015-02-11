@@ -108,7 +108,7 @@ public:
 		kCMType == kCMTypeMax ? 10 :
 		0;
 	// Flags
-	static const bool kStatistics = false;
+	static const bool kStatistics = true;
 	static const bool kFastStats = true;
 	static const bool kFixedProbs = false;
 	// Currently, LZP isn't as great as it coul be.
@@ -303,11 +303,12 @@ public:
 	CM(uint32_t mem = 8) : mem_usage(mem), opt_var(0) {
 	}
 
-	void setOpt(uint32_t var) {
+	bool setOpt(uint32_t var) {
 		opt_var = var;
 		word_model.setOpt(var);
 		match_model.setOpt(var);
 		sse.setOpt(var);
+		return true;
 	}
 
 	forceinline bool modelEnabled(Model model) const {
@@ -343,7 +344,7 @@ public:
 
 		table.build(0);
 		
-		mixer_mask = 0xFFFF;
+		mixer_mask = 0x1FFFF;
 		mixers.resize(static_cast<uint32_t>(kProfileCount) * (mixer_mask + 1));
 		for (auto& mixer : mixers) mixer.init(382);
 		lzp_mixers.resize(256);
@@ -354,7 +355,7 @@ public:
 		NSStateMap<kShift> sm;
 		sm.build();
 
-		sse.init(257 * 256, &table);
+		sse.init(257 * 256 * 16, &table);
 		sse2.init(257 * 256, &table);
 		mixer_sse_ctx = 0;
 		sse_ctx = sse2_ctx = 0;
@@ -394,7 +395,7 @@ public:
 			// binary_mask_map_[i] += (i < 128) + (i < 131) + (i < 137) + (i < 139) + (i < 140) + (i < 142);
 			// binary_mask_map_[i] += (i < opt_var);
 			text_mask_map_[i] = (i < 95) + (i < 123) + (i < 47) + (i < 64) + (i < 46) + (i < 33) + (i < 58);
-			text_mask_map_[i] += (i < 43) + (i < 14) + (i < 45) + (i < 40);
+			text_mask_map_[i] += (i < 43) + (i < 14) + (i < 45) + (i < 40) + (i < 96) + (i < 42) + (i < 59) + (i < 10);
 		}
 		current_mask_map_ = binary_mask_map_;
 
@@ -495,10 +496,10 @@ public:
 		return state_trans[state][bit];
 	}
 	
-	forceinline int getP(byte state, uint32_t ctx, const short* st) const {
+	forceinline int getP(byte state, uint32_t ctx) const {
 		int p = (*cur_preds)[ctx][state].getP();
 		if (!kFixedProbs) {
-			p = st[p];
+			p = table.st(p);
 		}
 		return p;
 	}
@@ -508,37 +509,32 @@ public:
 		if (!use_match_p_override) {
 			mixer_ctx = ctx;
 		}
-		auto* const cur_mixer = &mixer_base[mixer_ctx];
 		const auto mm_l = match_model.getLength();
 	
-		byte* const ht = hash_table;
-		const short* st = table.getStretchPtr();
-
 		uint8_t 
 			*no_alias sp0 = nullptr, *no_alias sp1 = nullptr, *no_alias sp2 = nullptr, *no_alias sp3 = nullptr, *no_alias sp4 = nullptr,
 			*no_alias sp5 = nullptr, *no_alias sp6 = nullptr, *no_alias sp7 = nullptr, *no_alias sp8 = nullptr, *no_alias sp9 = nullptr;
-		size_t s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, s5 = 0, s6 = 0, s7 = 0, s8 = 0, s9 = 0;
+		uint8_t s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, s5 = 0, s6 = 0, s7 = 0, s8 = 0, s9 = 0;
 
 		uint32_t p;
 		int p0 = 0, p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0, p8 = 0, p9 = 0;
-		if (inputs > 1) { sp1 = &ht[base_contexts[1] ^ ctx]; s1 = *sp1; p1 = getP(s1, 1, st); }
-		if (inputs > 2) { sp2 = &ht[base_contexts[2] ^ ctx]; s2 = *sp2; p2 = getP(s2, 2, st); }
-		if (inputs > 3) { sp3 = &ht[base_contexts[3] ^ ctx]; s3 = *sp3; p3 = getP(s3, 3, st); }
-		if (inputs > 4) { sp4 = &ht[base_contexts[4] ^ ctx]; s4 = *sp4; p4 = getP(s4, 4, st); }
-		if (inputs > 5) { sp5 = &ht[base_contexts[5] ^ ctx]; s5 = *sp5; p5 = getP(s5, 5, st); }
-		if (inputs > 6) { sp6 = &ht[base_contexts[6] ^ ctx]; s6 = *sp6; p6 = getP(s6, 6, st); }
-		if (inputs > 7) { sp7 = &ht[base_contexts[7] ^ ctx]; s7 = *sp7; p7 = getP(s7, 7, st); }
-		if (inputs > 8) { sp8 = &ht[base_contexts[8] ^ ctx]; s8 = *sp8; p8 = getP(s8, 8, st); }
-		if (inputs > 9) { sp9 = &ht[base_contexts[9] ^ ctx]; s9 = *sp9; p9 = getP(s9, 9, st); }
+		if (inputs > 1) { sp1 = &hash_table[base_contexts[1] ^ ctx]; s1 = *sp1; p1 = getP(s1, 1); }
+		if (inputs > 2) { sp2 = &hash_table[base_contexts[2] ^ ctx]; s2 = *sp2; p2 = getP(s2, 2); }
+		if (inputs > 3) { sp3 = &hash_table[base_contexts[3] ^ ctx]; s3 = *sp3; p3 = getP(s3, 3); }
+		if (inputs > 4) { sp4 = &hash_table[base_contexts[4] ^ ctx]; s4 = *sp4; p4 = getP(s4, 4); }
+		if (inputs > 5) { sp5 = &hash_table[base_contexts[5] ^ ctx]; s5 = *sp5; p5 = getP(s5, 5); }
+		if (inputs > 6) { sp6 = &hash_table[base_contexts[6] ^ ctx]; s6 = *sp6; p6 = getP(s6, 6); }
+		if (inputs > 7) { sp7 = &hash_table[base_contexts[7] ^ ctx]; s7 = *sp7; p7 = getP(s7, 7); }
+		if (inputs > 8) { sp8 = &hash_table[base_contexts[8] ^ ctx]; s8 = *sp8; p8 = getP(s8, 8); }
+		if (inputs > 9) { sp9 = &hash_table[base_contexts[9] ^ ctx]; s9 = *sp9; p9 = getP(s9, 9); }
 		if (inputs > 0) {
-			if (use_match_p_override) {
-				p0 = match_p_override;
-			} else if (mm_l == 0) {
-				sp0 = &ht[base_contexts[0] ^ ctx]; s0 = *sp0;
+			if (mm_l == 0) {
+				sp0 = &hash_table[base_contexts[0] ^ ctx]; s0 = *sp0;
 				assert(sp0 >= ht && sp0 <= ht + hash_alloc_size);
-				p0 = getP(s0, 0, st);
+				p0 = getP(s0, 0);
 			} else {
-				p0 = match_model.getP(st);
+				p0 = match_model.getP(table.getStretchPtr(),
+					use_match_p_override ? 1U : match_model.getExpectedBit());
 			}
 		}
 
@@ -568,6 +564,7 @@ public:
 		int stp = cur_mixer->p(wp);
 		int mixer_p = table.sq(stp); // Mix probabilities.
 #else
+		auto* const cur_mixer = &mixer_base[mixer_ctx];
 		int stp = cur_mixer->p(11, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9);
 		if (stp < kMinST) stp = kMinST;
 		if (stp >= kMaxST) stp = kMaxST - 1;
@@ -590,7 +587,7 @@ public:
 					p += p == 0;
 				}
 			} else {
-				p = (p + sse.p(st[p] + 2048, (mixer_sse_ctx & 0xFF) * 256 + mixer_ctx)) / 2;
+				p = (p + sse.p(stp + kMaxValue / 2, (mixer_sse_ctx & 0xFF) * 256 + mixer_ctx)) / 2;
 				p += p == 0;
 			}
 		}
@@ -606,6 +603,26 @@ public:
 #else
 		const bool ret = cur_mixer->update(mixer_p, bit, 12, 24, 0, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9);
 #endif
+		// Only update the states / predictions if the mixer was far enough from the bounds, helps 15k on enwik8 and 1-2sec.
+		if (ret) {
+			if (!use_match_p_override) {
+				if (inputs > 0 && mm_l == 0) *sp0 = nextState(s0, bit, 0);
+			}
+			if (inputs > 1) *sp1 = nextState(s1, bit, 1);
+			if (inputs > 2) *sp2 = nextState(s2, bit, 2);
+			if (inputs > 3) *sp3 = nextState(s3, bit, 3);
+			if (inputs > 4) *sp4 = nextState(s4, bit, 4);
+			if (inputs > 5) *sp5 = nextState(s5, bit, 5);
+			if (inputs > 6) *sp6 = nextState(s6, bit, 6);
+			if (inputs > 7) *sp7 = nextState(s7, bit, 7);
+			if (inputs > 8) *sp8 = nextState(s8, bit, 8);
+			if (inputs > 9) *sp9 = nextState(s9, bit, 9);
+			if (use_match_p_override) {
+				match_model.updateCurMdl(1, bit);
+			} else {
+				match_model.updateBit(bit);
+			}
+		}
 
 		if (kUseSSE) {
 			if (kUseLZP) {
@@ -622,25 +639,7 @@ public:
 		}
 
 		if (kStatistics) ++mixer_skip[ret];
-			
-		// Only update the states / predictions if the mixer was far enough from the bounds, helps 15k on enwik8 and 1-2sec.
-		if (ret) {
-			if (!use_match_p_override) {
-				if (inputs > 0 && mm_l == 0) *sp0 = nextState(s0, bit, 0);
-			}
-			if (inputs > 1) *sp1 = nextState(s1, bit, 1);
-			if (inputs > 2) *sp2 = nextState(s2, bit, 2);
-			if (inputs > 3) *sp3 = nextState(s3, bit, 3);
-			if (inputs > 4) *sp4 = nextState(s4, bit, 4);
-			if (inputs > 5) *sp5 = nextState(s5, bit, 5);
-			if (inputs > 6) *sp6 = nextState(s6, bit, 6);
-			if (inputs > 7) *sp7 = nextState(s7, bit, 7);
-			if (inputs > 8) *sp8 = nextState(s8, bit, 8);
-			if (inputs > 9) *sp9 = nextState(s9, bit, 9);
-		}
-		if (!use_match_p_override) {
-			match_model.updateBit(bit);
-		}
+
 		if (decode) {
 			ent.Normalize(stream);
 		} else {
@@ -802,7 +801,8 @@ public:
 		}
 		if (false) {
 			match_model.resetMatch();
-			return c;
+			// return c;
+			calcMixerBase();
 		}
 
 		// Non match, do normal encoding.
@@ -836,6 +836,18 @@ public:
 		size_t idx = 0;
 		switch (profile) {
 		case kText: // Text data types (tuned for xml)
+#if 0
+			if (inputs > idx++) enableModel(kModelOrder1);
+			if (inputs > idx++) enableModel(kModelOrder2);
+			if (inputs > idx++) enableModel(kModelOrder4);
+			if (inputs > idx++) enableModel(kModelMask);
+			if (inputs > idx++) enableModel(kModelWord1);
+			if (inputs > idx++) enableModel(kModelOrder6);
+			// if (inputs > idx++) enableModel(kModelWord12);
+			if (inputs > idx++) enableModel(kModelOrder3);
+			if (inputs > idx++) enableModel(kModelOrder0);
+			if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
+#else
 			if (inputs > idx++) enableModel(kModelOrder1);
 			if (inputs > idx++) enableModel(kModelWord1);
 			if (inputs > idx++) enableModel(kModelOrder4);
@@ -846,12 +858,14 @@ public:
 			if (inputs > idx++) enableModel(kModelOrder8);
 			if (inputs > idx++) enableModel(kModelWord2);
 			if (inputs > idx++) enableModel(kModelOrder0);
+#endif
 			// if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
 			setMatchModelOrder(10);
 			current_mask_map_ = text_mask_map_;
 			break;
 		default: // Binary
 #if 1
+			// Default
 			if (inputs > idx++) enableModel(kModelOrder1);
 			if (inputs > idx++) enableModel(kModelOrder2);
 			if (inputs > idx++) enableModel(kModelSparse34);

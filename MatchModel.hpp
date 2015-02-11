@@ -58,9 +58,9 @@ public:
 		hash_table = (uint32_t*)hash_storage.getData();
 	}
 
-	forceinline int getP(const short* st) {
+	forceinline int getP(const short* st, size_t expected_bit) {
 		dcheck(len != 0);
-		return st[cur_mdl[getExpectedBit()].getP()];
+		return st[cur_mdl[expected_bit].getP()];
 	}
 
 	forceinline size_t getPos() const {
@@ -172,6 +172,10 @@ public:
 
 	void updateExpectedCode(uint32_t code, uint32_t bit_len = 8) {
 		expected_code = code << (kCodeBitShift + 1 - bit_len);
+	}
+
+	forceinline void updateCurMdl(size_t expected_bit, uint32_t bit) {
+		cur_mdl[expected_bit].update(bit);
 	}
 
 	forceinline void updateBit(uint32_t bit) {

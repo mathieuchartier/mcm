@@ -47,11 +47,21 @@ public:
 };
 
 class VoidWriteStream : public WriteStream {
+	uint64_t pos_;
 public:
+	VoidWriteStream() : pos_(0) {}
 	virtual ~VoidWriteStream() {}
-    virtual void write(const byte*, uint32_t) {
+    virtual void write(const byte*, size_t n) {
+		pos_ += n;
 	}
 	virtual void put(int) {
+		++pos_;
+	}
+	virtual uint64_t tell() const {
+		return pos_;
+	}
+	virtual void seek(uint64_t pos) {
+		pos_ = pos;
 	}
 };
 

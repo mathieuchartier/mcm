@@ -324,8 +324,8 @@ void runFilterTests() {
 	}
 	std::cout << "Done running " << kTestIterations << " test iterations" << std::endl;
 
-	//std::vector<byte> data = loadFile("vcfiu.hlp", 4 * MB);
-	std::vector<byte> data = loadFile("rafale.bmp", 4 * MB);
+	std::vector<byte> data = loadFile("vcfiu.hlp", 4 * MB);
+	//std::vector<byte> data = loadFile("rafale.bmp", 4 * MB);
 	//std::vector<byte> data = loadFile("ohs.doc", 5 * MB);
 	//std::vector<byte> data = loadFile("world95.txt", 4 * MB);
 	//std::vector<byte> data = loadFile("english.dic", 4 * MB);
