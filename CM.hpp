@@ -167,10 +167,12 @@ public:
 	// If LZP, need extra bit for the 256 ^ o0 ctx
 	static const uint32_t o0size = 0x200 * (kUseLZP ? 2 : 1);
 	static const uint32_t o1size = o0size * 0x100;
-	
+	static const uint32_t o2size = o0size * 0x100 * 0x100;
+
 	static const size_t o0pos = 0;
 	static const size_t o1pos = o0pos + o0size; // Order 1 == sparse 1
-	static const size_t s2pos = o1pos + o1size; // Sparse 2
+	static const size_t o2pos = o1pos + o1size;
+	static const size_t s2pos = o1pos + o2size; // Sparse 2
 	static const size_t s3pos = s2pos + o1size; // Sparse 3
 	static const size_t s4pos = s3pos + o1size; // Sparse 4
 	static const size_t hashStart = s4pos + o1size;
@@ -223,7 +225,6 @@ public:
 	uint32_t mask_model_;
 
 	// LZP
-	HPStationaryModel lzp_match[256 * 256];
 	std::vector<CMMixer> lzp_mixers;
 	
 	// SM
@@ -238,7 +239,6 @@ public:
 	SSE<kShift> sse;
 	size_t sse_ctx;
 	SSE<kShift> sse2;
-	size_t sse2_ctx;
 	size_t mixer_sse_ctx;
 
 	// Memory usage
@@ -357,10 +357,10 @@ public:
 		NSStateMap<kShift> sm;
 		sm.build();
 
-		sse.init(257 * 256 * 16, &table);
+		sse.init(257 * 256, &table);
 		sse2.init(257 * 256, &table);
 		mixer_sse_ctx = 0;
-		sse_ctx = sse2_ctx = 0;
+		sse_ctx = 0;
 		
 		hash_mask = ((2 * MB) << mem_usage) / sizeof(hash_table[0]) - 1;
 		hash_alloc_size = hash_mask + hashStart + (1 << huffman_len_limit);
@@ -373,17 +373,6 @@ public:
 		end_of_block_mdl.init();
 		block_flag_model.init();
 		for (auto& m : block_profile_models) m.init();
-
-		for (size_t expected = 0; expected < 256; ++expected) {
-			for (size_t len = 0; len < 256; ++len) {
-				auto& m = lzp_match[expected * 256 + len];
-				if (len > 0) {
-					m.init(kMaxValue - kMaxValue / (2 * len));
-				} else {
-					m.init();
-				}
-			}
-		}
 
 		// Match model.
 		match_model.resize(buffer.getSize() / 2);
@@ -507,10 +496,7 @@ public:
 	}
 
 	template <const bool decode, typename TStream>
-	size_t processBit(TStream& stream, size_t bit, size_t* base_contexts, size_t ctx, bool use_match_p_override = false, int match_p_override = 0, size_t mixer_ctx = 0) {
-		if (!use_match_p_override) {
-			mixer_ctx = ctx;
-		}
+	size_t processBit(TStream& stream, size_t bit, size_t* base_contexts, size_t ctx, size_t mixer_ctx, bool use_match_p_override = false) {
 		const auto mm_l = match_model.getLength();
 	
 		uint8_t 
@@ -520,15 +506,6 @@ public:
 
 		uint32_t p;
 		int p0 = 0, p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0, p8 = 0, p9 = 0;
-		if (inputs > 1) { sp1 = &hash_table[base_contexts[1] ^ ctx]; s1 = *sp1; p1 = getP(s1, 1); }
-		if (inputs > 2) { sp2 = &hash_table[base_contexts[2] ^ ctx]; s2 = *sp2; p2 = getP(s2, 2); }
-		if (inputs > 3) { sp3 = &hash_table[base_contexts[3] ^ ctx]; s3 = *sp3; p3 = getP(s3, 3); }
-		if (inputs > 4) { sp4 = &hash_table[base_contexts[4] ^ ctx]; s4 = *sp4; p4 = getP(s4, 4); }
-		if (inputs > 5) { sp5 = &hash_table[base_contexts[5] ^ ctx]; s5 = *sp5; p5 = getP(s5, 5); }
-		if (inputs > 6) { sp6 = &hash_table[base_contexts[6] ^ ctx]; s6 = *sp6; p6 = getP(s6, 6); }
-		if (inputs > 7) { sp7 = &hash_table[base_contexts[7] ^ ctx]; s7 = *sp7; p7 = getP(s7, 7); }
-		if (inputs > 8) { sp8 = &hash_table[base_contexts[8] ^ ctx]; s8 = *sp8; p8 = getP(s8, 8); }
-		if (inputs > 9) { sp9 = &hash_table[base_contexts[9] ^ ctx]; s9 = *sp9; p9 = getP(s9, 9); }
 		if (inputs > 0) {
 			if (mm_l == 0) {
 				sp0 = &hash_table[base_contexts[0] ^ ctx]; s0 = *sp0;
@@ -539,39 +516,56 @@ public:
 					use_match_p_override ? 1U : match_model.getExpectedBit());
 			}
 		}
-
-#if 0
-		uint8_t* const sparse1 = &spar1[(owhash & 0xFF00) + ctx];
-		uint8_t* const sparse2 = &spar2[((owhash & 0xFF0000) >> 8) + ctx];
-		uint8_t* const sparse3 = &spar3[((owhash & 0xFF000000) >> 16) + ctx];
-		if (false && use_sparse) {
-			int sparsep =
-				16 * table.st((*cur_preds)[1][*sparse1].getP()) +
-				13 * table.st((*cur_preds)[1][*sparse2].getP()) +
-				18 * table.st((*cur_preds)[1][*sparse3].getP());
-			p6 = sparsep / 16;
+		if (inputs > 1) {
+			sp1 = &hash_table[base_contexts[1] ^ ctx];
+			s1 = *sp1;
+			p1 = getP(s1, 1);
 		}
-#endif
-
-#if USE_MMX
-		__m128i wa = _mm_cvtsi32_si128(static_cast<unsigned short>(((inputs > 0) ? (mm_p ? mm_p : getP(*s0, 0, st)) : 0)));
-		__m128i wb = _mm_cvtsi32_si128((inputs > 1) ? (int(getP(*s1, 1, st)) << 16) : 0);
-		if (inputs > 2) wa = _mm_insert_epi16(wa, getP(*s2, 2, st), 2);
-		if (inputs > 3) wb = _mm_insert_epi16(wb, getP(*s3, 3, st), 3);
-		if (inputs > 4) wa = _mm_insert_epi16(wa, getP(*s4, 4, st), 4);
-		if (inputs > 5) wb = _mm_insert_epi16(wb, getP(*s5, 5, st), 5);
-		if (inputs > 6) wa = _mm_insert_epi16(wa, getP(*s6, 6, st), 6);
-		if (inputs > 7) wb = _mm_insert_epi16(wb, getP(*s7, 7, st), 7);
-		__m128i wp = _mm_or_si128(wa, wb);
-		int stp = cur_mixer->p(wp);
-		int mixer_p = table.sq(stp); // Mix probabilities.
-#else
+		if (inputs > 2) {
+			sp2 = &hash_table[base_contexts[2] ^ ctx];
+			s2 = *sp2;
+			p2 = getP(s2, 2);
+		}
+		if (inputs > 3) {
+			sp3 = &hash_table[base_contexts[3] ^ ctx];
+			s3 = *sp3;
+			p3 = getP(s3, 3);
+		}
+		if (inputs > 4) {
+			sp4 = &hash_table[base_contexts[4] ^ ctx];
+			s4 = *sp4;
+			p4 = getP(s4, 4);
+		}
+		if (inputs > 5) {
+			sp5 = &hash_table[base_contexts[5] ^ ctx];
+			s5 = *sp5;
+			p5 = getP(s5, 5);
+		}
+		if (inputs > 6) {
+			sp6 = &hash_table[base_contexts[6] ^ ctx];
+			s6 = *sp6;
+			p6 = getP(s6, 6);
+		}
+		if (inputs > 7) {
+			sp7 = &hash_table[base_contexts[7] ^ ctx];
+			s7 = *sp7;
+			p7 = getP(s7, 7);
+		}
+		if (inputs > 8) {
+			sp8 = &hash_table[base_contexts[8] ^ ctx];
+			s8 = *sp8;
+			p8 = getP(s8, 8);
+		}
+		if (inputs > 9) {
+			sp9 = &hash_table[base_contexts[9] ^ ctx];
+			s9 = *sp9;
+			p9 = getP(s9, 9);
+		}
 		auto* const cur_mixer = &mixer_base[mixer_ctx];
 		int stp = cur_mixer->p(11, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9);
 		if (stp < kMinST) stp = kMinST;
 		if (stp >= kMaxST) stp = kMaxST - 1;
 		int mixer_p = table.squnsafe(stp); // Mix probabilities.
-#endif
 		p = mixer_p;
 		if (kUseSSE) {
 			if (kUseLZP) {
@@ -581,7 +575,6 @@ public:
 					} else {
 						p = sse.p(stp + kMaxValue / 2, sse_ctx + mixer_ctx);
 					}
-					// p = sse2.p(st[p] + 2048, sse2_ctx + mixer_ctx);
 					p += p == 0;
 				} else if (false) {
 					// This SSE is disabled for speed.
@@ -651,7 +644,7 @@ public:
 	}
 
 	template <const bool decode, typename TStream>
-	size_t processNibble(TStream& stream, size_t c, size_t* base_contexts, size_t ctx_add) {
+	size_t processNibble(TStream& stream, size_t c, size_t* base_contexts, size_t ctx_add, size_t ctx_add2) {
 		// Maximize performance!
 		uint32_t huff_state = huff.start_state, code = 0;
 		if (!decode) {
@@ -676,7 +669,7 @@ public:
 				bit = code >> (sizeof(uint32_t) * 8 - 1);
 				code <<= 1;
 			}
-			bit = processBit<decode>(stream, bit, base_contexts, ctx);
+			bit = processBit<decode>(stream, bit, base_contexts, ctx_add2 + ctx, ctx);
 
 			// Encode the bit / decode at the last second.
 			if (use_huffman) {
@@ -694,7 +687,7 @@ public:
 
 	template <const bool decode, typename TStream>
 	uint32_t processByte(TStream& stream, uint32_t c = 0) {
-		size_t base_contexts[inputs + 1] = { o0pos }; // Base contexts
+		size_t base_contexts[inputs] = { o0pos }; // Base contexts
 		auto* ctx_ptr = base_contexts;
 
 		const size_t bpos = buffer.getPos();
@@ -704,8 +697,9 @@ public:
 			p1 = static_cast<byte>(owhash >> 8),
 			p2 = static_cast<byte>(owhash >> 16),
 			p3 = static_cast<byte>(owhash >> 24);
-		const bool o0enabled = modelEnabled(kModelOrder0);
-		*(ctx_ptr++) = o0pos;
+		if (modelEnabled(kModelOrder0)) {
+			*(ctx_ptr++) = o0pos;
+		}
 		if (modelEnabled(kModelOrder1)) {
 			*(ctx_ptr++) = o1pos + p0 * o0size;
 		}
@@ -724,12 +718,15 @@ public:
 		if (modelEnabled(kModelSparse34)) {
 			*(ctx_ptr++) = hash_lookup(hashFunc(p3, hashFunc(p2, 0x651A833E))); // Order 34
 		}
-		uint32_t h = hashFunc(p0, 0x32017044);
-		uint32_t order = 2;  // Start at order 2.
+		if (modelEnabled(kModelOrder2)) {
+			*(ctx_ptr++) = o2pos + (owhash & 0xFFFF) * o0size;
+		}
+		uint32_t h = hashFunc(owhash & 0xFFFF, 0x32017044);
+		uint32_t order = 3;
 		for (; order <= max_order_; ++order) {
 			h = hashFunc(buffer[bpos - order], h);
 			if (modelEnabled(static_cast<Model>(kModelOrder0 + order))) {
-				*(ctx_ptr++) = hash_lookup(h);
+				*(ctx_ptr++) = hash_lookup(h, true);
 			}
 		}
 		dcheck(order - 1 == match_model_order_);
@@ -759,17 +756,16 @@ public:
 				if (use_huffman) expected_char = huff.getCode(expected_char).value;
 				match_model.updateExpectedCode(expected_char, expected_bits);
 			}
-		}
-
-		if (modelEnabled(kModelMatchHashE)) {
-			*(ctx_ptr++) = hash_lookup(hashFunc(match_model.getExpectedChar(buffer), h));
-		}
+		}	
 		dcheck(ctx_ptr - base_contexts <= inputs + 1);
-
-		sse2_ctx = sse_ctx = 0;
+		// for (auto* ptr = base_contexts + 1; ptr < ctx_ptr; ++ptr) {
+//			prefetch(hash_table + *ptr);
+//		}
+		sse_ctx = 0;
 		calcMixerBase();
+		size_t expected_char = 0;
 		if (mm_len > 0) {
-			const size_t expected_char = match_model.getExpectedChar(buffer);
+			expected_char = match_model.getExpectedChar(buffer);
 			if (kStatistics && !decode) {
 				++(expected_char == c ? match_count_ : non_match_count_);
 			}
@@ -782,17 +778,8 @@ public:
 				size_t bit = decode ? 0 : expected_char == c;
 
 				sse_ctx = 256 * (1 + expected_char);
-				if (true) {
-					sse2_ctx = sse_ctx + 256 * 257 * std::min(extra_len, static_cast<size_t>(15));
-				}
-
-				auto& m = lzp_match[expected_char * 256 + mm_len];
-				int p = m.getP();
-
-				int match_p2 = table.st(p);
-				bit = processBit<decode>(stream, bit, base_contexts + (o0enabled ? 0 : 1), 256 ^ expected_char, true, match_p2, 0);
-				m.update(bit);
-
+				bit = processBit<decode>(stream, bit, base_contexts, expected_char ^ 256, 0, true);
+				
 				if (bit) {
 					return expected_char;
 				}
@@ -809,18 +796,17 @@ public:
 
 		// Non match, do normal encoding.
 		size_t huff_state = 0;
-		auto* ctx_start = base_contexts + (o0enabled ? 0 : 1);
 		if (use_huffman) {
-			huff_state = processNibble<decode>(stream, c, ctx_start, 0);
+			huff_state = processNibble<decode>(stream, c, base_contexts, 0, 0);
 			if (decode) {
 				c = huff.getChar(huff_state);
 			}
 		} else {
-			size_t n1 = processNibble<decode>(stream, c >> 4, ctx_start, 0);
+			size_t n1 = processNibble<decode>(stream, c >> 4, base_contexts, 0, 0);
 			if (kPrefetchMatchModel) {
 				match_model.fetch(n1 << 4);
 			}
-			size_t n2 = processNibble<decode>(stream, c & 0xF, ctx_start, 15 + (n1 * 15));
+			size_t n2 = processNibble<decode>(stream, c & 0xF, base_contexts, 15 + (n1 * 15), 0);
 			if (decode) {
 				c = n2 | (n1 << 4);
 			}
@@ -838,23 +824,23 @@ public:
 		size_t idx = 0;
 		switch (profile) {
 		case kText: // Text data types (tuned for xml)
-#if 1
-		 if (inputs > idx++) enableModel(kModelOrder4);
-		 if (inputs > idx++) enableModel(kModelWord1);
-		 if (inputs > idx++) enableModel(kModelOrder6);
-		 if (inputs > idx++) enableModel(kModelOrder2);
-		 if (inputs > idx++) enableModel(kModelMask);
-		 if (inputs > idx++) enableModel(kModelOrder1);
-		 if (inputs > idx++) enableModel(kModelOrder10);
-		 if (inputs > idx++) enableModel(kModelOrder8);
-		 if (inputs > idx++) enableModel(kModelWord2);
-		 if (inputs > idx++) enableModel(kModelOrder3);
-#else
-		if (inputs > idx++) enableModel(kModelOrder1);
-			if (inputs > idx++) enableModel(kModelWord1);
+#if 0
 			if (inputs > idx++) enableModel(kModelOrder4);
-			if (inputs > idx++) enableModel(kModelOrder2);
+			if (inputs > idx++) enableModel(kModelWord1);
 			if (inputs > idx++) enableModel(kModelOrder6);
+			if (inputs > idx++) enableModel(kModelOrder2);
+			if (inputs > idx++) enableModel(kModelMask);
+			if (inputs > idx++) enableModel(kModelOrder1);
+			if (inputs > idx++) enableModel(kModelOrder10);
+			if (inputs > idx++) enableModel(kModelOrder8);
+			if (inputs > idx++) enableModel(kModelWord2);
+			if (inputs > idx++) enableModel(kModelOrder3);
+#else
+			if (inputs > idx++) enableModel(kModelOrder4);
+			if (inputs > idx++) enableModel(kModelWord1);
+			if (inputs > idx++) enableModel(kModelOrder6);
+			if (inputs > idx++) enableModel(kModelOrder2);
+			if (inputs > idx++) enableModel(kModelOrder1);
 			if (inputs > idx++) enableModel(kModelMask);
 			if (inputs > idx++) enableModel(kModelOrder3);
 			if (inputs > idx++) enableModel(kModelOrder8);
@@ -911,7 +897,7 @@ public:
 	void update(uint32_t c) {
 		if (modelEnabled(kModelWord1) || modelEnabled(kModelWord2) || modelEnabled(kModelWord12)) {
 			word_model.updateUTF(c);
-			if (word_model.getLength()) {
+			if (word_model.getLength() > 2) {
 				if (kPrefetchWordModel) {
 					hash_lookup(word_model.getHash(), true);
 				}
