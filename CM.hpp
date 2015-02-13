@@ -304,6 +304,8 @@ public:
 	}
 
 	bool setOpt(uint32_t var) {
+    // if (var > 6 && var < 13) return false;
+    if ((Model) opt_var == kModelWord12) return false;
 		opt_var = var;
 		word_model.setOpt(var);
 		match_model.setOpt(var);
@@ -342,7 +344,7 @@ public:
 	void init() {
 		const auto start = clock();
 
-		table.build(0);
+		table.build(opt_var);
 		
 		mixer_mask = 0x1FFFF;
 		mixers.resize(static_cast<uint32_t>(kProfileCount) * (mixer_mask + 1));
@@ -836,19 +838,19 @@ public:
 		size_t idx = 0;
 		switch (profile) {
 		case kText: // Text data types (tuned for xml)
-#if 0
-			if (inputs > idx++) enableModel(kModelOrder1);
-			if (inputs > idx++) enableModel(kModelOrder2);
-			if (inputs > idx++) enableModel(kModelOrder4);
-			if (inputs > idx++) enableModel(kModelMask);
-			if (inputs > idx++) enableModel(kModelWord1);
-			if (inputs > idx++) enableModel(kModelOrder6);
-			// if (inputs > idx++) enableModel(kModelWord12);
-			if (inputs > idx++) enableModel(kModelOrder3);
-			if (inputs > idx++) enableModel(kModelOrder0);
-			if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
+#if 1
+		 if (inputs > idx++) enableModel(kModelOrder4);
+		 if (inputs > idx++) enableModel(kModelWord1);
+		 if (inputs > idx++) enableModel(kModelOrder6);
+		 if (inputs > idx++) enableModel(kModelOrder2);
+		 if (inputs > idx++) enableModel(kModelMask);
+		 if (inputs > idx++) enableModel(kModelOrder1);
+		 if (inputs > idx++) enableModel(kModelOrder10);
+		 if (inputs > idx++) enableModel(kModelOrder8);
+		 if (inputs > idx++) enableModel(kModelWord2);
+		 if (inputs > idx++) enableModel(kModelOrder3);
 #else
-			if (inputs > idx++) enableModel(kModelOrder1);
+		if (inputs > idx++) enableModel(kModelOrder1);
 			if (inputs > idx++) enableModel(kModelWord1);
 			if (inputs > idx++) enableModel(kModelOrder4);
 			if (inputs > idx++) enableModel(kModelOrder2);
