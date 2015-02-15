@@ -509,7 +509,7 @@ public:
 		if (inputs > 0) {
 			if (mm_l == 0) {
 				sp0 = &hash_table[base_contexts[0] ^ ctx]; s0 = *sp0;
-				assert(sp0 >= ht && sp0 <= ht + hash_alloc_size);
+				assert(sp0 >= hash_table && sp0 <= hash_table + hash_alloc_size);
 				p0 = getP(s0, 0);
 			} else {
 				p0 = match_model.getP(table.getStretchPtr(),
@@ -581,7 +581,7 @@ public:
 					p = (p + sse.p(stp, mixer_sse_ctx & 0xFF)) / 2;
 					p += p == 0;
 				}
-			} else {
+			} else if (false) {
 				p = (p + sse.p(stp + kMaxValue / 2, (mixer_sse_ctx & 0xFF) * 256 + mixer_ctx)) / 2;
 				p += p == 0;
 			}
@@ -690,6 +690,14 @@ public:
 		size_t base_contexts[inputs] = { o0pos }; // Base contexts
 		auto* ctx_ptr = base_contexts;
 
+		uint32_t random_words[] = {
+			0x4ec457ce, 0x2f85195b, 0x4f4c033c, 0xc0de7294, 0x224eb711,
+			0x9f358562, 0x00d46a63, 0x0fb6c35c, 0xc4dca450, 0x9ddc89f7,
+			0x6f4a0403, 0x1fff619f, 0x83e56bd9, 0x0448a62c, 0x4de22c02,
+			0x418700b2, 0x7e546bf8, 0xac2bb7a9, 0xc9e6cbcb, 0x4a8b4a07,
+			0x486b3b68, 0x9e944172, 0xb11b7dd5, 0xaa0cd8a7, 0x4a6c6fa7,
+		};
+
 		const size_t bpos = buffer.getPos();
 		const size_t blast = bpos - 1; // Last seen char
 		const size_t
@@ -721,10 +729,10 @@ public:
 		if (modelEnabled(kModelOrder2)) {
 			*(ctx_ptr++) = o2pos + (owhash & 0xFFFF) * o0size;
 		}
-		uint32_t h = hashFunc(owhash & 0xFFFF, 0x32017044);
+		uint32_t h = hashFunc(owhash & 0xFFFF, random_words[0]);
 		uint32_t order = 3;
 		for (; order <= max_order_; ++order) {
-			h = hashFunc(buffer[bpos - order], h);
+			h = hashFunc(buffer[bpos - order], h ^ random_words[order]);
 			if (modelEnabled(static_cast<Model>(kModelOrder0 + order))) {
 				*(ctx_ptr++) = hash_lookup(h, true);
 			}
@@ -732,7 +740,7 @@ public:
 		dcheck(order - 1 == match_model_order_);
 
 		if (modelEnabled(kModelWord1)) {
-			*(ctx_ptr++) = hash_lookup(word_model.getHash(), false);
+			*(ctx_ptr++) = hash_lookup(word_model.getHash(), false); // Already prefetched.
 		}
 		if (modelEnabled(kModelWord2)) {
 			*(ctx_ptr++) = hash_lookup(word_model.getPrevHash(), false);
@@ -742,9 +750,9 @@ public:
 		}
 		if (modelEnabled(kModelMask)) {
 			// Idea from tangelo, thanks Jan Ondrus.
-			mask_model_ <<= 4;
-			mask_model_ |= current_mask_map_[p0];
-			*(ctx_ptr++) = hash_lookup(mask_model_ * 98765431);
+			mask_model_ *= 16;
+			mask_model_ += current_mask_map_[p0];
+			*(ctx_ptr++) = hash_lookup(hashFunc(0xaa0cd8a7, mask_model_ * 7), true);
 		}
 		size_t mm_len = 0;
 		if (match_model_order_ != 0) {
@@ -828,13 +836,14 @@ public:
 			if (inputs > idx++) enableModel(kModelOrder4);
 			if (inputs > idx++) enableModel(kModelWord1);
 			if (inputs > idx++) enableModel(kModelOrder6);
-			if (inputs > idx++) enableModel(kModelOrder2);
-			if (inputs > idx++) enableModel(kModelMask);
+			// Tuned for enwik8.drt
 			if (inputs > idx++) enableModel(kModelOrder1);
-			if (inputs > idx++) enableModel(kModelOrder10);
-			if (inputs > idx++) enableModel(kModelOrder8);
-			if (inputs > idx++) enableModel(kModelWord2);
+			if (inputs > idx++) enableModel(kModelOrder2);
 			if (inputs > idx++) enableModel(kModelOrder3);
+			if (inputs > idx++) enableModel(kModelOrder5);
+			if (inputs > idx++) enableModel(kModelMask);
+			// if (inputs > idx++) enableModel(static_cast<Model>(6 + opt_var));
+			setMatchModelOrder(10);
 #else
 			if (inputs > idx++) enableModel(kModelOrder4);
 			if (inputs > idx++) enableModel(kModelWord1);
@@ -846,9 +855,9 @@ public:
 			if (inputs > idx++) enableModel(kModelOrder8);
 			if (inputs > idx++) enableModel(kModelWord2);
 			if (inputs > idx++) enableModel(kModelOrder0);
+			setMatchModelOrder(10);
 #endif
 			// if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
-			setMatchModelOrder(10);
 			current_mask_map_ = text_mask_map_;
 			break;
 		default: // Binary
@@ -896,7 +905,7 @@ public:
 
 	void update(uint32_t c) {
 		if (modelEnabled(kModelWord1) || modelEnabled(kModelWord2) || modelEnabled(kModelWord12)) {
-			word_model.updateUTF(c);
+			word_model.update(c);
 			if (word_model.getLength() > 2) {
 				if (kPrefetchWordModel) {
 					hash_lookup(word_model.getHash(), true);

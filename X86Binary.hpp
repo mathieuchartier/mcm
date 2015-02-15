@@ -33,8 +33,12 @@
 // E8/E8 B2 <char> -> E8/E9 <char>
 // E8/E9 <other> -> E8/E9 <other>
 class X86AdvancedFilter : public ByteStreamFilter<16 * KB, 20 * KB> {
+	static const uint8_t kXORByte = 162;
+	static const uint8_t kMarkerByte = 99;
 public:
-	X86AdvancedFilter(Stream* stream) : ByteStreamFilter(stream), offset_(17) {
+	X86AdvancedFilter(Stream* stream)
+		: ByteStreamFilter(stream), offset_(17), last_offset_(17)
+		, opt_var_(0), transform_count_(0), false_positives_(0) {
 
 	}
 	virtual void forwardFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
@@ -47,9 +51,10 @@ public:
 		return 1;
 	}
 	void dumpInfo() const {
+		std::cout << std::endl << transform_count_ << " / " << false_positives_ << std::endl;
 	}
-	void setSpecific(uint32_t s) {
-		special_byte_ = s;
+	void setOpt(uint32_t s) {
+		opt_var_ = s;
 	}
 	
 private:
@@ -57,7 +62,6 @@ private:
 	void process(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
 		const size_t in_c = *in_count;
 		const size_t out_c = *out_count;
-		// std::cout << in_c << " " << out_c << std::endl;
 		uint8_t*start_out = out, *out_limit = out + out_c;
 		uint8_t *start_in = in, *in_limit = in + in_c;
 		if (in_c <= 6) {
@@ -70,8 +74,17 @@ private:
 				*out++ = *in;
 				if ((*in & 0xFE) == 0xE8 || ((*in & 0xF0) == 0x80 && in > start_in && in[-1] == 0x0F)) {
 					const size_t cur_offset = offset_ + (encode ? (in - start_in) : (out - 1 - start_out));
+					if (false && (in[4] == 0 || in[4] == 0xFF) && cur_offset - last_offset_ > 4 * KB) {
+						last_offset_ = cur_offset;
+						*out++ = in[1];
+						*out++ = in[2];
+						*out++ = in[3];
+						*out++ = in[4];
+						in += 4;
+						continue;
+					}
 					if (encode) {
-						byte sign_byte = in[4];
+						uint8_t sign_byte = in[4];
 						if (sign_byte == 0xFF || sign_byte == 0x00) {
 							int32_t delta = 
 									static_cast<uint32_t>(in[1]) +
@@ -79,35 +92,45 @@ private:
 									(static_cast<uint32_t>(in[3]) << 16) +
 									(static_cast<uint32_t>(sign_byte) << 24);
 							// Don't change 0 deltas.
-							if (delta > 0 || (delta < 0 && -delta < static_cast<int32_t>(cur_offset))) {
+							if (true || delta > 0 || (delta < 0 && -delta < static_cast<int32_t>(cur_offset))) {
+								if (cur_offset - last_offset_ > 8 * KB) {
+									offset_ = 17;
+								}
 								uint32_t addr = delta + static_cast<uint32_t>(cur_offset);
 								*out++ = sign_byte;
-								*out++ = (addr >> 16) ^ 162;
-								*out++ = (addr >> 8) ^ 162;
-								*out++ = (addr >> 0) ^ 162;
-								*out++ = 111;  // Marker byte for CM models (signals end of jump).
+								*out++ = (addr >> 16) ^ kXORByte;
+								*out++ = (addr >> 8) ^ kXORByte;
+								*out++ = (addr >> 0) ^ kXORByte;
+								*out++ = kMarkerByte;  // Marker byte for CM models (signals end of jump).
 								in += 4;
+								++transform_count_;
+								last_offset_ = cur_offset;
 								continue;
 							}
 						}
 						// Forbidden chars / non match.
 						if (in[1] == 0xFF || in[1] == 0x00 || in[1] == 0xB2) {
+							++false_positives_;
 							*out++ = 0xB2;
 							*out++ = in[1];
 							in++;
 						}
 					} else {
-						uint8_t sign_byte = in[1];
+						auto sign_byte = in[1];
 						if (sign_byte == 0xFF || sign_byte == 0x00) {
+							if (cur_offset - last_offset_ > 8 * KB) {
+								offset_ = 17;
+							}
 							uint32_t delta = 
-								static_cast<uint32_t>(in[4] ^ 162) +
-								(static_cast<uint32_t>(in[3] ^ 162) << 8) +
-								(static_cast<uint32_t>(in[2] ^ 162) << 16);
+								static_cast<uint32_t>(in[4] ^ kXORByte) +
+								(static_cast<uint32_t>(in[3] ^ kXORByte) << 8) +
+								(static_cast<uint32_t>(in[2] ^ kXORByte) << 16);
 							uint32_t addr = delta - static_cast<uint32_t>(cur_offset);
 							*out++ = (addr >> 0);
 							*out++ = (addr >> 8);
 							*out++ = (addr >> 16);
 							*out++ = sign_byte;
+							last_offset_ = cur_offset;
 							in += 5;
 						} else if (in[1] == 0xB2) {
 							*out++ = in[2];
@@ -118,18 +141,23 @@ private:
 			}
 		}
 		*out_count = out - start_out;
-		*in_count = in - start_in; 
+		*in_count = in - start_in;
 		offset_ += encode ? *in_count : *out_count;
 	}
 
 	size_t offset_;
-	size_t special_byte_;
+	size_t last_offset_;
+	size_t opt_var_;
+
+	size_t transform_count_;
+	size_t false_positives_;
 };
 
 // Simple E8E9 filter.
 class X86BinaryFilter : public ByteBufferFilter<0x10000> {
+	static const uint8_t kXORByte = 213;
 public:
-	X86BinaryFilter(Stream* stream) : ByteBufferFilter(stream), offset_(17), count_(0), other_count_(0), spec_(0) {
+	X86BinaryFilter(Stream* stream) : ByteBufferFilter(stream), offset_(17), count_(0), opt_var_(0) {
 	}
 	virtual void forwardFilter(byte* ptr, size_t count) {
 		process<true>(ptr, count); 
@@ -141,9 +169,10 @@ public:
 		return 1;
 	}
 	void dumpInfo() const {
-		std::cout << "E8E9 count " << count_ << "/" << other_count_ << std::endl;
+		std::cout << "E8E9 count " << count_ << std::endl;
 	}
-	void setSpecific(uint32_t s){
+	void setOpt(uint32_t s) {
+		opt_var_ = s;
 	}
 
 private:
@@ -152,13 +181,13 @@ private:
 		uint8_t* limit = ptr + count - 5;
 		if (encode) {
 			for (byte* cur_ptr = limit; cur_ptr >= ptr; --cur_ptr) {
-				if ((*cur_ptr & 0xFE) == 0xE8) {
+				if ((*cur_ptr & 0xFE) == 0xE8 || ((*cur_ptr & 0xF0) == 0x80 && cur_ptr > ptr && cur_ptr[-1] == 0x0F)) {
 					handleE8E9<encode>(cur_ptr, offset_ + (cur_ptr - ptr));
 				}
 			}
 		} else {
 			for (byte* cur_ptr = ptr; cur_ptr <= limit; ++cur_ptr) {
-				if ((*cur_ptr & 0xFE) == 0xE8) {
+				if ((*cur_ptr & 0xFE) == 0xE8 || ((*cur_ptr & 0xF0) == 0x80 && cur_ptr > ptr && cur_ptr[-1] == 0x0F)) {
 					handleE8E9<encode>(cur_ptr, offset_ + (cur_ptr - ptr));
 				}
 			}
@@ -168,25 +197,23 @@ private:
 	template <bool encode>
 	inline void handleE8E9(uint8_t* ptr, size_t cur_offset) {
 		const byte sign_byte = ptr[4];
-		++other_count_;
 		if (sign_byte == 0xFF || sign_byte == 0x00) {
 			++count_;
 			uint32_t offset = 
 				encode ? 
 					static_cast<uint32_t>(ptr[1]) +
 					(static_cast<uint32_t>(ptr[2]) << 8) +
-					(static_cast<uint32_t>(ptr[3]) << 16)
-					:
-						static_cast<uint32_t>(ptr[3] ^ 162) +
-						(static_cast<uint32_t>(ptr[2] ^ 162) << 8) +
-					(static_cast<uint32_t>(ptr[1] ^ 162) << 16);
+					(static_cast<uint32_t>(ptr[3]) << 16) :
+					static_cast<uint32_t>(ptr[3] ^ kXORByte) +
+					(static_cast<uint32_t>(ptr[2] ^ kXORByte) << 8) +
+					(static_cast<uint32_t>(ptr[1] ^ kXORByte) << 16);
 			uint32_t delta = static_cast<uint32_t>(encode ? cur_offset : -cur_offset);
 			uint32_t addr = offset + delta;
 			check(((addr - delta) & 0xFFFFFF) == (offset & 0xFFFFFF));
 			if (encode) {
-				ptr[1] = (addr >> 16) ^ 162;
-				ptr[2] = (addr >> 8) ^ 162;
-				ptr[3] = (addr >> 0) ^ 162;
+				ptr[1] = (addr >> 16) ^ kXORByte;
+				ptr[2] = (addr >> 8) ^ kXORByte;
+				ptr[3] = (addr >> 0) ^ kXORByte;
 			} else {
 				ptr[1] = addr >> 0;
 				ptr[2] = addr >> 8;
@@ -196,8 +223,7 @@ private:
 	}
 	size_t offset_;
 	size_t count_;
-	size_t other_count_;
-	size_t spec_;
+	size_t opt_var_;
 };
 
 #endif

@@ -43,6 +43,7 @@
 
 CompressorFactories* CompressorFactories::instance = nullptr;
 
+//typedef X86BinaryFilter DefaultFilter;
 typedef X86AdvancedFilter DefaultFilter;
 //typedef FixedDeltaFilter<2, 2> DefaultFilter;
 //typedef SimpleDict DefaultFilter;
@@ -50,7 +51,7 @@ typedef X86AdvancedFilter DefaultFilter;
 
 class ArchiveHeader {
 public:
-	static const size_t kVersion = 81;
+	static const size_t kVersion = 82;
 
 	char magic[3]; // MCM
 	uint16_t version;
@@ -99,6 +100,7 @@ public:
 	}
 
 	Compressor* createCompressor() {
+		//return new Store;
 		switch ((Compressor::Type)algorithm) {
 		case Compressor::kTypeCMTurbo:
 			return new CM<kCMTypeTurbo>(mem_usage);
@@ -263,6 +265,7 @@ public:
 	};
 	Mode mode;
 	bool opt_mode;
+	bool no_filter;
 	Compressor* compressor;
 	uint32_t mem_level;
 	CompLevel comp_level;
@@ -274,6 +277,7 @@ public:
 	Options()
 		: mode(kModeUnknown)
 		, opt_mode(false)
+		, no_filter(false)
 		, compressor(nullptr)
 		, mem_level(6)
 		, comp_level(kCompLevelHigh)
@@ -332,6 +336,7 @@ public:
 			} else if (arg == "-opt") {
 				opt_mode = true;
 			}
+			else if (arg == "-nofilter") no_filter = true;
 			else if (arg == "-turbo") comp_level = kCompLevelTurbo;
 			else if (arg == "-fast") comp_level = kCompLevelFast;
 			else if (arg == "-mid") comp_level = kCompLevelMid;
@@ -563,7 +568,9 @@ int main(int argc, char* argv[]) {
 				{
 					ProgressStream rms(&fin, &fout);
 					DefaultFilter f(&rms);
+					f.setOpt(opt_var);
 					comp->compress(&f, &fout);
+					f.dumpInfo();
 				}
 				clock_t time = clock() - start;
 				const auto size = fout.tell();
@@ -590,6 +597,7 @@ int main(int argc, char* argv[]) {
 				ProgressStream rms(&fin, &fout);
 				DefaultFilter f(&rms);
 				comp->compress(&f, &fout);
+				f.dumpInfo();
 			}
 			clock_t time = clock() - start;
 			std::cout << "Compression " << fin.getCount() << "->" << fout.getCount() << " took " << clockToSeconds(time) << "s" << std::endl;

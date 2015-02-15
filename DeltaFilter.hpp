@@ -93,6 +93,7 @@ template <uint32_t bytes, uint32_t offset>
 class FixedDeltaFilter : public DeltaFilter {
 public:
 	FixedDeltaFilter(Stream* stream) : DeltaFilter(stream, bytes, offset) { }
+	void setOpt(size_t) {}
 };
 
 #endif

@@ -139,7 +139,7 @@ public:
 
 		if (false) {
 			profile_length = size();
-			return profile = kBinary;
+			return profile = kText;
 		}
 
 		const auto total = size();
@@ -196,6 +196,27 @@ public:
 		}
 		
 		return profile;
+	}
+};
+
+class DetectorFilter {
+	static const size_t kLookaheadSize = 1 * MB;
+	CyclicBuffer<uint8_t> look_ahead_;
+public:
+	void init() {
+		look_ahead_.resize(kLookaheadSize);
+	}
+	int read() {
+		// kLookaheadSize
+
+	}
+
+	void put(int c) {
+
+	}
+
+	DataProfile detect() {
+
 	}
 };
 

@@ -158,7 +158,7 @@ public:
 	}
 	void dumpInfo() {
 	}
-	void setSpecific(uint32_t) { }
+	void setOpt(uint32_t) { }
 	static size_t getMaxExpansion() {
 		return 1;
 	}
