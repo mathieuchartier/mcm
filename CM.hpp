@@ -143,7 +143,6 @@ public:
 	typedef ss_table<short, kMaxValue, kMinST, kMaxST, 8> SSTable;
 	SSTable table;
 	
-	//typedef slowBitModel<unsigned short, shift> StationaryModel;
 	typedef safeBitModel<unsigned short, kShift, 5, 15> BitModel;
 	typedef fastBitModel<int, kShift, 9, 30> StationaryModel;
 	typedef fastBitModel<int, kShift, 9, 30> HPStationaryModel;
@@ -305,7 +304,6 @@ public:
 
 	bool setOpt(uint32_t var) {
     // if (var > 6 && var < 13) return false;
-    if ((Model) opt_var == kModelWord12) return false;
 		opt_var = var;
 		word_model.setOpt(var);
 		match_model.setOpt(var);
@@ -440,9 +438,9 @@ public:
 		}
 	}
 
-	forceinline uint32_t hashFunc(uint32_t a, uint32_t b) {
+	forceinline uint32_t hashFunc(uint32_t a, uint32_t b) const {
 		b += a;
-		b += rotate_left(b, 9);
+		b += rotate_left(b, 11);
 		return b ^ (b >> 6);
 	}
 
@@ -480,14 +478,14 @@ public:
 		cur_preds = &preds[static_cast<size_t>(profile)];
 	}
 
-	forceinline byte nextState(byte state, uint32_t bit, uint32_t ctx) {
+	forceinline byte nextState(uint8_t state, uint32_t bit, uint32_t ctx) {
 		if (!kFixedProbs) {
 			(*cur_preds)[ctx][state].update(bit, 9);
 		}
 		return state_trans[state][bit];
 	}
 	
-	forceinline int getP(byte state, uint32_t ctx) const {
+	forceinline int getP(uint8_t state, uint32_t ctx) const {
 		int p = (*cur_preds)[ctx][state].getP();
 		if (!kFixedProbs) {
 			p = table.st(p);
@@ -562,7 +560,7 @@ public:
 			p9 = getP(s9, 9);
 		}
 		auto* const cur_mixer = &mixer_base[mixer_ctx];
-		int stp = cur_mixer->p(11, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9);
+		int stp = cur_mixer->p(9, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9);
 		if (stp < kMinST) stp = kMinST;
 		if (stp >= kMaxST) stp = kMaxST - 1;
 		int mixer_p = table.squnsafe(stp); // Mix probabilities.
@@ -593,11 +591,7 @@ public:
 		dcheck(bit < 2);
 
 		// Returns false if we skipped the update due to a low error, should happen moderately frequently on highly compressible files.
-#if USE_MMX
-		const bool ret = cur_mixer->update(wp, mixer_p, bit);
-#else
-		const bool ret = cur_mixer->update(mixer_p, bit, 12, 24, 0, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9);
-#endif
+		const bool ret = cur_mixer->update(mixer_p, bit, kShift, 28, 1, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9);
 		// Only update the states / predictions if the mixer was far enough from the bounds, helps 15k on enwik8 and 1-2sec.
 		if (ret) {
 			if (!use_match_p_override) {
@@ -614,11 +608,8 @@ public:
 			if (inputs > 9) *sp9 = nextState(s9, bit, 9);
 			if (use_match_p_override) {
 				match_model.updateCurMdl(1, bit);
-			} else {
-				match_model.updateBit(bit);
 			}
 		}
-
 		if (kUseSSE) {
 			if (kUseLZP) {
 				if (!kUseSSEOnlyLZP || sse_ctx != 0) {
@@ -632,7 +623,9 @@ public:
 				mixer_sse_ctx = mixer_sse_ctx * 2 + ret;
 			}
 		}
-
+		if (!use_match_p_override) {
+			match_model.updateBit(bit);
+		}
 		if (kStatistics) ++mixer_skip[ret];
 
 		if (decode) {
@@ -729,10 +722,10 @@ public:
 		if (modelEnabled(kModelOrder2)) {
 			*(ctx_ptr++) = o2pos + (owhash & 0xFFFF) * o0size;
 		}
-		uint32_t h = hashFunc(owhash & 0xFFFF, random_words[0]);
+		uint32_t h = hashFunc(owhash & 0xFFFF, 0x4ec457ce);
 		uint32_t order = 3;
 		for (; order <= max_order_; ++order) {
-			h = hashFunc(buffer[bpos - order], h ^ random_words[order]);
+			h = hashFunc(buffer[bpos - order], h);
 			if (modelEnabled(static_cast<Model>(kModelOrder0 + order))) {
 				*(ctx_ptr++) = hash_lookup(h, true);
 			}
@@ -749,10 +742,10 @@ public:
 			*(ctx_ptr++) = hash_lookup(word_model.getHash() ^ word_model.getPrevHash(), false);
 		}
 		if (modelEnabled(kModelMask)) {
-			// Idea from tangelo, thanks Jan Ondrus.
+			// Model idea from Tangelo, thanks Jan Ondrus.
 			mask_model_ *= 16;
 			mask_model_ += current_mask_map_[p0];
-			*(ctx_ptr++) = hash_lookup(hashFunc(0xaa0cd8a7, mask_model_ * 7), true);
+			*(ctx_ptr++) = hash_lookup(hashFunc(0xaa0cd8a7, mask_model_ * 313), true);
 		}
 		size_t mm_len = 0;
 		if (match_model_order_ != 0) {
@@ -766,9 +759,6 @@ public:
 			}
 		}	
 		dcheck(ctx_ptr - base_contexts <= inputs + 1);
-		// for (auto* ptr = base_contexts + 1; ptr < ctx_ptr; ++ptr) {
-//			prefetch(hash_table + *ptr);
-//		}
 		sse_ctx = 0;
 		calcMixerBase();
 		size_t expected_char = 0;
@@ -780,7 +770,6 @@ public:
 			if (kUseLZP) {
 				size_t extra_len = mm_len - match_model.getMinMatch();
 				cur_preds = &preds[kPredArrays - 1];
-				// mixer_base = &lzp_mixers[mm_len];
 				dcheck(mm_len >= match_model.getMinMatch());
 				
 				size_t bit = decode ? 0 : expected_char == c;
@@ -842,7 +831,6 @@ public:
 			if (inputs > idx++) enableModel(kModelOrder3);
 			if (inputs > idx++) enableModel(kModelOrder5);
 			if (inputs > idx++) enableModel(kModelMask);
-			// if (inputs > idx++) enableModel(static_cast<Model>(6 + opt_var));
 			setMatchModelOrder(10);
 #else
 			if (inputs > idx++) enableModel(kModelOrder4);

@@ -98,13 +98,6 @@ public:
 		trans('Û') = trans('û') = index++;
 		trans('Ü') = trans('ü') = index++;
 
-		if (true)
-		for (size_t i = 128; i < transform_table_size; ++i) {
-			if (transform[i] == transform_table_size) {
-				transform[i] = index++;
-			}
-		}
-
 		len = 0;
 		prev = 0;
 		reset();
@@ -118,7 +111,7 @@ public:
 	}
 
 	forceinline uint32_t getHash() const {
-		return hashFunc(h1, h2);
+		return h1 + h2;
 	}
 
 	forceinline uint32_t getPrevHash() const {
@@ -130,42 +123,39 @@ public:
 	}
 
 	void update(uint8_t c) {
-		auto cur = transform[static_cast<uint8_t>(c)];
-		if (cur != transform_table_size) {
-			// h1 = hashFunc(cur, h1);
-			h1 = h1 * 48 + cur;
-			h2 = h1 ^ 0x486b3b68;
+		uint32_t cur = transform[c];
+		if (cur != transform_table_size || (cur >= 128 && cur != transform_table_size)) {
+			h1 = (h1 + cur) * 54;
+			h2 = h1 >> 7;
 			len += len < kMaxLen;
 		} else {
-			if (len) {
-				prev = rotate_left(getHash(), 13);
-				reset();
-			}
+			prev = rotate_left(getHash(), 13);
+			reset();
 		}
 	}
 
-	forceinline uint32_t hashFunc(uint32_t c, uint32_t h) const {
-		h *= 81;
+	forceinline uint32_t hashFunc(uint32_t c, uint32_t h) {
+		h *= 61;
 		h += c;
-		h += rotate_left(h, 9);
-		return h ^ (h >> 5);
+		h += rotate_left(h, 10);
+		return h ^ (h >> 8);
 	}
 
 	void updateUTF(char c) {
 		decoder.update(c);
-		auto cur = decoder.getAcc();
+		uint32_t cur = decoder.getAcc();
 		if (decoder.done()) {
 			if (cur < 256) cur = transform[cur];
 			if (LIKELY(cur != transform_table_size)) {
-				// h1 = hashFunc(cur, h1);
-				h1 = h1 * 48 + cur;
-				h2 = h1 ^ 0x486b3b68;
+				h1 = hashFunc(cur, h1);
+				h2 = h1 * 8;
 				len += len < kMaxLen;
 			} else {
 				if (len) {
 					prev = rotate_left(getHash(), 13);
 					reset();
 				}
+				return;
 			}
 		} else {
 			h2 = hashFunc(cur, h2);
