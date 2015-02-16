@@ -54,7 +54,7 @@ public:
 
 	void setOptVar(size_t var) {
 		opt_var_ = var;
-		}
+	}
 
 	void init() {
 		profile_length = 0;

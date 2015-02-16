@@ -51,7 +51,7 @@ public:
 		return 1;
 	}
 	void dumpInfo() const {
-		std::cout << std::endl << transform_count_ << " / " << false_positives_ << std::endl;
+		// std::cout << std::endl << transform_count_ << " / " << false_positives_ << std::endl;
 	}
 	void setOpt(uint32_t s) {
 		opt_var_ = s;
@@ -92,9 +92,9 @@ private:
 									(static_cast<uint32_t>(in[3]) << 16) +
 									(static_cast<uint32_t>(sign_byte) << 24);
 							// Don't change 0 deltas.
-							if (true || delta > 0 || (delta < 0 && -delta < static_cast<int32_t>(cur_offset))) {
-								if (cur_offset - last_offset_ > 8 * KB) {
-									offset_ = 17;
+							if (delta > 0 || (delta < 0 && -delta < static_cast<int32_t>(cur_offset))) {
+								if (cur_offset - last_offset_ > 3  * KB * 32) {
+									offset_ = 0;
 								}
 								uint32_t addr = delta + static_cast<uint32_t>(cur_offset);
 								*out++ = sign_byte;
@@ -118,8 +118,8 @@ private:
 					} else {
 						auto sign_byte = in[1];
 						if (sign_byte == 0xFF || sign_byte == 0x00) {
-							if (cur_offset - last_offset_ > 8 * KB) {
-								offset_ = 17;
+							if (cur_offset - last_offset_ > 3 * KB * 32) {
+								offset_ = 0;
 							}
 							uint32_t delta = 
 								static_cast<uint32_t>(in[4] ^ kXORByte) +

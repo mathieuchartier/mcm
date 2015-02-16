@@ -108,7 +108,7 @@ public:
 		kCMType == kCMTypeMax ? 10 :
 		0;
 	// Flags
-	static const bool kStatistics = true;
+	static const bool kStatistics = false;
 	static const bool kFastStats = true;
 	static const bool kFixedProbs = false;
 	// Currently, LZP isn't as great as it coul be.
@@ -493,8 +493,8 @@ public:
 		return p;
 	}
 
-	template <const bool decode, typename TStream>
-	size_t processBit(TStream& stream, size_t bit, size_t* base_contexts, size_t ctx, size_t mixer_ctx, bool use_match_p_override = false) {
+	template <const bool decode, const bool kLZPBit, typename TStream>
+	size_t processBit(TStream& stream, size_t bit, size_t* base_contexts, size_t ctx, size_t mixer_ctx) {
 		const auto mm_l = match_model.getLength();
 	
 		uint8_t 
@@ -505,13 +505,12 @@ public:
 		uint32_t p;
 		int p0 = 0, p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0, p8 = 0, p9 = 0;
 		if (inputs > 0) {
-			if (mm_l == 0) {
+			if (!kLZPBit && mm_l == 0) {
 				sp0 = &hash_table[base_contexts[0] ^ ctx]; s0 = *sp0;
 				assert(sp0 >= hash_table && sp0 <= hash_table + hash_alloc_size);
 				p0 = getP(s0, 0);
 			} else {
-				p0 = match_model.getP(table.getStretchPtr(),
-					use_match_p_override ? 1U : match_model.getExpectedBit());
+				p0 = match_model.getP(table.getStretchPtr(), kLZPBit ? 1U : match_model.getExpectedBit());
 			}
 		}
 		if (inputs > 1) {
@@ -567,8 +566,8 @@ public:
 		p = mixer_p;
 		if (kUseSSE) {
 			if (kUseLZP) {
-				if (!kUseSSEOnlyLZP || sse_ctx != 0) {
-					if (use_match_p_override) {
+				if (!kUseSSEOnlyLZP || kLZPBit || sse_ctx != 0) {
+					if (kLZPBit) {
 						p = sse2.p(stp + kMaxValue / 2, sse_ctx + mm_l);
 					} else {
 						p = sse.p(stp + kMaxValue / 2, sse_ctx + mixer_ctx);
@@ -594,7 +593,9 @@ public:
 		const bool ret = cur_mixer->update(mixer_p, bit, kShift, 28, 1, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9);
 		// Only update the states / predictions if the mixer was far enough from the bounds, helps 15k on enwik8 and 1-2sec.
 		if (ret) {
-			if (!use_match_p_override) {
+			if (kLZPBit) {
+				match_model.updateCurMdl(1, bit);
+			} else {
 				if (inputs > 0 && mm_l == 0) *sp0 = nextState(s0, bit, 0);
 			}
 			if (inputs > 1) *sp1 = nextState(s1, bit, 1);
@@ -606,24 +607,19 @@ public:
 			if (inputs > 7) *sp7 = nextState(s7, bit, 7);
 			if (inputs > 8) *sp8 = nextState(s8, bit, 8);
 			if (inputs > 9) *sp9 = nextState(s9, bit, 9);
-			if (use_match_p_override) {
-				match_model.updateCurMdl(1, bit);
-			}
 		}
 		if (kUseSSE) {
 			if (kUseLZP) {
-				if (!kUseSSEOnlyLZP || sse_ctx != 0) {
-					if (use_match_p_override) {
-						sse2.update(bit);
-					} else {
-						sse.update(bit);
-					}
+				if (kLZPBit) {
+					sse2.update(bit);
+				} else if (!kUseSSEOnlyLZP || sse_ctx != 0) {
+					sse.update(bit);
 				}
 			} else {
 				mixer_sse_ctx = mixer_sse_ctx * 2 + ret;
 			}
 		}
-		if (!use_match_p_override) {
+		if (!kLZPBit) {
 			match_model.updateBit(bit);
 		}
 		if (kStatistics) ++mixer_skip[ret];
@@ -662,7 +658,7 @@ public:
 				bit = code >> (sizeof(uint32_t) * 8 - 1);
 				code <<= 1;
 			}
-			bit = processBit<decode>(stream, bit, base_contexts, ctx_add2 + ctx, ctx);
+			bit = processBit<decode, false>(stream, bit, base_contexts, ctx_add2 + ctx, ctx);
 
 			// Encode the bit / decode at the last second.
 			if (use_huffman) {
@@ -775,7 +771,7 @@ public:
 				size_t bit = decode ? 0 : expected_char == c;
 
 				sse_ctx = 256 * (1 + expected_char);
-				bit = processBit<decode>(stream, bit, base_contexts, expected_char ^ 256, 0, true);
+				bit = processBit<decode, true>(stream, bit, base_contexts, expected_char ^ 256, 0);
 				
 				if (bit) {
 					return expected_char;
@@ -893,7 +889,7 @@ public:
 
 	void update(uint32_t c) {
 		if (modelEnabled(kModelWord1) || modelEnabled(kModelWord2) || modelEnabled(kModelWord12)) {
-			word_model.update(c);
+			word_model.updateUTF(c);
 			if (word_model.getLength() > 2) {
 				if (kPrefetchWordModel) {
 					hash_lookup(word_model.getHash(), true);

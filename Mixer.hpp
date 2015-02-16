@@ -64,7 +64,8 @@ public:
 template <typename T, const uint32_t weights, const uint32_t fp_shift = 16, const uint32_t wshift = 7>
 class Mixer {
 public:
-	static const int round = 1 << (fp_shift - 1);
+	static const bool kUseRound = true;
+	static const int round = kUseRound ? (1 << (fp_shift - 1)) : 0u;
 	// Each mixer has its own set of weights.
 	T w[weights + 1]; // Add dummy skew weight at the end.
 	// Current learn rate.
@@ -134,7 +135,6 @@ public:
 	// Neural network learn, assumes probs are stretched.
 	forceinline void update(int* probs, int pr, int32_t bit, uint32_t pshift = 12, uint32_t limit = 13) {
 		int err = ((bit << pshift) - pr) * learn;
-		T round = 1 << (fp_shift - 1);
 		for (uint32_t i = 0; i < weights; ++i) {
 			w[i] += (probs[i] * err + round) >> fp_shift;
 		}
@@ -174,7 +174,6 @@ private:
 	forceinline void updateRec(int p, int err) {
 		if (weights > index) {
 			w[index] += (p * err + round) >> fp_shift;
-			// if (w[index] < 0) w[index] = 0;
 		}
 	}
 };
