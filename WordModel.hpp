@@ -111,7 +111,7 @@ public:
 	}
 
 	forceinline uint32_t getHash() const {
-		return h1 + h2;
+		return h1 * 11 + h2 * 7;
 	}
 
 	forceinline uint32_t getPrevHash() const {
@@ -148,11 +148,11 @@ public:
 			if (cur < 256) cur = transform[cur];
 			if (LIKELY(cur != transform_table_size)) {
 				h1 = hashFunc(cur, h1);
-				h2 = h1 * 8;
+				h2 = h1 * 4;
 				len += len < kMaxLen;
 			} else {
 				if (len) {
-					prev = rotate_left(getHash(), 13);
+					prev = rotate_left(getHash(), 21);
 					reset();
 				}
 				return;

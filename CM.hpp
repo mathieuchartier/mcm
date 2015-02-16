@@ -108,7 +108,7 @@ public:
 		kCMType == kCMTypeMax ? 10 :
 		0;
 	// Flags
-	static const bool kStatistics = false;
+	static const bool kStatistics = true;
 	static const bool kFastStats = true;
 	static const bool kFixedProbs = false;
 	// Currently, LZP isn't as great as it coul be.
@@ -164,14 +164,15 @@ public:
 	uint8_t *hash_table;
 
 	// If LZP, need extra bit for the 256 ^ o0 ctx
-	static const uint32_t o0size = 0x200 * (kUseLZP ? 2 : 1);
+	static const uint32_t o0size = 0x100 * (kUseLZP ? 2 : 1);
 	static const uint32_t o1size = o0size * 0x100;
 	static const uint32_t o2size = o0size * 0x100 * 0x100;
 
+	// o0, o1, o2, s1, s2, s3, s4
 	static const size_t o0pos = 0;
 	static const size_t o1pos = o0pos + o0size; // Order 1 == sparse 1
 	static const size_t o2pos = o1pos + o1size;
-	static const size_t s2pos = o1pos + o2size; // Sparse 2
+	static const size_t s2pos = o2pos + o2size; // Sparse 2
 	static const size_t s3pos = s2pos + o1size; // Sparse 3
 	static const size_t s4pos = s3pos + o1size; // Sparse 4
 	static const size_t hashStart = s4pos + o1size;
@@ -253,8 +254,8 @@ public:
 
 		kModelOrder5,
 		kModelOrder6,
-		kModelOrder8,
 		kModelOrder7,
+		kModelOrder8,
 		kModelOrder9,
 		
 		kModelOrder10,
@@ -303,7 +304,7 @@ public:
 	}
 
 	bool setOpt(uint32_t var) {
-    // if (var > 6 && var < 13) return false;
+		if (var > 9 && var < 13) return false;
 		opt_var = var;
 		word_model.setOpt(var);
 		match_model.setOpt(var);
@@ -837,8 +838,8 @@ public:
 			if (inputs > idx++) enableModel(kModelMask);
 			if (inputs > idx++) enableModel(kModelOrder3);
 			if (inputs > idx++) enableModel(kModelOrder8);
-			if (inputs > idx++) enableModel(kModelWord2);
 			if (inputs > idx++) enableModel(kModelOrder0);
+			if (inputs > idx++) enableModel(kModelWord12);
 			setMatchModelOrder(10);
 #endif
 			// if (inputs > idx++) enableModel(static_cast<Model>(opt_var));

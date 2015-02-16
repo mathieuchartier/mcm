@@ -206,9 +206,10 @@ public:
 	void init() {
 		look_ahead_.resize(kLookaheadSize);
 	}
+
 	int read() {
 		// kLookaheadSize
-
+		return 0;
 	}
 
 	void put(int c) {
@@ -216,7 +217,7 @@ public:
 	}
 
 	DataProfile detect() {
-
+		return kBinary;
 	}
 };
 
