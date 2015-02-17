@@ -98,6 +98,14 @@ public:
 		trans('Û') = trans('û') = index++;
 		trans('Ü') = trans('ü') = index++;
 
+		if (true) {
+			for (size_t i = 128; i < 256; ++i) {
+				if (transform[i] == transform_table_size) {
+					transform[i] = index++;
+				}
+			}
+		}
+
 		len = 0;
 		prev = 0;
 		reset();
@@ -118,18 +126,22 @@ public:
 		return prev;
 	}
 
+	forceinline uint32_t get01Hash() const {
+		return getHash() ^ getPrevHash();
+	}
+
 	forceinline uint32_t getLength() const {
 		return len;
 	}
 
 	void update(uint8_t c) {
-		uint32_t cur = transform[c];
-		if (cur != transform_table_size || (cur >= 128 && cur != transform_table_size)) {
-			h1 = (h1 + cur) * 54;
-			h2 = h1 >> 7;
+		const auto cur = transform[c];
+		if (LIKELY(cur != transform_table_size)) {
+			h1 = hashFunc(cur, h1);
+			h2 = h1 * 4;
 			len += len < kMaxLen;
-		} else {
-			prev = rotate_left(getHash(), 13);
+		} else if (len) {
+			prev = rotate_left(getHash(), 21);
 			reset();
 		}
 	}
@@ -150,12 +162,9 @@ public:
 				h1 = hashFunc(cur, h1);
 				h2 = h1 * 4;
 				len += len < kMaxLen;
-			} else {
-				if (len) {
-					prev = rotate_left(getHash(), 21);
-					reset();
-				}
-				return;
+			} else if (len) {
+				prev = rotate_left(getHash(), 21);
+				reset();
 			}
 		} else {
 			h2 = hashFunc(cur, h2);

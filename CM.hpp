@@ -119,6 +119,7 @@ public:
 	static const bool kUsePrefetch = false;
 	static const bool kPrefetchMatchModel = true;
 	static const bool kPrefetchWordModel = true;
+	static const bool kFixedMatchProbs = true;
 
 	class SubBlockHeader {
 		friend class CM;
@@ -156,6 +157,7 @@ public:
 	typedef MatchModel<HPStationaryModel> MatchModelType;
 	MatchModelType match_model;
 	size_t match_model_order_;
+	std::vector<int> fixed_match_probs_;
 
 	// Hash table
 	size_t hash_mask;
@@ -304,7 +306,7 @@ public:
 	}
 
 	bool setOpt(uint32_t var) {
-		if (var > 9 && var < 13) return false;
+		//if (var > 9 && var < 13) return false;
 		opt_var = var;
 		word_model.setOpt(var);
 		match_model.setOpt(var);
@@ -377,6 +379,28 @@ public:
 		match_model.resize(buffer.getSize() / 2);
 		match_model.init(MatchModelType::kMinMatch, 80U);
 		match_model_order_ = 0;
+		fixed_match_probs_.resize(81 * 2);
+		int magic_array[100];
+		for (size_t i = 1; i < 100; ++i) {
+			magic_array[i] = (kMaxValue / 2) / i;
+		}
+		if (true) {
+			magic_array[10] -= 69;
+			magic_array[11] -= 19;
+			magic_array[12] -= 4;
+			magic_array[13] += 0;
+			magic_array[14] += 0;
+		}
+		for (size_t i = 2; i < fixed_match_probs_.size(); ++i) {
+			// const size_t len = 6 + i / 2;
+			const size_t len = 6 + i / 2;
+			auto delta = magic_array[len];
+			if ((i & 1) != 0) {
+				fixed_match_probs_[i] = table.st(kMaxValue - 1 - delta);
+			} else {
+				fixed_match_probs_[i] = table.st(delta); 
+			}
+		}
 
 		for (size_t i = 0; i < 256; ++i) {
 			binary_mask_map_[i] = (i < 1) + (i < 32) + (i < 64) + (i < 128) + (i < 255) + (i < 142) + (i < 138) +
@@ -505,13 +529,27 @@ public:
 
 		uint32_t p;
 		int p0 = 0, p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0, p8 = 0, p9 = 0;
-		if (inputs > 0) {
-			if (!kLZPBit && mm_l == 0) {
-				sp0 = &hash_table[base_contexts[0] ^ ctx]; s0 = *sp0;
-				assert(sp0 >= hash_table && sp0 <= hash_table + hash_alloc_size);
+		if (kLZPBit) {
+			if (inputs > 0) {
+				if (kFixedMatchProbs) {
+					p0 = fixed_match_probs_[mm_l * 2 + 1];
+				} else {
+					p0 = match_model.getP(table.getStretchPtr(), 1);
+				}
+			}
+		} else if (mm_l == 0) {
+			if (inputs > 0) {
+				sp0 = &hash_table[base_contexts[0] ^ ctx];
+				s0 = *sp0;
 				p0 = getP(s0, 0);
-			} else {
-				p0 = match_model.getP(table.getStretchPtr(), kLZPBit ? 1U : match_model.getExpectedBit());
+			}
+		} else {
+			if (inputs > 0) {
+				if (kFixedMatchProbs) {
+					p0 = fixed_match_probs_[mm_l * 2 + match_model.getExpectedBit()];
+				} else {
+					p0 = match_model.getP(table.getStretchPtr(), match_model.getExpectedBit());
+				}
 			}
 		}
 		if (inputs > 1) {
@@ -596,8 +634,8 @@ public:
 		if (ret) {
 			if (kLZPBit) {
 				match_model.updateCurMdl(1, bit);
-			} else {
-				if (inputs > 0 && mm_l == 0) *sp0 = nextState(s0, bit, 0);
+			} else if (mm_l == 0) {
+				if (inputs > 0) *sp0 = nextState(s0, bit, 0);
 			}
 			if (inputs > 1) *sp1 = nextState(s1, bit, 1);
 			if (inputs > 2) *sp2 = nextState(s2, bit, 2);
@@ -736,7 +774,7 @@ public:
 			*(ctx_ptr++) = hash_lookup(word_model.getPrevHash(), false);
 		}
 		if (modelEnabled(kModelWord12)) {
-			*(ctx_ptr++) = hash_lookup(word_model.getHash() ^ word_model.getPrevHash(), false);
+			*(ctx_ptr++) = hash_lookup(word_model.get01Hash(), false); // Already prefetched.
 		}
 		if (modelEnabled(kModelMask)) {
 			// Model idea from Tangelo, thanks Jan Ondrus.
@@ -746,9 +784,10 @@ public:
 		}
 		size_t mm_len = 0;
 		if (match_model_order_ != 0) {
-			match_model.setCtx(p0);
 			match_model.update(buffer, h);
 			if (mm_len = match_model.getLength()) {
+				match_model.setCtx(h & 0xFF);
+				match_model.updateCurMdl();
 				uint32_t expected_char = match_model.getExpectedChar(buffer);
 				uint32_t expected_bits = use_huffman ? huff.getCode(expected_char).length : 8;
 				if (use_huffman) expected_char = huff.getCode(expected_char).value;
@@ -863,7 +902,7 @@ public:
 			if (inputs > idx++) enableModel(kModelOrder4);
 			if (inputs > idx++) enableModel(kModelOrder2);
 			if (inputs > idx++) enableModel(kModelOrder12);
-			if (inputs > idx++) enableModel(kModelSparse34);
+			if (inputs > idx++) enabl	eModel(kModelSparse34);
 			if (inputs > idx++) enableModel(kModelOrder5);
 			if (inputs > idx++) enableModel(kModelMask);
 			if (inputs > idx++) enableModel(kModelOrder1);
@@ -890,11 +929,14 @@ public:
 
 	void update(uint32_t c) {
 		if (modelEnabled(kModelWord1) || modelEnabled(kModelWord2) || modelEnabled(kModelWord12)) {
-			word_model.updateUTF(c);
+			word_model.update(c);
 			if (word_model.getLength() > 2) {
 				if (kPrefetchWordModel) {
 					hash_lookup(word_model.getHash(), true);
 				}
+			}
+			if (kPrefetchWordModel && modelEnabled(kModelWord12)) {
+				hash_lookup(word_model.get01Hash(), true);
 			}
 		}
 		buffer.push(c);

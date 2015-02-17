@@ -27,6 +27,7 @@
 #include <fstream>
 #include <deque>
 #include "CyclicBuffer.hpp"
+#include "Stream.hpp"
 #include "UTF8.hpp"
 #include "Util.hpp"
 
@@ -203,6 +204,9 @@ class DetectorFilter {
 	static const size_t kLookaheadSize = 1 * MB;
 	CyclicBuffer<uint8_t> look_ahead_;
 public:
+	DetectorFilter(Stream* stream) : stream_(stream) {
+	}
+
 	void init() {
 		look_ahead_.resize(kLookaheadSize);
 	}
@@ -219,6 +223,9 @@ public:
 	DataProfile detect() {
 		return kBinary;
 	}
+
+private:
+	Stream* stream_;
 };
 
 #endif
