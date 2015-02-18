@@ -407,9 +407,8 @@ public:
 				(i < 140) + (i < 137) + (i < 97);
 			// binary_mask_map_[i] = (i < 1) + (i < 32) + (i < 59) + (i < 64) + (i < 91) + (i < 142) + (i < 255); // + (i < 58) + (i < 48);
 			// binary_mask_map_[i] += (i < 128) + (i < 131) + (i < 137) + (i < 139) + (i < 140) + (i < 142);
-			// binary_mask_map_[i] += (i < opt_var);
-			text_mask_map_[i] = (i < 95) + (i < 123) + (i < 47) + (i < 64) + (i < 46) + (i < 33) + (i < 58);
-			text_mask_map_[i] += (i < 43) + (i < 14) + (i < 45) + (i < 40) + (i < 96) + (i < 42) + (i < 59) + (i < 10);
+			text_mask_map_[i] = (i < 91) + (i < 123) + (i < 47) + (i < 62) + (i < 46) + (i < 33) + (i < 28);
+			text_mask_map_[i] += (i < 58) + (i < 210) + (i < 92) + (i < 40) + (i < 97) + (i < 42) + (i < 59) + (i < 48);
 		}
 		current_mask_map_ = binary_mask_map_;
 
