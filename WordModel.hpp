@@ -130,7 +130,7 @@ public:
 		return getHash() ^ getPrevHash();
 	}
 
-	forceinline uint32_t getLength() const {
+	forceinline size_t getLength() const {
 		return len;
 	}
 

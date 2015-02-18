@@ -51,7 +51,7 @@ public:
 		return 1;
 	}
 	void dumpInfo() const {
-		// std::cout << std::endl << transform_count_ << " / " << false_positives_ << std::endl;
+		std::cout << std::endl << transform_count_ << " / " << false_positives_ << std::endl;
 	}
 	void setOpt(uint32_t s) {
 		opt_var_ = s;

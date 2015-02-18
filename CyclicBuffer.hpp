@@ -30,37 +30,30 @@
 
 template <typename T>
 class CyclicBuffer {
-	uint32_t pos;
 protected:
-	uint32_t mask, count, alloc_size;
+	size_t pos_, mask_, alloc_size_;
+	T *storage_, *data_;
 public:
-	T *storage, *data;
 
-	forceinline uint32_t getPos() const {return pos;}
-	forceinline uint32_t getMask() const {return mask;}
-	forceinline T* getData() { return data; }
+	forceinline uint32_t getPos() const {return pos_;}
+	forceinline uint32_t getMask() const {return mask_;}
+	forceinline T* getData() { return data_; }
 
-	inline uint32_t prev(uint32_t pos, uint32_t count) const {
-		// Relies on integer underflow behaviour -> infinity. Works since pow 2 size.
-		return (pos - count) & mask;
+	inline size_t prev(size_t pos, size_t count) const {
+		// Relies on integer underflow behavior. Works since pow 2 size.
+		return (pos - count) & mask_;
 	}
 
-	inline uint32_t next(uint32_t pos, uint32_t count) const {
-		return (pos + count) & mask;
+	inline size_t next(size_t pos, size_t count) const {
+		return (pos + count) & mask_;
 	}
 
 	// Maximum size.
-	forceinline uint32_t getSize() const {
-		return mask + 1;
+	forceinline size_t getSize() const {
+		return mask_ + 1;
 	}
 
-	// Current nubmer of items inside of the buffer.
-	forceinline uint32_t getCount() const {
-		return count;
-	}
-
-	CyclicBuffer() : storage(NULL), mask(0) {
-		
+	CyclicBuffer() : storage_(nullptr), mask_(0) {
 	}
 
 	virtual ~CyclicBuffer() {
@@ -68,63 +61,85 @@ public:
 	}
 
 	virtual void restart() {
-		pos = 0;
-		count = 0;
+		pos_ = 0;
 	}
 
 	forceinline void push(T val) {
-		data[pos++ & mask] = val;
-		++count;
+		data_[pos_++ & mask_] = val;
 	}
 
-	forceinline T& operator [] (uint32_t offset) {
-		return data[offset & mask];
+	forceinline T& operator [] (size_t offset) {
+		return data_[offset & mask_];
 	}
-
-	forceinline T operator [] (uint32_t offset) const {
-		return data[offset & mask];
+	forceinline T operator [] (size_t offset) const {
+		return data_[offset & mask_];
 	}
-
-	forceinline T operator () (uint32_t offset) const {
-		return data[offset];
+	forceinline T operator () (size_t offset) const {
+		return data_[offset];
 	}
 
 	virtual void release() {
-		pos = alloc_size = 0;
-		mask = static_cast<uint32_t>(-1);
-		delete [] storage;
-		storage = data = nullptr;
+		pos_ = alloc_size_ = 0;
+		mask_ = static_cast<size_t>(-1);
+		delete [] storage_;
+		storage_ = data_ = nullptr;
 	}
 
 	void fill(T d) {
-		std::fill(storage, storage + getSize(), d);
+		std::fill(storage_, storage_ + getSize(), d);
 	}
 
 	// Can be used for LZ77.
-	void copyStartToEndOfBuffer(uint32_t count) {
-		uint32_t size = getSize();
-		for (uint32_t i = 0;i < count;++i) {
-			data[size + i] = data[i];
+	void copyStartToEndOfBuffer(size_t count) {
+		size_t size = getSize();
+		for (size_t i = 0 ;i < count ;++i) {
+			data_[size + i] = data_[i];
 		}
 	}
 
 	// Can be used for LZ77.
-	void copyEndToStartOfBuffer(uint32_t count) {
-		uint32_t size = getSize();
-		for (uint32_t i = 0;i < count;++i) {
-			storage[i] = storage[i + size];
+	void copyEndToStartOfBuffer(size_t count) {
+		size_t size = getSize();
+		for (size_t i = 0;i < count;++i) {
+			storage_[i] = storage_[i + size];
 		}
 	}
 
-	void resize(uint32_t newSize, uint32_t padding = sizeof(uint32_t)) {
+	void resize(size_t new_size, size_t padding = sizeof(uint32_t)) {
 		// Ensure power of 2.
-		assert((newSize & newSize - 1) == 0);
-		delete [] storage;
-		mask = newSize - 1;
-		alloc_size = newSize + padding * 2;
-		storage = new T[alloc_size]();
-		data = storage + padding;
+		assert((new_size & (new_size - 1)) == 0);
+		delete [] storage_;
+		mask_ = new_size - 1;
+		alloc_size_ = new_size + padding * 2;
+		storage_ = new T[alloc_size_]();
+		data_ = storage_ + padding;
 		restart();
+	}
+};
+
+template <typename T>
+class CyclicDeque : public CyclicBuffer<T> {
+	size_t size_;
+	size_t front_pos_;
+public:
+	CyclicDeque() : size_(0), front_pos_(0) {
+	}
+	size_t capacity() const {
+		return this->mask_ + 1;
+	}
+	void pop_front() {
+		dcheck(size_ > 0);
+		++front_pos_;
+		--size_;
+	}
+	T front() const {
+		return this->data_[front_pos_ & this->mask_];
+	}
+	size_t size() const {
+		return size_;
+	}
+	forceinline T operator [] (size_t offset) const {
+		return this->data_[(front_pos_ + offset) & this->mask_];
 	}
 };
 

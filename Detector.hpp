@@ -200,32 +200,4 @@ public:
 	}
 };
 
-class DetectorFilter {
-	static const size_t kLookaheadSize = 1 * MB;
-	CyclicBuffer<uint8_t> look_ahead_;
-public:
-	DetectorFilter(Stream* stream) : stream_(stream) {
-	}
-
-	void init() {
-		look_ahead_.resize(kLookaheadSize);
-	}
-
-	int read() {
-		// kLookaheadSize
-		return 0;
-	}
-
-	void put(int c) {
-
-	}
-
-	DataProfile detect() {
-		return kBinary;
-	}
-
-private:
-	Stream* stream_;
-};
-
 #endif

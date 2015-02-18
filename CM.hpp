@@ -885,7 +885,14 @@ public:
 			current_mask_map_ = text_mask_map_;
 			break;
 		default: // Binary
-#if 1
+#if 0
+			// bitmap profile sao
+			if (inputs > idx++) enableModel(kModelOrder1);
+			if (inputs > idx++) enableModel(kModelOrder2);
+			if (inputs > idx++) enableModel(kModelOrder3);
+			if (inputs > idx++) enableModel(kModelOrder4);
+			if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
+#elif 1
 			// Default
 			if (inputs > idx++) enableModel(kModelOrder1);
 			if (inputs > idx++) enableModel(kModelOrder2);
@@ -902,7 +909,7 @@ public:
 			if (inputs > idx++) enableModel(kModelOrder4);
 			if (inputs > idx++) enableModel(kModelOrder2);
 			if (inputs > idx++) enableModel(kModelOrder12);
-			if (inputs > idx++) enabl	eModel(kModelSparse34);
+			if (inputs > idx++) enableModel(kModelSparse34);
 			if (inputs > idx++) enableModel(kModelOrder5);
 			if (inputs > idx++) enableModel(kModelMask);
 			if (inputs > idx++) enableModel(kModelOrder1);
