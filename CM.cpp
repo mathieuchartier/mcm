@@ -181,6 +181,8 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 		}
 		std::cout << "CMed bytes=" << (mixer_skip[0] + mixer_skip[1]) / 8 <<  " mix skip=" << mixer_skip[0] << " mix nonskip=" << mixer_skip[1] << std::endl;
 		std::cout << "match=" << match_count_ << " matchfail=" << non_match_count_ << " nonmatch=" << other_count_ << std::endl;
+		std::cout << "lzp_bit_size=" << lzp_bit_match_bytes_ << " lzp_bit_miss_bytes=" << lzp_bit_miss_bytes_
+			<< " lzp_miss_bytes=" << lzp_miss_bytes_ << " lzp_normal_bytes=" << normal_bytes_ << std::endl;
 	}
 }
 

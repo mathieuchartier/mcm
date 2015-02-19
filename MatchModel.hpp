@@ -139,7 +139,7 @@ public:
 		prefetch(&hash_table[(hash_ ^ ctx) & hash_mask]);
 	}
 
-	void update(Buffer& buffer, uint32_t h) {
+	void update(Buffer& buffer) {
 		const auto blast = buffer.getPos() - 1;
 		const auto bmask = buffer.getMask();
 		hash_ = hash_ ^ buffer[blast];
@@ -157,6 +157,13 @@ public:
 		}
 		updateCurMdl();
 		b1 = last_pos | hmask;
+	}
+
+	uint32_t getHash() const {
+		return hash_;
+	}
+
+	void setHash(uint32_t h) {
 		hash_ = h;
 	}
 

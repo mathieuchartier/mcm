@@ -285,6 +285,7 @@ public:
 	// Statistics
 	uint64_t mixer_skip[2];
 	uint64_t match_count_, non_match_count_, other_count_;
+	uint64_t lzp_bit_match_bytes_, lzp_bit_miss_bytes_, lzp_miss_bytes_, normal_bytes_;
 
 	// TODO: Get rid of this.
 	static const uint32_t eof_char = 126;
@@ -306,7 +307,7 @@ public:
 	}
 
 	bool setOpt(uint32_t var) {
-		//if (var > 9 && var < 13) return false;
+		if (var >= 7 && var < 13) return false;
 		opt_var = var;
 		word_model.setOpt(var);
 		match_model.setOpt(var);
@@ -459,6 +460,7 @@ public:
 			for (auto& c : mixer_skip) c = 0;
 			other_count_ = match_count_ = non_match_count_ = 0;
 			std::cout << "Setup took: " << clock() - start << std::endl << std::endl;
+			lzp_bit_match_bytes_ = lzp_bit_miss_bytes_ = lzp_miss_bytes_ = normal_bytes_ = 0;
 		}
 	}
 
@@ -758,10 +760,25 @@ public:
 		}
 		uint32_t h = hashFunc(owhash & 0xFFFF, 0x4ec457ce);
 		uint32_t order = 3;
+		size_t expected_char = 0;
+
+		size_t mm_len = 0;
+		if (match_model_order_ != 0) {
+			match_model.update(buffer);
+			if (mm_len = match_model.getLength()) {
+				match_model.setCtx(h & 0xFF);
+				match_model.updateCurMdl();
+				expected_char = match_model.getExpectedChar(buffer);
+				uint32_t expected_bits = use_huffman ? huff.getCode(expected_char).length : 8;
+				size_t expected_code = use_huffman ? huff.getCode(expected_char).value : expected_char;
+				match_model.updateExpectedCode(expected_code, expected_bits);
+			}
+		}
+
 		for (; order <= max_order_; ++order) {
 			h = hashFunc(buffer[bpos - order], h);
 			if (modelEnabled(static_cast<Model>(kModelOrder0 + order))) {
-				*(ctx_ptr++) = hash_lookup(h, true);
+				*(ctx_ptr++) = hash_lookup(false ? hashFunc(expected_char, h) : h, true);
 			}
 		}
 		dcheck(order - 1 == match_model_order_);
@@ -781,24 +798,17 @@ public:
 			mask_model_ += current_mask_map_[p0];
 			*(ctx_ptr++) = hash_lookup(hashFunc(0xaa0cd8a7, mask_model_ * 313), true);
 		}
-		size_t mm_len = 0;
-		if (match_model_order_ != 0) {
-			match_model.update(buffer, h);
-			if (mm_len = match_model.getLength()) {
-				match_model.setCtx(h & 0xFF);
-				match_model.updateCurMdl();
-				uint32_t expected_char = match_model.getExpectedChar(buffer);
-				uint32_t expected_bits = use_huffman ? huff.getCode(expected_char).length : 8;
-				if (use_huffman) expected_char = huff.getCode(expected_char).value;
-				match_model.updateExpectedCode(expected_char, expected_bits);
-			}
-		}	
+		if (modelEnabled(kModelMatchHashE)) {
+			*(ctx_ptr++) = hash_lookup(match_model.getHash(), false);
+		}
+		match_model.setHash(h);
 		dcheck(ctx_ptr - base_contexts <= inputs + 1);
 		sse_ctx = 0;
+
+		uint64_t cur_pos = kStatistics ? stream.tell() : 0;
+
 		calcMixerBase();
-		size_t expected_char = 0;
 		if (mm_len > 0) {
-			expected_char = match_model.getExpectedChar(buffer);
 			if (kStatistics && !decode) {
 				++(expected_char == c ? match_count_ : non_match_count_);
 			}
@@ -812,20 +822,22 @@ public:
 				sse_ctx = 256 * (1 + expected_char);
 				bit = processBit<decode, true>(stream, bit, base_contexts, expected_char ^ 256, 0);
 				
+				const uint64_t after_pos = kStatistics ? stream.tell() : 0;
+				if (kStatistics) {
+					(bit ? lzp_bit_match_bytes_ : lzp_bit_miss_bytes_) += after_pos - cur_pos; 
+					cur_pos = after_pos;
+				}
+
 				if (bit) {
 					return expected_char;
 				}
 			} 
 			calcProbBase();
-		} else {
-			if (kStatistics) ++other_count_;
-		}
+		} else if (kStatistics) ++other_count_;
 		if (false) {
 			match_model.resetMatch();
-			// return c;
-			calcMixerBase();
+			return c;
 		}
-
 		// Non match, do normal encoding.
 		size_t huff_state = 0;
 		if (use_huffman) {
@@ -842,6 +854,9 @@ public:
 			if (decode) {
 				c = n2 | (n1 << 4);
 			}
+			if (kStatistics) {
+				(sse_ctx != 0 ? lzp_miss_bytes_ : normal_bytes_) += stream.tell() - cur_pos;
+			}
 		}
 
 		return c;
@@ -857,17 +872,14 @@ public:
 		switch (profile) {
 		case kText: // Text data types (tuned for xml)
 #if 0
+			if (inputs > idx++) enableModel(kModelOrder0);
 			if (inputs > idx++) enableModel(kModelOrder4);
-			if (inputs > idx++) enableModel(kModelWord1);
-			if (inputs > idx++) enableModel(kModelOrder6);
-			// Tuned for enwik8.drt
-			if (inputs > idx++) enableModel(kModelOrder1);
+			if (inputs > idx++) enableModel(kModelOrder8);
 			if (inputs > idx++) enableModel(kModelOrder2);
-			if (inputs > idx++) enableModel(kModelOrder3);
-			if (inputs > idx++) enableModel(kModelOrder5);
 			if (inputs > idx++) enableModel(kModelMask);
-			setMatchModelOrder(10);
-#else
+			if (inputs > idx++) enableModel(kModelWord);
+			if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
+#elif 1
 			if (inputs > idx++) enableModel(kModelOrder4);
 			if (inputs > idx++) enableModel(kModelWord1);
 			if (inputs > idx++) enableModel(kModelOrder6);
@@ -878,18 +890,19 @@ public:
 			if (inputs > idx++) enableModel(kModelOrder8);
 			if (inputs > idx++) enableModel(kModelOrder0);
 			if (inputs > idx++) enableModel(kModelWord12);
-			setMatchModelOrder(10);
 #endif
+			setMatchModelOrder(10);
 			// if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
 			current_mask_map_ = text_mask_map_;
 			break;
 		default: // Binary
 #if 0
 			// bitmap profile sao
+			if (inputs > idx++) enableModel(kModelOrder0);
 			if (inputs > idx++) enableModel(kModelOrder1);
 			if (inputs > idx++) enableModel(kModelOrder2);
-			if (inputs > idx++) enableModel(kModelOrder3);
-			if (inputs > idx++) enableModel(kModelOrder4);
+			if (inputs > idx++) enableModel(kModelMask);
+			if (inputs > idx++) enableModel(kModelSparse34);
 			if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
 #elif 1
 			// Default

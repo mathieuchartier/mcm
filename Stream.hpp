@@ -163,16 +163,13 @@ public:
 		assert(stream != nullptr);
 		init(stream);
 	}
-
 	virtual ~BufferedStreamReader() {
 	}
-
 	void init(Stream* new_stream) {
 		stream = new_stream;
 		buffer_pos = 0;
 		buffer_count = 0;
 	}
-
 	forceinline int get() {
 		if (UNLIKELY(buffer_pos >= buffer_count)) {
 			buffer_pos = 0;
@@ -183,9 +180,11 @@ public:
 		}
 		return buffer[buffer_pos++];
 	}
-
 	void put(int c) {
 		unimplementedError(__FUNCTION__);
+	}
+	uint64_t tell() const {
+		return stream->tell() + buffer_pos;
 	}
 };
 
@@ -217,6 +216,9 @@ public:
 	int get() {
 		unimplementedError(__FUNCTION__);
 		return 0;
+	}
+	uint64_t tell() const {
+		return stream_->tell() + (ptr_ - buffer_);
 	}
 
 private:
