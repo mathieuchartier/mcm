@@ -307,7 +307,7 @@ public:
 	}
 
 	bool setOpt(uint32_t var) {
-		if (var >= 7 && var < 13) return false;
+		// if (var >= 7 && var < 13) return false;
 		opt_var = var;
 		word_model.setOpt(var);
 		match_model.setOpt(var);
