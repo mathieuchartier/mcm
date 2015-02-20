@@ -122,7 +122,7 @@ public:
 class VerifyStream : public WriteStream {
 public:
 	std::ifstream fin;
-	uint32_t differences, total;
+	uint64_t differences, total;
 
 	VerifyStream(const std::string& file_name) {
 		fin.open(file_name, std::ios_base::in | std::ios_base::binary);

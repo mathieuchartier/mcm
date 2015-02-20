@@ -34,8 +34,8 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 	detector.init();
 
 	// Compression profiles.
-	std::vector<uint32_t> profile_counts((uint32_t)kProfileCount, 0);
-	std::vector<uint32_t> profile_len((uint32_t)kProfileCount, 0);
+	std::vector<uint64_t> profile_counts((uint32_t)kProfileCount, 0);
+	std::vector<uint64_t> profile_len((uint32_t)kProfileCount, 0);
 
 	// Start by writing out archive header.
 	init();
@@ -73,7 +73,7 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 		setDataProfile(block.profile);
 
 		// Code a block.
-		uint32_t block_size = 0;
+		uint64_t block_size = 0;
 		for (;;++block_size) {
 			detector.fill(sin);
 			DataProfile new_profile = detector.detect();
@@ -95,7 +95,7 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 				if (is_end_of_block) break;
 			}
 		}
-		profile_len[(uint32_t)block.profile] += block_size;
+		profile_len[(uint64_t)block.profile] += block_size;
 	}
 #ifndef _WIN64
 	_mm_empty();
@@ -110,7 +110,7 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 		
 	// TODO: Put in statistics??
 	uint64_t total = 0;
-	for (uint32_t i = 0; i < kProfileCount; ++i) {
+	for (size_t i = 0; i < kProfileCount; ++i) {
 		auto cnt = profile_counts[i];
 		if (cnt) {
 			std::cout << (DataProfile)i << " : " << cnt << "(" << profile_len[i] / KB << "KB)" << std::endl;
@@ -129,7 +129,7 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 	if (kStatistics) {
 		if (!kFastStats) {
 			std::ofstream fout("probs.txt");
-			for (uint32_t i = 0; i < inputs; ++i) {
+			for (size_t i = 0; i < inputs; ++i) {
 				fout << "{";
 				for (uint32_t j = 0; j < 256; ++j) fout << preds[kText][i][j].getP() << ",";
 				fout << "}," << std::endl;
