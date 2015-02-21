@@ -57,6 +57,7 @@ public:
 	uint16_t version;
 	uint8_t mem_usage;
 	uint8_t algorithm;
+	bool lzp_enabled;
 
 	ArchiveHeader() {
 		magic[0] = 'M';
@@ -103,15 +104,15 @@ public:
 		//return new Store;
 		switch ((Compressor::Type)algorithm) {
 		case Compressor::kTypeCMTurbo:
-			return new CM<kCMTypeTurbo>(mem_usage);
+			return new CM<kCMTypeTurbo>(mem_usage, lzp_enabled);
 		case Compressor::kTypeCMFast:
-			return new CM<kCMTypeFast>(mem_usage);
+			return new CM<kCMTypeFast>(mem_usage, lzp_enabled);
 		case Compressor::kTypeCMMid:
-			return new CM<kCMTypeMid>(mem_usage);
+			return new CM<kCMTypeMid>(mem_usage, lzp_enabled);
 		case Compressor::kTypeCMHigh:
-			return new CM<kCMTypeHigh>(mem_usage);
+			return new CM<kCMTypeHigh>(mem_usage, lzp_enabled);
 		case Compressor::kTypeCMMax:
-			return new CM<kCMTypeMax>(mem_usage);
+			return new CM<kCMTypeMax>(mem_usage, lzp_enabled);
 		default:
 			return new Store;
 		}
@@ -266,6 +267,7 @@ public:
 	Mode mode;
 	bool opt_mode;
 	bool no_filter;
+	bool lzp_enabled;
 	Compressor* compressor;
 	uint32_t mem_level;
 	CompLevel comp_level;
@@ -278,6 +280,7 @@ public:
 		: mode(kModeUnknown)
 		, opt_mode(false)
 		, no_filter(false)
+		, lzp_enabled(true)
 		, compressor(nullptr)
 		, mem_level(6)
 		, comp_level(kCompLevelHigh)
@@ -337,6 +340,7 @@ public:
 				opt_mode = true;
 			}
 			else if (arg == "-nofilter") no_filter = true;
+			else if (arg == "-nolzp") lzp_enabled = false;
 			else if (arg == "-turbo") comp_level = kCompLevelTurbo;
 			else if (arg == "-fast") comp_level = kCompLevelFast;
 			else if (arg == "-mid") comp_level = kCompLevelMid;
@@ -546,6 +550,7 @@ int main(int argc, char* argv[]) {
 		ArchiveHeader header;
 		header.mem_usage = options.mem_level;
 		header.algorithm = options.compressorType();
+		header.lzp_enabled = options.lzp_enabled;
 
 		if (err = fin.open(in_file, std::ios_base::in | std::ios_base::binary)) {
 			std::cerr << "Error opening: " << in_file << " (" << errstr(err) << ")" << std::endl;

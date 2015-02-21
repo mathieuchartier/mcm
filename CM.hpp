@@ -228,7 +228,8 @@ public:
 
 	// LZP
 	std::vector<CMMixer> lzp_mixers;
-	
+	bool lzp_enabled_;
+
 	// SM
 	typedef StationaryModel PredModel;
 	static const size_t kProbCtx = inputs;
@@ -303,7 +304,7 @@ public:
 		mem_usage = usage;
 	}
 
-	CM(uint32_t mem = 8) : mem_usage(mem), opt_var(0) {
+	CM(uint32_t mem = 8, bool lzp_enabled = kUseLZP) : mem_usage(mem), opt_var(0), lzp_enabled_(lzp_enabled) {
 	}
 
 	bool setOpt(uint32_t var) {
@@ -812,7 +813,7 @@ public:
 			if (kStatistics && !decode) {
 				++(expected_char == c ? match_count_ : non_match_count_);
 			}
-			if (kUseLZP) {
+			if (lzp_enabled_) {
 				size_t extra_len = mm_len - match_model.getMinMatch();
 				cur_preds = &preds[kPredArrays - 1];
 				dcheck(mm_len >= match_model.getMinMatch());

@@ -32,7 +32,6 @@
 #include "Util.hpp"
 
 // Detects blocks and data type from input data
-
 class Detector {
 	bool is_forbidden[256]; // Chars which don't appear in text often.
 	
