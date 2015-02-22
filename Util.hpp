@@ -357,6 +357,7 @@ private:
 };
 
 std::string prettySize(uint64_t size);
+std::string formatNumber(uint64_t n);
 double clockToSeconds(clock_t c);
 std::string errstr(int err);
 std::vector<byte> randomArray(size_t size);

@@ -1,7 +1,8 @@
+#include "Util.hpp"
+
 #include <fstream>
 #include <sstream>
-
-#include "Util.hpp"
+#include <iomanip>
 
 bool fileExists(const char* name) {
     std::ifstream fin(name, std::ios_base::in);
@@ -82,4 +83,15 @@ std::vector<byte> loadFile(const std::string& name, uint32_t max_size) {
 		ret.push_back(static_cast<byte>(static_cast<uint>(c)));
 	}
 	return ret;
+}
+
+std::string formatNumber(uint64_t n) {
+	std::string ret;
+	while (n >= 1000) {
+		std::ostringstream oss;
+		oss << std::setw(3) << std::setfill('0') << n % 1000;
+		ret = "," + oss.str() + ret;
+		n /= 1000;
+	}
+	return std::to_string(n) + ret;
 }

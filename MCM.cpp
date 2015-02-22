@@ -177,7 +177,10 @@ std::string trimExt(std::string str) {
 }
 
 static void printHeader() {
-	std::cout << "mcm file compressor v0." << ArchiveHeader::kVersion << ", by Mathieu Chartier (c)2015 Google Inc" << std::endl;
+	std::cout << "mcm compressor v0." << ArchiveHeader::kVersion << ", by Mathieu Chartier (c)2015 Google Inc." << std::endl
+		<< "Experimental, may contain bugs. Contact mathieu.a.chartier@gmail.com" << std::endl
+		<< "Special thanks to: Matt Mahoney, Stephan Busch, Christopher Mattern." << std::endl
+		<< "======================================================================" << std::endl;
 }
 
 static int usage(const std::string& name) {
@@ -583,8 +586,9 @@ int main(int argc, char* argv[]) {
 					best_size = size;
 					best_var = opt_var;
 				}
-				std::cout << "opt_var=" << opt_var << " best=" << best_var << "(" << best_size << ") "
-					<< fin.getCount() << "->" << size << " took " << clockToSeconds(time) << "s" << std::endl;
+				std::cout << "opt_var=" << opt_var << " best=" << best_var << "(" << formatNumber(best_size) << ") "
+					<< formatNumber(fin.getCount()) << "->" << formatNumber(size) << " took " << std::setprecision(3)
+					<< clockToSeconds(time) << "s" << std::endl;
 			}
 		} else {
 			const clock_t start = clock();
@@ -605,9 +609,10 @@ int main(int argc, char* argv[]) {
 				f.dumpInfo();
 			}
 			clock_t time = clock() - start;
-			std::cout << "Compression " << fin.getCount() << "->" << fout.getCount() << " took " << clockToSeconds(time) << "s" << std::endl;
-			std::cout << "Rate: " << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fin.getCount()) << " ns/B" << std::endl;
-			std::cout << "Size: " << fout.getCount() << " bytes @ " << double(fout.getCount()) * 8.0 / double(fin.getCount()) << " bpc" << std::endl;
+			std::cout << "Compressing " << formatNumber(fin.getCount()) << "->" << formatNumber(fout.getCount())
+				<< " took " << std::setprecision(3) << clockToSeconds(time) << "s"
+				<< " bpc " << double(fout.getCount()) * 8.0 / double(fin.getCount()) << " bpc" << std::endl;
+			std::cout << "Avg rate: " << std::setprecision(3) << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fin.getCount()) << " ns/B" << std::endl;
 
 			fout.close();
 			fin.close();
