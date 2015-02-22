@@ -179,7 +179,9 @@ std::string trimExt(std::string str) {
 }
 
 static void printHeader() {
-	std::cout << "mcm compressor v0." << ArchiveHeader::kVersion << ", by Mathieu Chartier (c)2015 Google Inc." << std::endl
+	std::cout
+		<< "======================================================================" << std::endl
+		<< "mcm compressor v0." << ArchiveHeader::kVersion << ", by Mathieu Chartier (c)2015 Google Inc." << std::endl
 		<< "Experimental, may contain bugs. Contact mathieu.a.chartier@gmail.com" << std::endl
 		<< "Special thanks to: Matt Mahoney, Stephan Busch, Christopher Mattern." << std::endl
 		<< "======================================================================" << std::endl;
