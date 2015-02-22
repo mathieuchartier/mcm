@@ -15,7 +15,7 @@ Sandy Bridge 2630QM, 8GB RAM, Windows 7 x64, GCC compile (make.bat)
 <p>
 - Silesia corpus (separate files) from http://mattmahoney.net/dc/silesia.html:
 <table>
-<tr><th>Program</th><th>C size bytes</th><th>C time seconds
+<tr><th>Program</th><th>Compression size</th><th>Compression time
 <tr><th>Uncompressed</th><th>211,938,580</th><th>N/A
 <tr><th>7z ultra 1 thread</th><th>48,745,801</th><th>140s
 <tr><th>CCM 7</th><th>44,954,217</th><th>70s
