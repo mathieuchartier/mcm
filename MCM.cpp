@@ -76,6 +76,7 @@ public:
 		version = (version << 8) | sin.get();
 		mem_usage = (byte)sin.get();
 		algorithm = (byte)sin.get();
+		lzp_enabled = sin.get();
 	}
 
 	template <typename TOut>
@@ -87,6 +88,7 @@ public:
 		sout.put(version & 0xFF);
 		sout.put(mem_usage);
 		sout.put(algorithm);
+		sout.put(lzp_enabled);
 	}
 
 	bool isValid() const {
