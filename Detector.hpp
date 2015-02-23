@@ -43,12 +43,71 @@ class Detector {
 	typedef std::vector<byte> Pattern;
 	Pattern exe_pattern;
 
-	// Buffer
+	// Lookahed.
 	CyclicDeque<uint8_t> buffer_;
-	
+
+	// Out buffer.
+	StaticArray<uint8_t, 4 * KB> out_buffer_;
+
 	// Opt var
 	size_t opt_var_;
+
 public:
+	// Pre-detected.
+	enum Profile {
+		kProfileText,
+		kProfileBinary,
+		kProfileEOF,
+	};
+
+	class DetectedBlock {
+	public:
+		static size_t calculateLengthBytes(size_t length) {
+			if (length & 0xFF000000) return 4;
+			if (length & 0xFF0000) return 3;
+			if (length & 0xFF00) return 2;
+			return 1;
+		}
+		static size_t getLengthBytes(uint8_t b) {
+			return b >> kLengthBytesShift;
+		}
+		size_t write(uint8_t* ptr) {
+			const auto* orig_ptr = ptr;
+			const auto length_bytes = calculateLengthBytes(length_);
+			*(ptr++) = static_cast<uint8_t>(profile_) | (length_bytes << kLengthBytesShift);
+			for (size_t i = 0; i < length_bytes; ++i) {
+				*(ptr++) = static_cast<uint8_t>(length_ >> (i * 8));
+			}
+			return ptr - orig_ptr;
+		}
+		size_t read(const uint8_t* ptr) {
+			const auto* orig_ptr = ptr;
+			auto c = *(ptr++);
+			profile_ = static_cast<Profile>(c & kDataProfileMask);
+			auto length_bytes = getLengthBytes(c);
+			length_ = 0;
+			for (size_t i = 0; i < length_bytes; ++i) {
+				length_ |= static_cast<uint32_t>(*(ptr++)) << (i * 8);
+			}
+			return ptr - orig_ptr;
+		}
+		Profile profile() const {
+			return profile_;
+		}
+		uint32_t length() const {
+			return length_;
+		}
+
+	private:
+		static const size_t kLengthBytesShift = 6;
+		static const size_t kDataProfileMask = (1u << kLengthBytesShift) - 1;
+		uint32_t length_;
+		Profile profile_;
+	};
+
+	std::vector<DetectedBlock> detected_blocks_;
+public:
+
 	Detector() : opt_var_(0) {
 		init();
 	}
@@ -62,7 +121,14 @@ public:
 		profile = kBinary;
 		for (auto& b : is_forbidden) b = false;
 
-		byte forbidden_arr[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
+		const byte forbidden_arr[] = {
+			0, 1, 2, 3, 4,
+			5, 6, 7, 8, 11,
+			12, 14, 15, 16, 17,
+			19, 20, 21, 22, 23,
+			24, 25, 26, 27, 28,
+			29, 30, 31
+		};
 		for (auto c : forbidden_arr) is_forbidden[c] = true;
 		
 		buffer_.resize(64 * KB);
@@ -77,7 +143,7 @@ public:
 		while (buffer_.size() < buffer_.capacity()) {
 			int c = sin.get();
 			if (c == EOF) break;
-			buffer_.push_back((char)c);
+			buffer_.push_back((uint8_t)c);
 		}
 	}
 
@@ -88,7 +154,6 @@ public:
 	forceinline size_t size() const {
 		return buffer_.size();
 	}
-
 
 	forceinline uint32_t at(uint32_t index) const {
 		assert(index < buffer_.size());
@@ -121,18 +186,6 @@ public:
 			}
 		}
 		return w;
-	}
-
-	bool matches_pattern(Pattern& pattern) const {
-		if (size() < pattern.size()) {
-			return false;
-		}
-		for (uint32_t i = 0;i < pattern.size();++i) {
-			if (pattern[i] != at(i)) {
-				return false;
-			}
-		}
-		return true;
 	}
 
 	DataProfile detect() {
