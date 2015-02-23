@@ -36,9 +36,6 @@
 class Detector {
 	bool is_forbidden[256]; // Chars which don't appear in text often.
 	
-	DataProfile profile; // Current profile.
-	uint64_t profile_length; // Length.
-
 	// MZ pattern, todo replace with better detection.
 	typedef std::vector<byte> Pattern;
 	Pattern exe_pattern;
@@ -46,35 +43,54 @@ class Detector {
 	// Lookahed.
 	CyclicDeque<uint8_t> buffer_;
 
-	// Out buffer.
-	StaticArray<uint8_t, 4 * KB> out_buffer_;
+	// Out buffer, only used to store headers (for now).
+	StaticArray<uint8_t, 16 * KB> out_buffer_;
+	size_t out_buffer_pos_, out_buffer_size_;
+
+	// Read / write stream.
+	Stream* stream_;
 
 	// Opt var
 	size_t opt_var_;
-
 public:
 	// Pre-detected.
 	enum Profile {
 		kProfileText,
 		kProfileBinary,
 		kProfileEOF,
+		kProfileCount,
 	};
 
 	class DetectedBlock {
 	public:
+		DetectedBlock(Profile profile = kProfileBinary, uint32_t length = 0)
+			: profile_(profile), length_(length) {
+		}
+		DetectedBlock(const DetectedBlock& other) {
+			*this = other;
+		}
+		DetectedBlock& operator=(const DetectedBlock& other) {
+			profile_ = other.profile_;
+			length_ = other.length_;
+			return *this;
+		}
+
 		static size_t calculateLengthBytes(size_t length) {
 			if (length & 0xFF000000) return 4;
 			if (length & 0xFF0000) return 3;
 			if (length & 0xFF00) return 2;
 			return 1;
 		}
+		static size_t getSizeFromHeaderByte(uint8_t b) {
+			return 1 + getLengthBytes(b);
+		}
 		static size_t getLengthBytes(uint8_t b) {
-			return b >> kLengthBytesShift;
+			return (b >> kLengthBytesShift) + 1;
 		}
 		size_t write(uint8_t* ptr) {
 			const auto* orig_ptr = ptr;
 			const auto length_bytes = calculateLengthBytes(length_);
-			*(ptr++) = static_cast<uint8_t>(profile_) | (length_bytes << kLengthBytesShift);
+			*(ptr++) = static_cast<uint8_t>(profile_) | ((length_bytes - 1) << kLengthBytesShift);
 			for (size_t i = 0; i < length_bytes; ++i) {
 				*(ptr++) = static_cast<uint8_t>(length_ >> (i * 8));
 			}
@@ -97,18 +113,27 @@ public:
 		uint32_t length() const {
 			return length_;
 		}
+		// Remove one character from length.
+		void pop() {
+			assert(length_ > 0);
+			--length_;
+		}
 
 	private:
 		static const size_t kLengthBytesShift = 6;
 		static const size_t kDataProfileMask = (1u << kLengthBytesShift) - 1;
-		uint32_t length_;
 		Profile profile_;
+		uint32_t length_;
 	};
 
-	std::vector<DetectedBlock> detected_blocks_;
+	// std::vector<DetectedBlock> detected_blocks_;
+	DetectedBlock current_block_;
+
+	// Detected but not already read.
+	DetectedBlock detected_block_;
 public:
 
-	Detector() : opt_var_(0) {
+	Detector(Stream* stream) : stream_(stream), opt_var_(0) {
 		init();
 	}
 
@@ -117,8 +142,7 @@ public:
 	}
 
 	void init() {
-		profile_length = 0;
-		profile = kBinary;
+		out_buffer_pos_ = out_buffer_size_ = 0;
 		for (auto& b : is_forbidden) b = false;
 
 		const byte forbidden_arr[] = {
@@ -138,12 +162,16 @@ public:
 		for (auto& c : p) exe_pattern.push_back(c);
 	}
 
-	template <typename TIn>
-	void fill(TIn& sin) {
-		while (buffer_.size() < buffer_.capacity()) {
-			int c = sin.get();
-			if (c == EOF) break;
-			buffer_.push_back((uint8_t)c);
+	void refillRead() {
+		const size_t kBufferSize = 4 * KB;
+		uint8_t buffer[kBufferSize];
+		for (;;) {
+			const size_t remain = buffer_.capacity() - buffer_.size();
+			const size_t n = stream_->read(buffer, std::min(kBufferSize, remain));
+			for (size_t i = 0; i < n; ++i) {
+				buffer_.push_back(buffer[i]);
+			}
+			if (n == 0 || remain == 0) break;
 		}
 	}
 
@@ -155,53 +183,93 @@ public:
 		return buffer_.size();
 	}
 
+	void put(int c) {
+		// Profile can't extend past the end of the buffer.
+		if (current_block_.length() > 0) {
+			current_block_.pop();
+			if (buffer_.size() >= buffer_.capacity()) {
+				flush();
+			}
+			buffer_.push_back(c);
+		} else {
+			out_buffer_[out_buffer_pos_++] = c;
+			uint8_t num_bytes = DetectedBlock::getSizeFromHeaderByte(out_buffer_[0]);
+ 			if (out_buffer_pos_ == num_bytes) {
+				current_block_.read(&out_buffer_[0]);
+				if (current_block_.profile() == kProfileEOF) {
+					out_buffer_pos_ = 0;
+				}
+				out_buffer_pos_ = 0;
+			}
+		}
+	}
+	
+	Profile detect() {
+		if (current_block_.length() > 0) {
+			return current_block_.profile();
+		}
+		if (current_block_.profile() == kProfileEOF) {
+			return kProfileEOF;
+		}
+		return kProfileBinary;
+	}
+
+	void flush() {
+		// TODO: Optimize
+		BufferedStreamWriter<4 * KB> sout(stream_);
+		while (buffer_.size() != 0) {
+			sout.put(buffer_.front());
+			buffer_.pop_front();
+		}
+		sout.flush();
+	}
+
 	forceinline uint32_t at(uint32_t index) const {
 		assert(index < buffer_.size());
 		return buffer_[index];
 	}
 
-	int read() {
-		if (empty()) {
+	int get(Profile& profile) {
+		// Profile can't extend past the end of the buffer.
+		if (current_block_.length() > 0) {
+			current_block_.pop();
+			profile = current_block_.profile();
+			auto ret = buffer_.front();
+			buffer_.pop_front();
+			return ret;
+		} 
+		// Still have some header to read?
+		if (out_buffer_pos_ < out_buffer_size_) {
+			if (++out_buffer_pos_ == out_buffer_size_) {
+				current_block_ = detected_block_;
+			}
+			profile = kProfileBinary;
+			return out_buffer_[out_buffer_pos_  - 1];
+		} 
+		if (current_block_.profile() == kProfileEOF) {
+			profile = kProfileEOF;
 			return EOF;
 		}
-		assert(profile_length > 0);
-		--profile_length;
-		uint32_t ret = buffer_.front();
-		buffer_.pop_front();
-		return ret;
+		detected_block_ = detectBlock();
+		out_buffer_size_ = detected_block_.write(&out_buffer_[0]);
+		profile = kProfileBinary;
+		out_buffer_pos_ = 1;
+		return out_buffer_[0];
 	}
 
-	forceinline uint32_t readBytes(uint32_t pos, uint32_t bytes = 4, bool big_endian = true) {
-		uint32_t w = 0;
-		if (pos + bytes <= size()) {
-			// Past the end of buffer :(
-			if(big_endian) {
-				for (uint32_t i = 0; i < bytes; ++i) {
-					w = (w << 8) | at(pos + i);
-				}
+	DetectedBlock detectBlock() {
+		refillRead();
+		if (true) {
+			if (buffer_.size()) {
+				return DetectedBlock(kProfileText, static_cast<uint32_t>(buffer_.size()));
 			} else {
-				for (uint32_t i = bytes; i; --i) {
-					w = (w << 8) | at(pos + i - 1);
-				}
+				return DetectedBlock(kProfileEOF, 0);
 			}
 		}
-		return w;
-	}
-
-	DataProfile detect() {
-		if (profile_length) {
-			return profile;
-		}
-
-		if (false) {
-			profile_length = size();
-			return profile = kText;
-		}
-
 		const auto total = size();
 		UTF8Decoder<true> decoder;
-		uint32_t text_length = 0, i = 0;
-		for (;i < total;++i) {
+		uint32_t text_length = 0;
+		for (size_t i = 0; i < buffer_.size(); ++i) {
 			auto c = buffer_[i];
 			decoder.update(c);
 			if (decoder.err() || is_forbidden[static_cast<byte>(c)]) {
@@ -213,9 +281,9 @@ public:
 		}
 		
 		if (text_length >= std::min(total, static_cast<size_t>(100))) {
-			profile = kText;
-			profile_length = text_length;
+			detected_block_ = DetectedBlock(kProfileText, text_length);
 		} else {
+			/*
 			// This is pretty bad, need a clean way to do it.
 			uint32_t fpos = 0;
 			uint32_t w0 = readBytes(fpos); fpos += 4;
@@ -246,12 +314,13 @@ public:
 					}
 				} 
 			}
+			*/
 
-			profile = kBinary;
-			profile_length = 1; //std::max(i, (uint32_t)16);
+			// profile = kBinary;
+			// profile_length = 1; //std::max(i, (uint32_t)16);
 		}
 		
-		return profile;
+		return DetectedBlock(kProfileBinary, 1u);
 	}
 };
 

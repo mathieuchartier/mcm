@@ -25,17 +25,16 @@
 
 template <CMType kCMType>
 void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
-	BufferedStreamReader<4 * KB> sin(in_stream);
 	BufferedStreamWriter<4 * KB> sout(out_stream);
 	assert(in_stream != nullptr);
 	assert(out_stream != nullptr);
-	Detector detector;
+	Detector detector(in_stream);
 	detector.setOptVar(opt_var);
 	detector.init();
 
 	// Compression profiles.
-	std::vector<uint64_t> profile_counts((uint32_t)kProfileCount, 0);
-	std::vector<uint64_t> profile_len((uint32_t)kProfileCount, 0);
+	std::vector<uint64_t> profile_counts(static_cast<uint32_t>(Detector::kProfileCount), 0);
+	std::vector<uint64_t> profile_len(static_cast<uint32_t>(Detector::kProfileCount), 0);
 
 	// Start by writing out archive header.
 	init();
@@ -46,74 +45,47 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 		clock_t start = clock();
 		size_t freqs[256] = { 1 };
 		std::cout << "Building huffman tree" << std::endl;
-		if (false) {
-			for (;;) {
-				int c = sin.get();
-				if (c == EOF) break;
-				++freqs[c];
-			}
+		/*
+		for (;;) {
+			int c = sin.get();
+			if (c == EOF) break;
+			++freqs[c];
 		}
+		*/
 		Huffman::HuffTree* tree = Huffman::buildTreePackageMerge(freqs, 256, static_cast<size_t>(huffman_len_limit));
 		tree->printRatio("LL");
 		Huffman::writeTree(ent, sout, tree, 256, huffman_len_limit);
 		huff.build(tree);	
 		std::cout << "Building huffman tree took: " << clock() - start << " MS" << std::endl;
 	}
-	size_t freqs[kProfileCount][256] = { 0 };
-	detector.fill(sin);
+	size_t freqs[Detector::kProfileCount][256] = { 0 };
 	for (;;) {
-		if (!detector.size()) break;
-
-		// Block header
-		SubBlockHeader block;
-		// Initial detection.
-		block.profile = detector.detect();
-		++profile_counts[(uint32_t)block.profile];
-		writeSubBlock(sout, block);
-		setDataProfile(block.profile);
-
-		// Code a block.
-		uint64_t block_size = 0;
-		for (;;++block_size) {
-			detector.fill(sin);
-			DataProfile new_profile = detector.detect();
-			bool is_end_of_block = new_profile != block.profile;
-			int c;
-			if (!is_end_of_block) {
-				c = detector.read();
-				is_end_of_block = c == EOF;
+		Detector::Profile new_profile;
+		auto c = detector.get(new_profile);
+		if (new_profile != profile) {
+			if (new_profile == Detector::kProfileEOF) {
+				break;
 			}
-			if (is_end_of_block) {
-				c = eof_char;
-			}
-			freqs[block.profile][(byte)c]++;
-			processByte<false>(sout, c);
-			update(c);
-			if (UNLIKELY(c == eof_char)) {
-				ent.encode(sout, is_end_of_block, end_of_block_mdl.getP(), kShift);
-				end_of_block_mdl.update(is_end_of_block);
-				if (is_end_of_block) break;
-			}
+			setDataProfile(profileForDetectorProfile(new_profile));
 		}
-		profile_len[(uint64_t)block.profile] += block_size;
+		// Initial detection.
+		dcheck(c != EOF);
+		processByte<false>(sout, c);
+		update(c);
+		// profile_len[(uint64_t)block.profile] += block_size;
 	}
+	ent.flush(sout);
 #ifndef _WIN64
 	_mm_empty();
 #endif
 	std::cout << std::endl;
-
-	// Encode the end of block subblock.
-	SubBlockHeader eof_block;
-	eof_block.profile = kEOF;
-	writeSubBlock(sout, eof_block);
-	ent.flush(sout);
 		
 	// TODO: Put in statistics??
 	uint64_t total = 0;
 	for (size_t i = 0; i < kProfileCount; ++i) {
 		auto cnt = profile_counts[i];
 		if (cnt) {
-			std::cout << (DataProfile)i << " : " << cnt << "(" << profile_len[i] / KB << "KB)" << std::endl;
+			std::cout << static_cast<CMProfile>(i) << " : " << cnt << "(" << profile_len[i] / KB << "KB)" << std::endl;
 		}
 		if (false) {
 			Huffman h2;
@@ -131,12 +103,12 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 			std::ofstream fout("probs.txt");
 			for (size_t i = 0; i < inputs; ++i) {
 				fout << "{";
-				for (uint32_t j = 0; j < 256; ++j) fout << preds[kText][i][j].getP() << ",";
+				for (uint32_t j = 0; j < 256; ++j) fout << preds[kProfileText][i][j].getP() << ",";
 				fout << "}," << std::endl;
 			}
 			// Print average weights so that we find out which contexts are good and which are not.
 			for (size_t cur_p = 0; cur_p < static_cast<uint32_t>(kProfileCount); ++cur_p) {
-				auto cur_profile = (DataProfile)cur_p;
+				auto cur_profile = (CMProfile)cur_p;
 				CMMixer* mixers = getProfileMixers(cur_profile);
 				std::cout << "Mixer weights for profile " << cur_profile << std::endl;
 				for (size_t i = 0; i < 256; ++i) {
@@ -197,8 +169,10 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 template <CMType kCMType>
 void CM<kCMType>::decompress(Stream* in_stream, Stream* out_stream) {
 	BufferedStreamReader<4 * KB> sin(in_stream);
-	BufferedStreamWriter<4 * KB> sout(out_stream);
-	ProgressMeter meter(false);
+	Detector detector(out_stream);
+	detector.setOptVar(opt_var);
+	detector.init();
+
 	init();
 	ent.initDecoder(sin);
 	if (use_huffman) {
@@ -207,27 +181,28 @@ void CM<kCMType>::decompress(Stream* in_stream, Stream* out_stream) {
 		delete tree;
 	}
 	for (;;) {
-		SubBlockHeader block;
-		readSubBlock(sin, block);
-		if (block.profile == kEOF) break;
-		setDataProfile(block.profile);
-			
-		for (;;) {
-			uint32_t c = processByte<true>(sin);
-			update(c);
-
-			if (c == eof_char) {
-				int eob = ent.decode(sin, end_of_block_mdl.getP(), kShift);
-				end_of_block_mdl.update(eob);
-				if (eob) {
-					break; // Hit end of block, go to next block.
-				}
+		auto new_profile = detector.detect();
+		if (new_profile != profile) {
+			if (new_profile == Detector::kProfileEOF) {
+				break;
 			}
-
-			sout.put(c);
+			setDataProfile(profileForDetectorProfile(new_profile));
 		}
+		uint32_t c = processByte<true>(sin);
+		update(c);
+		detector.put(c);
 	}
+	detector.flush();
 }	
+
+
+std::ostream& operator << (std::ostream& sout, const CMProfile& pattern) {
+	switch (pattern) {
+	case kProfileText: return sout << "text";
+	case kProfileBinary: return sout << "binary";
+	}
+	return sout << "unknown!";
+}
 
 template class CM<kCMTypeTurbo>;
 template class CM<kCMTypeFast>;

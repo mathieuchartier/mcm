@@ -85,17 +85,6 @@ static const uint32_t kCacheLineSize = 64; // Sandy bridge.
 static const uint32_t kPageSize = 4 * KB;
 static const uint32_t kBitsPerByte = 8;
 
-enum DataProfile {
-	kText,
-	kExe,
-	kBinary,
-	kWave,
-	kEOF,
-	kProfileCount,
-};
-
-std::ostream& operator << (std::ostream& sout, const DataProfile& pattern);
-
 forceinline void prefetch(const void* ptr) {
 #ifdef WIN32
 	_mm_prefetch((char*)ptr, _MM_HINT_T0);

@@ -97,6 +97,14 @@ enum CMType {
 	kCMTypeMax,
 };
 
+enum CMProfile {
+	kProfileText,
+	kProfileBinary,
+	kProfileCount,
+};
+
+std::ostream& operator << (std::ostream& sout, const CMProfile& pattern);
+
 template <CMType kCMType = kCMTypeHigh>
 class CM : public Compressor {
 public:
@@ -107,6 +115,7 @@ public:
 		kCMType == kCMTypeHigh ? 8 : 
 		kCMType == kCMTypeMax ? 10 :
 		0;
+	
 	// Flags
 	static const bool kStatistics = true;
 	static const bool kFastStats = true;
@@ -120,21 +129,6 @@ public:
 	static const bool kPrefetchMatchModel = true;
 	static const bool kPrefetchWordModel = true;
 	static const bool kFixedMatchProbs = true;
-
-	class SubBlockHeader {
-		friend class CM;
-	public:
-		// Block flags
-		byte flags;
-
-		// Which profile we need to set the compressor to.
-		DataProfile profile;
-		
-		SubBlockHeader() {
-			flags = 0;
-			profile = kBinary;
-		}
-	};
 
 	// SS table
 	static const uint32_t kShift = 12;
@@ -215,7 +209,7 @@ public:
 	
 	// End of block signal.
 	BitModel end_of_block_mdl;
-	DataProfile profile;
+	CMProfile profile;
 	
 	typedef bitContextModel<BitModel, 255> BlockFlagModel;
 	BlockFlagModel block_flag_model;
@@ -453,7 +447,7 @@ public:
 			}
 		}
 
-		setDataProfile(kBinary);
+		setDataProfile(kProfileBinary);
 		owhash = 0;
 
 		// Statistics
@@ -471,7 +465,7 @@ public:
 		return b ^ (b >> 6);
 	}
 
-	forceinline CMMixer* getProfileMixers(DataProfile profile) {
+	forceinline CMMixer* getProfileMixers(CMProfile profile) {
 		return &mixers[static_cast<uint32_t>(profile) * (mixer_mask + 1)];
 	}
 
@@ -863,7 +857,14 @@ public:
 		return c;
 	}
 
-	void setDataProfile(DataProfile new_profile) {
+	static CMProfile profileForDetectorProfile(Detector::Profile profile) {
+		if (profile == Detector::kProfileText) {
+			return kProfileText;
+		}
+		return kProfileBinary;
+	}
+
+	void setDataProfile(CMProfile new_profile) {
 		profile = new_profile;
 		cur_profile_mixers_ = getProfileMixers(profile);
 		mask_model_ = 0;
@@ -871,7 +872,7 @@ public:
 		setEnabledModels(0);
 		size_t idx = 0;
 		switch (profile) {
-		case kText: // Text data types (tuned for xml)
+		case kProfileText: // Text data types (tuned for xml)
 #if 0
 			if (inputs > idx++) enableModel(kModelOrder0);
 			if (inputs > idx++) enableModel(kModelOrder4);
@@ -897,6 +898,7 @@ public:
 			current_mask_map_ = text_mask_map_;
 			break;
 		default: // Binary
+			assert(profile == kProfileBinary);
 #if 0
 			// bitmap profile sao
 			if (inputs > idx++) enableModel(kModelOrder0);
@@ -961,18 +963,6 @@ public:
 		}
 		buffer.push(c);
 		owhash = (owhash << 8) | static_cast<byte>(c);
-	}
-
-	template <typename TStream>
-	void readSubBlock(TStream& sin, SubBlockHeader& block) {
-		block.flags = block_flag_model.decode(ent, sin);
-		block.profile = (DataProfile)block_profile_models[(uint32_t)profile].decode(ent, sin);
-	}
-
-	template <typename TStream>
-	void writeSubBlock(TStream& sout, const SubBlockHeader& block) {
-		block_flag_model.encode(ent, sout, block.flags);
-		block_profile_models[(uint32_t)profile].encode(ent, sout, (uint32_t)block.profile);
 	}
 
 	void compress(Stream* in_stream, Stream* out_stream);

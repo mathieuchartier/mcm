@@ -9,17 +9,6 @@ bool fileExists(const char* name) {
     return fin.good();
 }
 
-std::ostream& operator << (std::ostream& sout, const DataProfile& pattern) {
-	switch (pattern) {
-	case kText: return sout << "text";
-	case kBinary: return sout << "binary";
-	case kExe: return sout << "exe";
-	case kWave: return sout << "wave";
-	}
-	return sout << "unknown!";
-}
-
-
 std::string prettySize(uint64_t size) {
 	uint64_t units;
 	const char* name;
