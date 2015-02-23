@@ -24,7 +24,6 @@
 #ifndef _LZ_HPP_
 #define _LZ_HPP_
 
-#include "BoundedQueue.hpp"
 #include "CyclicBuffer.hpp"
 #include "Model.hpp"
 #include "Range.hpp"
@@ -70,7 +69,7 @@ public:
 };
 
 class LZ {
-	BoundedQueue<byte> lookahead;
+	CyclicDeque<byte> lookahead;
 	CyclicBuffer<byte> buffer;
 
 	void tryMatch(uint32_t& pos, uint32_t& len) {

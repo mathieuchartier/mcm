@@ -26,6 +26,7 @@
 
 #include <fstream>
 #include <deque>
+
 #include "CyclicBuffer.hpp"
 #include "Stream.hpp"
 #include "UTF8.hpp"
@@ -43,7 +44,7 @@ class Detector {
 	Pattern exe_pattern;
 
 	// Buffer
-	std::deque<byte> buffer;
+	CyclicDeque<uint8_t> buffer_;
 	
 	// Opt var
 	size_t opt_var_;
@@ -64,6 +65,7 @@ public:
 		byte forbidden_arr[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 14, 15, 16, 17, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31};
 		for (auto c : forbidden_arr) is_forbidden[c] = true;
 		
+		buffer_.resize(64 * KB);
 		// Exe pattern
 		byte p[] = {0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0xFF, 0xFF,};
 		exe_pattern.clear();
@@ -72,10 +74,10 @@ public:
 
 	template <typename TIn>
 	void fill(TIn& sin) {
-		while (buffer.size() < 128 * KB) {
+		while (buffer_.size() < buffer_.capacity()) {
 			int c = sin.get();
 			if (c == EOF) break;
-			buffer.push_back((char)c);
+			buffer_.push_back((char)c);
 		}
 	}
 
@@ -84,12 +86,13 @@ public:
 	}
 
 	forceinline size_t size() const {
-		return buffer.size();
+		return buffer_.size();
 	}
 
+
 	forceinline uint32_t at(uint32_t index) const {
-		assert(index < buffer.size());
-		return buffer[index];
+		assert(index < buffer_.size());
+		return buffer_[index];
 	}
 
 	int read() {
@@ -98,8 +101,8 @@ public:
 		}
 		assert(profile_length > 0);
 		--profile_length;
-		uint32_t ret = buffer.front();
-		buffer.pop_front();
+		uint32_t ret = buffer_.front();
+		buffer_.pop_front();
 		return ret;
 	}
 
@@ -146,7 +149,7 @@ public:
 		UTF8Decoder<true> decoder;
 		uint32_t text_length = 0, i = 0;
 		for (;i < total;++i) {
-			auto c = buffer[i];
+			auto c = buffer_[i];
 			decoder.update(c);
 			if (decoder.err() || is_forbidden[static_cast<byte>(c)]) {
 				break; // Error state?

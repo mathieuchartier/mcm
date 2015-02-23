@@ -132,6 +132,11 @@ public:
 		++front_pos_;
 		--size_;
 	}
+	void push_back(T c) {
+		assert(size_ < capacity());
+		++size_;
+		push(c);
+	}
 	T front() const {
 		return this->data_[front_pos_ & this->mask_];
 	}
