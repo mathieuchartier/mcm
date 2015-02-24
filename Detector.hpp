@@ -259,69 +259,75 @@ public:
 
 	DetectedBlock detectBlock() {
 		refillRead();
-		if (true) {
-			if (buffer_.size()) {
-				return DetectedBlock(kProfileText, static_cast<uint32_t>(buffer_.size()));
-			} else {
-				return DetectedBlock(kProfileEOF, 0);
-			}
+		const size_t buffer_size = buffer_.size();
+		if (buffer_size == 0) {
+			return DetectedBlock(kProfileEOF, 0);
 		}
-		const auto total = size();
-		UTF8Decoder<true> decoder;
-		uint32_t text_length = 0;
-		for (size_t i = 0; i < buffer_.size(); ++i) {
-			auto c = buffer_[i];
-			decoder.update(c);
-			if (decoder.err() || is_forbidden[static_cast<byte>(c)]) {
-				break; // Error state?
-			}
-			if (decoder.done()) {
-				text_length = i + 1;
-			}
+		if (false) {
+			return DetectedBlock(kProfileText, static_cast<uint32_t>(buffer_.size()));
 		}
-		
-		if (text_length >= std::min(total, static_cast<size_t>(100))) {
-			detected_block_ = DetectedBlock(kProfileText, text_length);
-		} else {
-			/*
-			// This is pretty bad, need a clean way to do it.
-			uint32_t fpos = 0;
-			uint32_t w0 = readBytes(fpos); fpos += 4;
-			if (false && w0 == 0x52494646) {
-				uint32_t chunk_size = readBytes(fpos); fpos += 4;
-				uint32_t format = readBytes(fpos); fpos += 4;
-				// Format subchunk.
-				uint32_t subchunk_id = readBytes(fpos); fpos += 4;
-				if (format == 0x57415645 && subchunk_id == 0x666d7420) {
-					uint32_t subchunk_size = readBytes(fpos, 4, false); fpos += 4;
-					if (subchunk_size == 16) {
-						uint32_t audio_format = readBytes(fpos, 2, false); fpos += 2;
-						uint32_t num_channels = readBytes(fpos, 2, false); fpos += 2;
-						if (audio_format == 1 && (num_channels == 1 || num_channels == 2)) {
-							fpos += 4; // Skip: Sample rate
-							fpos += 4; // Skip: Byte rate
-							fpos += 2; // Skip: Block align
-							uint32_t bits_per_sample = readBytes(fpos, 2, false); fpos += 2;
-							uint32_t subchunk2_id = readBytes(fpos, 4); fpos += 4;
-							if (subchunk2_id == 0x64617461) {
-								uint32_t subchunk2_size = readBytes(fpos, 4, false); fpos += 4;
-								// Read wave header, TODO binary block as big as fpos?? Need to be able to queue subblocks then.
-								profile_length = fpos + subchunk2_size;
-								profile = kWave;
-								return profile;
-							}
-						}
-					}
-				} 
-			}
-			*/
 
-			// profile = kBinary;
-			// profile_length = 1; //std::max(i, (uint32_t)16);
+		size_t binary_len = 0;
+		while (binary_len < buffer_size) {
+			UTF8Decoder<true> decoder;
+			size_t text_len = 0;
+			while (binary_len + text_len < buffer_size) {
+				auto c = buffer_[binary_len + text_len];
+				decoder.update(c);
+				if (decoder.err() || is_forbidden[static_cast<uint8_t>(c)]) {
+					break; // Error state?
+				}
+				++text_len;
+			}
+			if (text_len > 28) {
+				if (binary_len == 0) {
+					return DetectedBlock(kProfileText, text_len);
+				} else {
+					break;
+				}
+			} else {
+				binary_len += text_len;
+				if (binary_len >= buffer_size) {
+					break;
+				}
+				++binary_len;
+			}
 		}
-		
-		return DetectedBlock(kProfileBinary, 1u);
+		return DetectedBlock(kProfileBinary, binary_len);
 	}
+
+	/*
+	// This is pretty bad, need a clean way to do it.
+	uint32_t fpos = 0;
+	uint32_t w0 = readBytes(fpos); fpos += 4;
+	if (false && w0 == 0x52494646) {
+		uint32_t chunk_size = readBytes(fpos); fpos += 4;
+		uint32_t format = readBytes(fpos); fpos += 4;
+		// Format subchunk.
+		uint32_t subchunk_id = readBytes(fpos); fpos += 4;
+		if (format == 0x57415645 && subchunk_id == 0x666d7420) {
+			uint32_t subchunk_size = readBytes(fpos, 4, false); fpos += 4;
+			if (subchunk_size == 16) {
+				uint32_t audio_format = readBytes(fpos, 2, false); fpos += 2;
+				uint32_t num_channels = readBytes(fpos, 2, false); fpos += 2;
+				if (audio_format == 1 && (num_channels == 1 || num_channels == 2)) {
+					fpos += 4; // Skip: Sample rate
+					fpos += 4; // Skip: Byte rate
+					fpos += 2; // Skip: Block align
+					uint32_t bits_per_sample = readBytes(fpos, 2, false); fpos += 2;
+					uint32_t subchunk2_id = readBytes(fpos, 4); fpos += 4;
+					if (subchunk2_id == 0x64617461) {
+						uint32_t subchunk2_size = readBytes(fpos, 4, false); fpos += 4;
+						// Read wave header, TODO binary block as big as fpos?? Need to be able to queue subblocks then.
+						profile_length = fpos + subchunk2_size;
+						profile = kWave;
+						return profile;
+					}
+				}
+			}
+		} 
+	}
+	*/
 };
 
 #endif
