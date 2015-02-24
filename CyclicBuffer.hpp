@@ -135,7 +135,7 @@ public:
 	void push_back(T c) {
 		assert(size_ < capacity());
 		++size_;
-		push(c);
+		this->push(c);
 	}
 	T front() const {
 		return this->data_[front_pos_ & this->mask_];

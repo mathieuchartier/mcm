@@ -25,7 +25,7 @@ private:
 	size_t dist;
 
 	// Current match.
-	size_t pos, len;
+	uint32_t pos, len;
 
 	// Hash
 	uint32_t hash_;

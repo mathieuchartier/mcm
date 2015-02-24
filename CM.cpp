@@ -62,11 +62,10 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 	for (;;) {
 		Detector::Profile new_profile;
 		auto c = detector.get(new_profile);
-		if (new_profile != profile) {
-			if (new_profile == Detector::kProfileEOF) {
-				break;
-			}
-			setDataProfile(profileForDetectorProfile(new_profile));
+		if (new_profile == Detector::kProfileEOF) break;
+		auto cm_profile = profileForDetectorProfile(new_profile);
+		if (cm_profile != profile) {
+			setDataProfile(cm_profile);
 		}
 		// Initial detection.
 		dcheck(c != EOF);
@@ -182,11 +181,12 @@ void CM<kCMType>::decompress(Stream* in_stream, Stream* out_stream) {
 	}
 	for (;;) {
 		auto new_profile = detector.detect();
-		if (new_profile != profile) {
-			if (new_profile == Detector::kProfileEOF) {
-				break;
-			}
-			setDataProfile(profileForDetectorProfile(new_profile));
+		if (new_profile == Detector::kProfileEOF) {
+			break;
+		}
+		auto cm_profile = profileForDetectorProfile(new_profile);
+		if (cm_profile != profile) {
+			setDataProfile(cm_profile);
 		}
 		uint32_t c = processByte<true>(sin);
 		update(c);
