@@ -302,7 +302,7 @@ public:
 	}
 
 	bool setOpt(uint32_t var) {
-		// if (var >= 7 && var < 13) return false;
+		if (var >= 7 && var < 13) return false;
 		opt_var = var;
 		word_model.setOpt(var);
 		match_model.setOpt(var);
@@ -899,13 +899,16 @@ public:
 			break;
 		default: // Binary
 			assert(profile == kProfileBinary);
-#if 0
-			// bitmap profile sao
+#if 1
 			if (inputs > idx++) enableModel(kModelOrder0);
-			if (inputs > idx++) enableModel(kModelOrder1);
-			if (inputs > idx++) enableModel(kModelOrder2);
-			if (inputs > idx++) enableModel(kModelMask);
+			if (inputs > idx++) enableModel(kModelOrder3);
 			if (inputs > idx++) enableModel(kModelSparse34);
+			if (inputs > idx++) enableModel(kModelMask);
+			if (inputs > idx++) enableModel(kModelOrder2);
+			if (inputs > idx++) enableModel(kModelOrder1);
+			if (inputs > idx++) enableModel(kModelSparse2);
+			if (inputs > idx++) enableModel(kModelSparse4);
+			if (inputs > idx++) enableModel(kModelOrder4);
 			if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
 #elif 1
 			// Default
