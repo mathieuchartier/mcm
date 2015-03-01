@@ -29,29 +29,49 @@
 #include "CM.hpp"
 #include "Compressor.hpp"
 #include "File.hpp"
+#include "Stream.hpp"
 
 // File headers are stored in a list of blocks spread out through data.
 class Archive {
 public:
-	// Header of the actual archive file.
-	class FHeader {
+	class Header {
 	public:
-		FHeader();
-		virtual ~FHeader();
-		uint32_t getVersion() const;
-		bool isValid();
-		void write(File* file);
-		void read(File* file);
+		static const size_t kCurMajorVersion = 0;
+		static const size_t kCurMinorVersion = 83;
+		static const size_t kMagicStringLength = 10;
+		
+		static const char* getMagic() {
+			return "MCMARCHIVE";
+		}
+		Header();
+		void read(Stream* stream);
+		void write(Stream* stream);
+		bool isArchive() const;
+		bool isSameVersion();
+		uint16_t majorVersion() const {
+			return major_version_;
+		}
+		uint16_t minorVersion() const {
+			return minor_version_;
+		}
 
 	private:
-		static const uint32_t header_size = 4;
-		char magic[header_size];
-		uint32_t version;
-		uint64_t free_list_;
+		char magic_[10]; // MCMARCHIVE
+		uint16_t major_version_;
+		uint16_t minor_version_;
+	};
 
-		static const char* getReferenceHeader();
+	class Algorithm {
+	public:
+		Algorithm(uint8_t mem_usage = 6, uint8_t algorithm = 0, bool lzp_enabled = false);
+		Compressor* createCompressor();
+		void read(Stream* stream);
+		void write(Stream* stream);
 
-		friend class Archive;
+	private:
+		uint8_t mem_usage_;
+		uint8_t algorithm_;
+		bool lzp_enabled_;
 	};
 
 	// Archive consists of a list of these.
@@ -351,7 +371,7 @@ private:
 	// Main file.
 	File file_;
 	// The header.
-	FHeader header_;
+	// FHeader header_;
 	// File manager.
 	FileManager file_manager_;
 	// Mutex

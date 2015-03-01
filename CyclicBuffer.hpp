@@ -35,8 +35,8 @@ protected:
 	T *storage_, *data_;
 public:
 
-	forceinline uint32_t getPos() const {return pos_;}
-	forceinline uint32_t getMask() const {return mask_;}
+	forceinline size_t getPos() const {return pos_;}
+	forceinline size_t getMask() const {return mask_;}
 	forceinline T* getData() { return data_; }
 
 	inline size_t prev(size_t pos, size_t count) const {

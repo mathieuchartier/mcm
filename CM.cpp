@@ -205,7 +205,7 @@ void CM<kCMType>::decompress(Stream* in_stream, Stream* out_stream) {
 		if (cm_profile != profile) {
 			setDataProfile(cm_profile);
 		}
-		uint32_t c = processByte<true>(sin);
+		size_t c = processByte<true>(sin);
 		update(c);
 		detector.put(c);
 	}

@@ -25,31 +25,64 @@
 
 #include <cstring>
 
-Archive::FHeader::FHeader() : version(7) {
-	memcpy(magic, getReferenceHeader(), header_size);
+Archive::Header::Header() : major_version_(kCurMajorVersion), minor_version_(kCurMinorVersion) {
+	memcpy(magic_, getMagic(), kMagicStringLength);
 }
 
-Archive::FHeader::~FHeader() {
-}
-		
-uint32_t Archive::FHeader::getVersion() const {
-	return version;
-}
-
-bool Archive::FHeader::isValid() {
-	return memcmp(magic, getReferenceHeader(), header_size) == 0;
+void Archive::Header::read(Stream* stream) {
+	stream->read(reinterpret_cast<uint8_t*>(magic_), kMagicStringLength);
+	major_version_ = stream->get16();
+	minor_version_ = stream->get16();
 }
 
-void Archive::FHeader::write(File* file) {
-	file->awrite(0, this, sizeof(*this));
+void Archive::Header::write(Stream* stream) {
+	stream->write(reinterpret_cast<uint8_t*>(magic_), kMagicStringLength);
+	stream->put16(major_version_);
+	stream->put16(minor_version_);
 }
 
-void Archive::FHeader::read(File* file) {
-	file->aread(0, this, sizeof(*this));
+bool Archive::Header::isArchive() const {
+	return memcmp(magic_, getMagic(), kMagicStringLength) == 0;
 }
 
-const char* Archive::FHeader::getReferenceHeader() {
-	return "MCMA";
+bool Archive::Header::isSameVersion() {
+	return major_version_ == kCurMajorVersion && minor_version_ == kCurMinorVersion;
+}
+
+Archive::Algorithm::Algorithm(uint8_t mem_usage, uint8_t algorithm, bool lzp_enabled)
+	: mem_usage_(mem_usage), algorithm_(algorithm), lzp_enabled_(lzp_enabled) {
+}
+
+Compressor* Archive::Algorithm::createCompressor() {
+	switch (static_cast<Compressor::Type>(algorithm_)) {
+	case Compressor::kTypeCMTurbo:
+		return new CM<kCMTypeTurbo>(mem_usage_, lzp_enabled_);
+		//return new TurboCM<6>(mem_usage);
+		//return new CMRolz;
+	case Compressor::kTypeCMFast:
+		return new CM<kCMTypeFast>(mem_usage_, lzp_enabled_);
+	case Compressor::kTypeCMMid:
+		return new CM<kCMTypeMid>(mem_usage_, lzp_enabled_);
+	case Compressor::kTypeCMHigh:
+		return new CM<kCMTypeHigh>(mem_usage_, lzp_enabled_);
+	case Compressor::kTypeCMMax:
+		return new CM<kCMTypeMax>(mem_usage_, lzp_enabled_);
+	default:
+		return new Store;
+	}
+	return nullptr;
+}
+
+void Archive::Algorithm::read(Stream* stream) {
+	mem_usage_ = static_cast<uint8_t>(stream->get());
+	algorithm_ = static_cast<uint8_t>(stream->get());
+	lzp_enabled_ = stream->get() != 0 ? true : false;
+}
+
+void Archive::Algorithm::write(Stream* stream) {
+	stream->put(mem_usage_);
+	stream->put(algorithm_);
+	stream->put(lzp_enabled_);
 }
 
 Archive::FBlockHeader::Type Archive::FBlockHeader::getType() const {
@@ -221,7 +254,7 @@ void Archive::open(const FilePath& file_path, bool overwrite, std::ios_base::ope
 	file_.open(file_path.getName(), std::ios_base::binary | mode);
 	if (!file_.length() || overwrite) {
 		// If the file is empty we need to write out the archive headder before we do anything.
-		file_.write(reinterpret_cast<void*>(&header_), sizeof(header_));
+		// file_.write(reinterpret_cast<void*>(&header_), sizeof(header_));
 	}
 }
 

@@ -49,81 +49,6 @@ typedef X86AdvancedFilter DefaultFilter;
 //typedef SimpleDict DefaultFilter;
 //typedef IdentityFilter DefaultFilter;
 
-class ArchiveHeader {
-public:
-	static const size_t kVersion = 82;
-
-	char magic[3]; // MCM
-	uint16_t version;
-	uint8_t mem_usage;
-	uint8_t algorithm;
-	bool lzp_enabled;
-
-	ArchiveHeader() {
-		magic[0] = 'M';
-		magic[1] = 'C';
-		magic[2] = 'M';
-		version = kVersion;
-		mem_usage = 8;
-	}
-
-	template <typename TIn>
-	void read(TIn& sin) {
-		for (auto& c : magic) {
-			c = sin.get();
-		}
-		version = sin.get();
-		version = (version << 8) | sin.get();
-		mem_usage = (byte)sin.get();
-		algorithm = (byte)sin.get();
-		lzp_enabled = static_cast<bool>(sin.get());
-	}
-
-	template <typename TOut>
-	void write(TOut& sout) {
-		for (auto& c : magic) {
-			sout.put(c);
-		}
-		sout.put(version >> 8);
-		sout.put(version & 0xFF);
-		sout.put(mem_usage);
-		sout.put(algorithm);
-		sout.put(lzp_enabled);
-	}
-
-	bool isValid() const {
-		// Check magic && version.
-		if (magic[0] != 'M' ||
-			magic[1] != 'C' ||
-			magic[2] != 'M' ||
-			version != kVersion) {
-			return false;
-		}
-		return true;
-	}
-
-	Compressor* createCompressor() {
-		//return new Store;
-		switch ((Compressor::Type)algorithm) {
-		case Compressor::kTypeCMTurbo:
-			//return new CM<kCMTypeTurbo>(mem_usage, lzp_enabled);
-			// return new TurboCM<6>(mem_usage);
-			return new CMRolz;
-		case Compressor::kTypeCMFast:
-			return new CM<kCMTypeFast>(mem_usage, lzp_enabled);
-		case Compressor::kTypeCMMid:
-			return new CM<kCMTypeMid>(mem_usage, lzp_enabled);
-		case Compressor::kTypeCMHigh:
-			return new CM<kCMTypeHigh>(mem_usage, lzp_enabled);
-		case Compressor::kTypeCMMax:
-			return new CM<kCMTypeMax>(mem_usage, lzp_enabled);
-		default:
-			return new Store;
-		}
-		return nullptr;
-	}
-};
-
 class VerifyStream : public WriteStream {
 public:
 	std::ifstream fin;
@@ -169,78 +94,14 @@ public:
 	}
 };
 
-std::string trimExt(std::string str) {
-	std::streamsize start = 0, pos;
-	if ((pos = str.find_last_of('\\')) != std::string::npos) {
-		start = std::max(start, pos + 1);
-	}
-	if ((pos = str.find_last_of('/')) != std::string::npos) {
-		start = std::max(start, pos + 1);
-	}
-	return str.substr(static_cast<uint32_t>(start));
-}
-
 static void printHeader() {
 	std::cout
 		<< "======================================================================" << std::endl
-		<< "mcm compressor v0." << ArchiveHeader::kVersion << ", by Mathieu Chartier (c)2015 Google Inc." << std::endl
+		<< "mcm compressor v" << Archive::Header::kCurMajorVersion << "." << Archive::Header::kCurMinorVersion
+			<< ", by Mathieu Chartier (c)2015 Google Inc." << std::endl
 		<< "Experimental, may contain bugs. Contact mathieu.a.chartier@gmail.com" << std::endl
 		<< "Special thanks to: Matt Mahoney, Stephan Busch, Christopher Mattern." << std::endl
 		<< "======================================================================" << std::endl;
-}
-
-static int usage(const std::string& name) {
-	printHeader();
-	std::cout
-		<< "Caution: Use only for testing!!" << std::endl
-		<< "Usage: " << name << " [options] <infile> <outfile>" << std::endl
-		<< "Options: -d for decompress" << std::endl
-		<< "-1 ... -9 specifies ~32mb ... ~1500mb memory, " << std::endl
-		<< "-10 -11 for 3GB, ~5.5GB (only supported on 64 bits)" << std::endl
-		<< "modes: -turbo -fast -mid -high -max (default -high) specifies speed" << std::endl
-		<< "-test tests the file after compression is done" << std::endl
-		// << "-b <mb> specifies block size in MB" << std::endl
-		// << "-t <threads> the number of threads to use (decompression requires the same number of threads" << std::endl
-		<< "Exaples:" << std::endl
-		<< "Compress: " << name << " -c -9 -high enwik8 enwik8.mcm" << std::endl
-		<< "Decompress: " << name << " -d enwik8.mcm enwik8.ref" << std::endl;
-	return 0;
-}
-
-void openArchive(ReadStream* stream) {
-	Archive archive;
-	// archive.open(stream);
-}
-
-// Compress a single file.
-void compressSingleFile(ReadFileStream* fin, WriteFileStream* fout, uint32_t blocks) {
-	// Split the file into a list of blocks.
-	File& file = fin->getFile();
-	// Seek to end and 
-	file.seek(0, SEEK_END);
-	uint64_t length = file.tell();
-	file.seek(0, SEEK_SET);
-	// Calculate block size.
-	uint64_t block_size = (length + blocks - 1) / blocks;
-	
-	Archive archive;
-}
-
-// Compress a block to a temporary file. Thread safe.
-void compressBlock() {
-	WriteFileStream out_file;
-	std::string temp_name;
-	// This is racy.
-	for (;;) {
-		std::ostringstream ss;
-		ss << "__TMP" + rand();
-		temp_name = ss.str();
-		if (!fileExists(temp_name.c_str())) {
-			break;
-		}
-	}
-	// Compress each file block into the chunk.
-
 }
 
 class Options {
@@ -273,6 +134,8 @@ public:
 		kCompLevelHigh,
 		kCompLevelMax,
 	};
+	static const size_t kDefaultMemLevel = 6;
+	static const CompLevel kDefaultCompLevel = kCompLevelMid;
 	Mode mode;
 	bool opt_mode;
 	bool no_filter;
@@ -306,6 +169,24 @@ public:
 		case kCompLevelMax: return Compressor::kTypeCMMax;
 		}
 		return Compressor::kTypeStore;
+	}
+	
+	int usage(const std::string& name) {
+		printHeader();
+		std::cout
+			<< "Caution: Use only for testing!!" << std::endl
+			<< "Usage: " << name << " [options] <infile> <outfile>" << std::endl
+			<< "Options: -d for decompress" << std::endl
+			<< "-1 ... -9 specifies ~32mb ... ~1500mb memory (default " << kDefaultMemLevel << ")" << std::endl
+			<< "-10 -11 for 3GB, ~5.5GB (only supported on 64 bits)" << std::endl
+			<< "modes: -turbo -fast -mid -high -max (default -mid) specifies speed" << std::endl
+			<< "-test tests the file after compression is done" << std::endl
+			// << "-b <mb> specifies block size in MB" << std::endl
+			// << "-t <threads> the number of threads to use (decompression requires the same number of threads" << std::endl
+			<< "Examples:" << std::endl
+			<< "Compress: " << name << " -c -9 -high enwik8 enwik8.mcm" << std::endl
+			<< "Decompress: " << name << " -d enwik8.mcm enwik8.ref" << std::endl;
+		return 0;
 	}
 
 	int parse(int argc, char* argv[]) {
@@ -345,9 +226,7 @@ public:
 						break;
 					}
 				}
-			} else if (arg == "-opt") {
-				opt_mode = true;
-			}
+			} else if (arg == "-opt") opt_mode = true;
 			else if (arg == "-nofilter") no_filter = true;
 			else if (arg == "-nolzp") lzp_enabled = false;
 			else if (arg == "-turbo") comp_level = kCompLevelTurbo;
@@ -364,18 +243,13 @@ public:
 			else if (arg == "-7") mem_level = 7;
 			else if (arg == "-8") mem_level = 8;
 			else if (arg == "-9") mem_level = 9;
-			else if (arg == "-10") {
-				if (sizeof(void*) == 8) {
-					mem_level = 10;
-				} else {
-					std::cerr << arg << " only supported with 64 bit";
+			else if (arg == "-10" || arg == "-11") {
+				if (sizeof(void*) < 8) {
+					std::cerr << arg << " only supported with 64 bit" << std::endl;
+					return usage(program);
 				}
-			} else if (arg == "-11") {
-				if (sizeof(void*) == 8) {
-					mem_level = 11;
-				} else {
-					std::cerr << arg << " only supported with 64 bit";
-				}
+				if (arg == "-10") mem_level = 10;
+				else mem_level = 11;
 			} else if (arg == "-b") {
 				if  (i + 1 >= argc) {
 					return usage(program);
@@ -438,15 +312,21 @@ public:
 };
 
 void decompress(Stream* in, Stream* out) {
-	ArchiveHeader header;
-	header.read(*in);
-	if (!header.isValid()) {
-		std::cerr << "Invalid archive or invalid version";
+	Archive::Header header;
+	header.read(in);
+	if (!header.isArchive()) {
+		std::cerr << "Attempting to decompress non archive file" << std::endl;
 		return;
 	}
+	if (!header.isSameVersion()) {
+		std::cerr << "Attempting to decompress old version " << header.majorVersion() << "." << header.minorVersion() << std::endl;
+		return;
+	}
+	Archive::Algorithm algo;
+	algo.read(in);
 	DefaultFilter f(out);
 	auto start = clock();
-	std::unique_ptr<Compressor> comp(header.createCompressor());
+	std::unique_ptr<Compressor> comp(algo.createCompressor());
 	comp->decompress(in, &f);
 	f.flush();
 	auto time = clock() - start;
@@ -459,7 +339,7 @@ int main(int argc, char* argv[]) {
 	Options options;
 	auto ret = options.parse(argc, argv);
 	if (ret) {
-		std::cerr << "Failed to parse arguments";
+		std::cerr << "Failed to parse arguments" << std::endl;
 		return ret;
 	}
 	Archive archive;
@@ -556,10 +436,8 @@ int main(int argc, char* argv[]) {
 		auto in_file = options.files.back().getName();
 		auto out_file = options.archive_file.getName();
 
-		ArchiveHeader header;
-		header.mem_usage = options.mem_level;
-		header.algorithm = options.compressorType();
-		header.lzp_enabled = options.lzp_enabled;
+		Archive::Header header;
+		Archive::Algorithm algorithm(options.mem_level, options.compressorType(), options.lzp_enabled);
 
 		if (err = fin.open(in_file, std::ios_base::in | std::ios_base::binary)) {
 			std::cerr << "Error opening: " << in_file << " (" << errstr(err) << ")" << std::endl;
@@ -574,8 +452,9 @@ int main(int argc, char* argv[]) {
 				const clock_t start = clock();
 				fin.seek(0);
 				VoidWriteStream fout;
-				header.write(fout);
-				std::unique_ptr<Compressor> comp(header.createCompressor());
+				header.write(&fout);
+				algorithm.write(&fout);
+				std::unique_ptr<Compressor> comp(algorithm.createCompressor());
 				if (!comp->setOpt(opt_var)) {
 					continue;
 				}
@@ -605,9 +484,10 @@ int main(int argc, char* argv[]) {
 
 			std::cout << "Compressing to " << out_file << " mem level=" << options.mem_level << std::endl;
 
-			header.write(fout);
+			header.write(&fout);
+			algorithm.write(&fout);
 
-			std::unique_ptr<Compressor> comp(header.createCompressor());
+			std::unique_ptr<Compressor> comp(algorithm.createCompressor());
 			{
 				ProgressStream rms(&fin, &fout);
 				DefaultFilter f(&rms);
@@ -690,9 +570,5 @@ int main(int argc, char* argv[]) {
 		break;
 	}
 	}
-
-#if 0
-	
-#endif
 	return 0;
 }

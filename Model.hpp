@@ -122,7 +122,7 @@ public:
 		p += count < kCountMask;
 		p &= 0x7FFFFFFF;
 #else
-		const int m[2] = {kCountMask, (1 << 31) - 1};
+		const int m[2] = {kCountMask, (1u << 31) - 1};
 		p = p + (((m[bit] - static_cast<int>(p)) >> learn_rate) & ~kCountMask);
 		p += count < kCountMask;
 #endif
@@ -153,27 +153,22 @@ public:
 	static const uint32_t learn_rate = _learn_rate;
 	static const uint32_t max = 1 << shift;
 
-	forceinline void init(int new_p = (1 << _shift - 1)) {
+	forceinline void init(int new_p = 1u << (_shift - 1)) {
 		p = new_p << (_bits - shift);
 	}
-
 	forceinline fastBitModel() {
 		init();
 	}
-
 	forceinline void update(T bit) {
 		update(bit, learn_rate);
 	}
-
 	forceinline void update(T bit, int32_t learn_rate) {
 		const int round = kUseRounding ? (1 << (learn_rate - 1)) : 0;
 		p += ((static_cast<int>(bit) << _bits) - static_cast<int>(p) + round) >> learn_rate;
 	}
-
 	forceinline void setP(uint32_t new_p) {
 		p = new_p << (_bits - shift);
 	}
-
 	forceinline uint32_t getP() const {
 		return p >> (_bits - shift);
 	}

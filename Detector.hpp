@@ -91,7 +91,7 @@ public:
 			const auto* orig_ptr = ptr;
 			size_t enc_len = length_ - 1;
 			const auto length_bytes = calculateLengthBytes(enc_len);
-			*(ptr++) = static_cast<uint8_t>(profile_) | ((length_bytes - 1) << kLengthBytesShift);
+			*(ptr++) = static_cast<uint8_t>(profile_) | static_cast<uint8_t>((length_bytes - 1) << kLengthBytesShift);
 			for (size_t i = 0; i < length_bytes; ++i) {
 				*(ptr++) = static_cast<uint8_t>(enc_len >> (i * 8));
 			}
@@ -213,8 +213,8 @@ public:
 			}
 			buffer_.push_back(c);
 		} else {
-			out_buffer_[out_buffer_pos_++] = c;
-			uint8_t num_bytes = DetectedBlock::getSizeFromHeaderByte(out_buffer_[0]);
+			out_buffer_[out_buffer_pos_++] = static_cast<uint8_t>(c);
+			auto num_bytes = DetectedBlock::getSizeFromHeaderByte(out_buffer_[0]);
  			if (out_buffer_pos_ == num_bytes) {
 				current_block_.read(&out_buffer_[0]);
 				if (current_block_.profile() == kProfileEOF) {
@@ -302,8 +302,6 @@ public:
 		if (false) {
 			return DetectedBlock(kProfileText, static_cast<uint32_t>(buffer_.size()));
 		}
-
-		// return DetectedBlock(kProfileText, buffer_size);
 		size_t binary_len = 0;
 		while (binary_len < buffer_size) {
 			UTF8Decoder<true> decoder;
@@ -318,7 +316,7 @@ public:
 			}
 			if (text_len > 146) {
 				if (binary_len == 0) {
-					return DetectedBlock(kProfileText, text_len);
+					return DetectedBlock(kProfileText, static_cast<uint32_t>(text_len));
 				} else {
 					break;
 				}
@@ -330,7 +328,7 @@ public:
 				++binary_len;
 			}
 		}
-		return DetectedBlock(kProfileBinary, binary_len);
+		return DetectedBlock(kProfileBinary, static_cast<uint32_t>(binary_len));
 	}
 
 	/*

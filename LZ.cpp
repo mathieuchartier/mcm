@@ -586,7 +586,7 @@ size_t LZFast::compressBytes(byte* in, byte* out, size_t count) {
 			}
 		}
 		for (uint32_t bits = 0; bits < 8; ++bits) {
-			const uint32_t cur_max_nm = kMinNonMatch + (1U << bits) - 1;
+			const uint32_t cur_max_nm = kMinNonMatch + (1u << bits) - 1;
 			uint32_t non_match_count = 0, non_match_bytes = 0;
 			uint64_t total_bits = 0;
 			for (uint32_t i = 0; i < non_matches_.size(); ++i) {
@@ -848,7 +848,7 @@ void CMRolz::compress(Stream* in_stream, Stream* out_stream) {
 			lookahead_.push_back(static_cast<uint8_t>(c));
 		}
 		if (lookahead_.size() >= kMinMatch) {
-			uint32_t h = 0x987654321;
+			uint32_t h = 0x97654321;
 			for (size_t order = 0; order < kMinMatch; ++order) {
 				h = hashFunc(lookahead_[order], h);
 			}
@@ -876,7 +876,7 @@ void CMRolz::compress(Stream* in_stream, Stream* out_stream) {
 				processByte<false>(sout, order1p_ + (owhash_ & 0xFF) * 256, order2p_ + (owhash_ & 0xFFFF) * 256, best_idx);
 				processByte<false>(sout, order1l_ + (owhash_ & 0xFF) * 256, order2l_ + (owhash_ & 0xFFFF) * 256, best_len - kMinMatch);
 				entries_[ctx][best_idx].pos_ = buffer_.getPos();
-				size_t mtf_idx = mtf_[ctx].find(best_idx);
+				size_t mtf_idx = mtf_[ctx].find(static_cast<uint8_t>(best_idx));
 				mtf_[ctx].moveToFront(mtf_idx);
 				for (size_t i = 0; i < best_len ; ++i) {
 					buffer_.push(lookahead_.front());

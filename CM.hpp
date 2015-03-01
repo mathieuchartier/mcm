@@ -277,7 +277,7 @@ public:
 	};
 	static_assert(kModelCount <= 32, "no room in word");
 	static const size_t kMaxOrder = 12;
-	size_t enabled_models_;
+	uint32_t enabled_models_;
 	size_t max_order_;
 
 	// Statistics
@@ -355,7 +355,7 @@ public:
 		lzp_mixers.resize(256);
 		for (auto& mixer : lzp_mixers) mixer.init(382);
 		for (size_t len = 1; len < kMaxMatch; ++len) {
-			lzp_mdl_[len].setP(kMaxValue - (kMaxValue * 2) / len);
+			lzp_mdl_[len].setP(static_cast<uint32_t>(kMaxValue - (kMaxValue * 2) / len));
 		}
 
 		for (auto& s : mixer_skip) s = 0;
@@ -738,7 +738,7 @@ public:
 	}
 
 	template <const bool decode, typename TStream>
-	uint32_t processByte(TStream& stream, uint32_t c = 0) {
+	size_t processByte(TStream& stream, uint32_t c = 0) {
 		size_t base_contexts[inputs] = { o0pos }; // Base contexts
 		auto* ctx_ptr = base_contexts;
 

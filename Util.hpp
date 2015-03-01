@@ -287,18 +287,18 @@ public:
 	}
 };
 
-template <class T, uint32_t kSize>
+template <class T, size_t kSize>
 class StaticArray {
 public:
 	StaticArray() {
 	}
-	ALWAYS_INLINE const T& operator[](uint32_t i) const {
+	ALWAYS_INLINE const T& operator[](size_t i) const {
 		return data_[i];
 	}
-	ALWAYS_INLINE T& operator[](uint32_t i) {
+	ALWAYS_INLINE T& operator[](size_t i) {
 		return data_[i];
 	}
-	ALWAYS_INLINE uint32_t size() const {
+	ALWAYS_INLINE size_t size() const {
 		return kSize;
 	}
 
@@ -387,5 +387,6 @@ std::string errstr(int err);
 std::vector<byte> randomArray(size_t size);
 uint64_t computeRate(uint64_t size, uint64_t delta_time);
 std::vector<byte> loadFile(const std::string& name, uint32_t max_size = 0xFFFFFFF);
+std::string trimExt(const std::string& str);
 
 #endif

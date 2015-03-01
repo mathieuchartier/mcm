@@ -30,6 +30,10 @@
 
 #include "Filter.hpp"
 
+class DictBuilder {
+public:
+};
+
 class SimpleDict : public ByteStreamFilter<16 * KB, 16 * KB> {
 	static const size_t kMaxWordLen = 255;
 public:

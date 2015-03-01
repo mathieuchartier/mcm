@@ -84,3 +84,14 @@ std::string formatNumber(uint64_t n) {
 	}
 	return std::to_string(n) + ret;
 }
+
+std::string trimExt(const std::string& str) {
+	std::streamsize start = 0, pos;
+	if ((pos = str.find_last_of('\\')) != std::string::npos) {
+		start = std::max(start, pos + 1);
+	}
+	if ((pos = str.find_last_of('/')) != std::string::npos) {
+		start = std::max(start, pos + 1);
+	}
+	return str.substr(static_cast<uint32_t>(start));
+}

@@ -25,7 +25,7 @@ private:
 	size_t dist;
 
 	// Current match.
-	uint32_t pos, len;
+	size_t pos, len;
 
 	// Hash
 	uint32_t hash_;
@@ -33,7 +33,7 @@ private:
 	size_t num_length_models_;
 
 	// Hash table
-	uint32_t hash_mask;
+	size_t hash_mask;
 	MemMap hash_storage;
 	uint32_t* hash_table;
 	Model* cur_mdl;
@@ -50,7 +50,7 @@ public:
 		opt_var = var;
 	}
 
-	void resize(uint32_t size) {
+	void resize(size_t size) {
 		hash_mask = size - 1;
 		// Check power of 2.
 		assert((hash_mask & (hash_mask + 1)) == 0);
@@ -111,10 +111,10 @@ public:
 		model_base = &models[ctx * num_length_models_];
 	}
 
-	void search(Buffer& buffer, uint32_t spos) {
+	void search(Buffer& buffer, size_t spos) {
 		// Reverse match.
-		uint32_t blast = buffer.getPos() - 1;
-		uint32_t len = sizeof(uint32_t);
+		size_t blast = buffer.getPos() - 1;
+		size_t len = sizeof(uint32_t);
 		if (*reinterpret_cast<uint32_t*>(&buffer[spos - len]) ==
 			*reinterpret_cast<uint32_t*>(&buffer[blast - len])) {
 			--spos;

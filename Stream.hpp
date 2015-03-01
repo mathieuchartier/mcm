@@ -34,6 +34,16 @@ public:
 	}
     virtual ~Stream() {
 	}
+	void put16(uint16_t n) {
+		put(static_cast<uint8_t>(n >> 8));
+		put(static_cast<uint8_t>(n >> 0));
+	}
+	uint16_t get16() {
+		uint16_t ret = 0;
+		ret = (ret << 8) | static_cast<uint16_t>(get());
+		ret = (ret << 8) | static_cast<uint16_t>(get());
+		return ret;
+	}
 };
 
 class WriteStream : public Stream {

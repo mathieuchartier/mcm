@@ -177,7 +177,7 @@ class CMRolz : public Compressor {
 
 private:
 	template <const bool decode, typename TStream>
-	uint32_t processByte(TStream& stream, uint8_t* ctx1, uint8_t* ctx2, uint32_t c = 0) {
+	size_t processByte(TStream& stream, uint8_t* ctx1, uint8_t* ctx2, uint32_t c = 0) {
 		if (!decode) {
 			c <<= 24;
 		}
