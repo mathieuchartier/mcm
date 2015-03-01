@@ -76,7 +76,7 @@ public:
 		version = (version << 8) | sin.get();
 		mem_usage = (byte)sin.get();
 		algorithm = (byte)sin.get();
-		lzp_enabled = sin.get();
+		lzp_enabled = static_cast<bool>(sin.get());
 	}
 
 	template <typename TOut>
@@ -106,7 +106,9 @@ public:
 		//return new Store;
 		switch ((Compressor::Type)algorithm) {
 		case Compressor::kTypeCMTurbo:
-			return new CM<kCMTypeTurbo>(mem_usage, lzp_enabled);
+			//return new CM<kCMTypeTurbo>(mem_usage, lzp_enabled);
+			// return new TurboCM<6>(mem_usage);
+			return new CMRolz;
 		case Compressor::kTypeCMFast:
 			return new CM<kCMTypeFast>(mem_usage, lzp_enabled);
 		case Compressor::kTypeCMMid:

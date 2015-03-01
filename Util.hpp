@@ -75,7 +75,7 @@ static const bool kIsDebugBuild = false;
 #else
 #define ASSUME(x)
 #endif
-
+	
 typedef uint32_t hash_t;
 
 static const uint64_t KB = 1024;
@@ -250,6 +250,41 @@ public:
 
 protected:
 	byte buffer_[kMaxSize];
+};
+
+// Move to front.
+template <typename T>
+class MTF {
+	std::vector<T> data_;
+public:
+	void init(size_t n) {
+		data_.resize(n);
+		for (size_t i = 0; i < n; ++i) {
+			data_[i] = static_cast<T>(n - 1 - i);
+		}
+	}
+	size_t find(T value) {
+		for (size_t i = 0; i < data_.size(); ++i) {
+			if (data_[i] == value) {
+				return i;
+			}
+		}
+		return data_.size();
+	}
+	forceinline T back() const {
+		return data_.back();
+	}
+	size_t size() const {
+		return data_.size();
+	}
+	void moveToFront(size_t index) {
+		auto old = data_[index];
+		while (index) {
+			data_[index] = data_[index - 1];
+			--index;
+		}
+		data_[0] = old;
+	}
 };
 
 template <class T, uint32_t kSize>

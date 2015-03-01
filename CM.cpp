@@ -36,6 +36,12 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 	std::vector<uint64_t> profile_counts(static_cast<uint32_t>(Detector::kProfileCount), 0);
 	std::vector<uint64_t> profile_len(static_cast<uint32_t>(Detector::kProfileCount), 0);
 
+// #define SPLIT_TYPES
+#if SPLIT_TYPES
+	std::ofstream fbinary("binary.out", std::ios_base::out | std::ios_base::binary);
+	std::ofstream ftext("text.out", std::ios_base::out | std::ios_base::binary);
+#endif
+
 	// Start by writing out archive header.
 	init();
 	ent.init();
@@ -67,6 +73,10 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 		if (cm_profile != profile) {
 			setDataProfile(cm_profile);
 		}
+#if SPLIT_TYPES
+		if (cm_profile == kProfileBinary)  fbinary.put(c);
+		else ftext.put(c);
+#endif
 		// Initial detection.
 		dcheck(c != EOF);
 		processByte<false>(sout, c);
@@ -150,12 +160,19 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 			}
 			std::cout << "zero=" << z << " nonzero=" << nz << std::endl;
 		}
+		detector.dumpInfo();
 		std::cout << "CMed bytes=" << formatNumber((mixer_skip[0] + mixer_skip[1]) / 8)
 			<< " mix skip=" << formatNumber(mixer_skip[0])
 			<< " mix nonskip=" << formatNumber(mixer_skip[1]) << std::endl;
 		std::cout << "match=" << formatNumber(match_count_)
 			<< " matchfail=" << formatNumber(non_match_count_)
 			<< " nonmatch=" << formatNumber(other_count_) << std::endl;
+		for (size_t i = 0; i < kMaxMatch; ++i) {
+			const size_t t = match_hits_[i] + match_miss_[i];
+			if (t != 0) {
+				std::cout << i << ":" << match_hits_[i] << "/" << match_miss_[i] << " = " << static_cast<double>(match_hits_[i]) / t << std::endl;
+			}
+		}
 		if (lzp_enabled_) {
 			std::cout << "lzp_bit_size=" << formatNumber(lzp_bit_match_bytes_)
 				<< " lzp_bit_miss_bytes=" << formatNumber(lzp_bit_miss_bytes_)

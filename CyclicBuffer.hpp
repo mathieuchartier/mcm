@@ -124,7 +124,7 @@ class CyclicDeque : public CyclicBuffer<T> {
 public:
 	CyclicDeque() : size_(0), front_pos_(0) {
 	}
-	size_t capacity() const {
+	forceinline size_t capacity() const {
 		return this->mask_ + 1;
 	}
 	void pop_front() {
@@ -137,14 +137,20 @@ public:
 		++size_;
 		this->push(c);
 	}
-	T front() const {
+	forceinline T front() const {
 		return this->data_[front_pos_ & this->mask_];
 	}
-	size_t size() const {
+	forceinline size_t size() const {
 		return size_;
 	}
 	forceinline T operator [] (size_t offset) const {
 		return this->data_[(front_pos_ + offset) & this->mask_];
+	}
+	forceinline bool full() const {
+		return this->size() == capacity();
+	}
+	forceinline bool empty() const {
+		return this->size() == 0;
 	}
 };
 

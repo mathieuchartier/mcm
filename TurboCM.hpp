@@ -65,7 +65,7 @@ public:
 
 	// CM state table.
 	static const uint32_t num_states = 256;
-	byte state_trans[num_states][2];
+	uint8_t state_trans[num_states][2];
 
 	// Fixed models
 	byte order0[256];
@@ -92,15 +92,15 @@ public:
 	uint32_t opt_var;
 
 	// Mixer
-	typedef Mixer<int, 4, 17, 1> CMMixer;
+	typedef Mixer<int, 4, 17, 11> CMMixer;
 	CMMixer mixer;
 
-	TurboCM() : mem_usage(0), opt_var(0) {
+	TurboCM(size_t mem = 6) : mem_usage(mem), opt_var(0) {
 	}
 
-
-	void setOpt(uint32_t var) {
+	bool setOpt(uint32_t var) {
 		opt_var = var;
+		return true;
 	}
 
 	void setMemUsage(uint32_t m) {
@@ -210,12 +210,12 @@ public:
 				3 * table.st(pr1.getP()) +
 				7 * table.st(pr2.getP()) +
 				8 * table.st(pr3.getP())) / 16);
-#elif 0
+#elif 1
 			int p0 = table.st(pr0.getP());
 			int p1 = table.st(pr1.getP());
 			int p2 = table.st(pr2.getP());
 			int p3 = table.st(pr3.getP());
-			int p = table.sq(mixer.p(p0, p1, p2, p3));
+			int p = table.sq(mixer.p(9, p0, p1, p2, p3));
 #else
 			int p = table.sq((table.st(pr0.getP()) + table.st(pr1.getP()) + table.st(pr2.getP()) + table.st(pr3.getP())) / 4) ;
 #endif
@@ -231,7 +231,7 @@ public:
 
 			ctx = ctx * 2 + bit;
 
-			// mixer.update(p0, p1, p2, p3, 0, 0, 0, 0, p, bit);
+			mixer.update(p, bit, 12, 28, 1, p0, p1, p2, p3, 0, 0, 0, 0);
 			pr0.update(bit, learn_rate);
 			pr1.update(bit, learn_rate);
 			pr2.update(bit, learn_rate);

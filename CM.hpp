@@ -183,7 +183,7 @@ public:
 #if USE_MMX
 	typedef MMXMixer<inputs, 15, 1> CMMixer;
 #else
-	typedef Mixer<int, inputs, 17, 11> CMMixer;
+	typedef Mixer<int, inputs+1, 17, 11> CMMixer;
 #endif
 	std::vector<CMMixer> mixers;
 	CMMixer *mixer_base;
@@ -210,7 +210,7 @@ public:
 	// End of block signal.
 	BitModel end_of_block_mdl;
 	CMProfile profile;
-	
+
 	typedef bitContextModel<BitModel, 255> BlockFlagModel;
 	BlockFlagModel block_flag_model;
 
@@ -223,6 +223,8 @@ public:
 	// LZP
 	std::vector<CMMixer> lzp_mixers;
 	bool lzp_enabled_;
+	static const size_t kMaxMatch = 100;
+	StationaryModel lzp_mdl_[kMaxMatch];
 
 	// SM
 	typedef StationaryModel PredModel;
@@ -267,6 +269,7 @@ public:
 		kModelWord1,
 		kModelWord2,
 
+		kModelWordMask,
 		kModelWord12,
 		kModelMask,
 		kModelMatchHashE,
@@ -281,6 +284,7 @@ public:
 	uint64_t mixer_skip[2];
 	uint64_t match_count_, non_match_count_, other_count_;
 	uint64_t lzp_bit_match_bytes_, lzp_bit_miss_bytes_, lzp_miss_bytes_, normal_bytes_;
+	uint64_t match_hits_[kMaxMatch], match_miss_[kMaxMatch];
 
 	// TODO: Get rid of this.
 	static const uint32_t eof_char = 126;
@@ -302,7 +306,7 @@ public:
 	}
 
 	bool setOpt(uint32_t var) {
-		if (var >= 7 && var < 13) return false;
+		// if (var >= 7 && var < 13) return false;
 		opt_var = var;
 		word_model.setOpt(var);
 		match_model.setOpt(var);
@@ -334,7 +338,7 @@ public:
 	}
 
 	void setMatchModelOrder(size_t order) {
-		match_model_order_ = order - 1;
+		match_model_order_ = order ? order - 1 : 0;
 		calculateMaxOrder();
 	}
 	
@@ -346,9 +350,14 @@ public:
 		mixer_mask = 0x1FFFF;
 		mixers.resize(static_cast<uint32_t>(kProfileCount) * (mixer_mask + 1));
 		for (auto& mixer : mixers) mixer.init(382);
+
+		// Lzp
 		lzp_mixers.resize(256);
 		for (auto& mixer : lzp_mixers) mixer.init(382);
-	
+		for (size_t len = 1; len < kMaxMatch; ++len) {
+			lzp_mdl_[len].setP(kMaxValue - (kMaxValue * 2) / len);
+		}
+
 		for (auto& s : mixer_skip) s = 0;
 		
 		NSStateMap<kShift> sm;
@@ -456,6 +465,8 @@ public:
 			other_count_ = match_count_ = non_match_count_ = 0;
 			std::cout << "Setup took: " << clock() - start << std::endl << std::endl;
 			lzp_bit_match_bytes_ = lzp_bit_miss_bytes_ = lzp_miss_bytes_ = normal_bytes_ = 0;
+			for (auto& len : match_hits_) len = 0;
+			for (auto& len : match_miss_) len = 0;
 		}
 	}
 
@@ -514,7 +525,13 @@ public:
 		return p;
 	}
 
-	template <const bool decode, const bool kLZPBit, typename TStream>
+	enum BitType {
+		kBitTypeLZP,
+		kBitTypeMatch,
+		kBitTypeNormal,
+	};
+
+	template <const bool decode, BitType kBitType, typename TStream>
 	size_t processBit(TStream& stream, size_t bit, size_t* base_contexts, size_t ctx, size_t mixer_ctx) {
 		const auto mm_l = match_model.getLength();
 	
@@ -525,7 +542,7 @@ public:
 
 		uint32_t p;
 		int p0 = 0, p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0, p8 = 0, p9 = 0;
-		if (kLZPBit) {
+		if (kBitType == kBitTypeLZP) {
 			if (inputs > 0) {
 				if (kFixedMatchProbs) {
 					p0 = fixed_match_probs_[mm_l * 2 + 1];
@@ -538,6 +555,11 @@ public:
 				sp0 = &hash_table[base_contexts[0] ^ ctx];
 				s0 = *sp0;
 				p0 = getP(s0, 0);
+			}
+			if (false && kBitType != kBitTypeLZP && profile == kProfileBinary) {
+				p0 += getP(hash_table[s2pos + (owhash & 0xFF00) + ctx], 0);
+				p0 += getP(hash_table[s3pos + ((owhash & 0xFF0000) >> 8) + ctx], 0);
+				p0 += getP(hash_table[s4pos + ((owhash & 0xFF000000) >> 16) + ctx], 0);
 			}
 		} else {
 			if (inputs > 0) {
@@ -601,8 +623,9 @@ public:
 		p = mixer_p;
 		if (kUseSSE) {
 			if (kUseLZP) {
-				if (!kUseSSEOnlyLZP || kLZPBit || sse_ctx != 0) {
-					if (kLZPBit) {
+				if (!kUseSSEOnlyLZP || kBitType == kBitTypeLZP || sse_ctx != 0) {
+					if (kBitType == kBitTypeLZP) {
+						// p = sse2.p(stp + kMaxValue / 2, sse_ctx + mm_l);
 						p = sse2.p(stp + kMaxValue / 2, sse_ctx + mm_l);
 					} else {
 						p = sse.p(stp + kMaxValue / 2, sse_ctx + mixer_ctx);
@@ -628,10 +651,15 @@ public:
 		const bool ret = cur_mixer->update(mixer_p, bit, kShift, 28, 1, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9);
 		// Only update the states / predictions if the mixer was far enough from the bounds, helps 15k on enwik8 and 1-2sec.
 		if (ret) {
-			if (kLZPBit) {
+			if (kBitType == kBitTypeLZP) {
 				match_model.updateCurMdl(1, bit);
 			} else if (mm_l == 0) {
 				if (inputs > 0) *sp0 = nextState(s0, bit, 0);
+				if (false && kBitType != kBitTypeLZP && profile == kProfileBinary) {
+					hash_table[s2pos + (owhash & 0xFF00) + ctx] = nextState(hash_table[s2pos + (owhash & 0xFF00) + ctx], bit, 0);
+					hash_table[s3pos + ((owhash & 0xFF0000) >> 8) + ctx] = nextState(hash_table[s3pos + ((owhash & 0xFF0000) >> 8) + ctx], bit, 0);
+					hash_table[s4pos + ((owhash & 0xFF000000) >> 16) + ctx] = nextState(hash_table[s4pos + ((owhash & 0xFF000000) >> 16) + ctx], bit, 0);
+				}
 			}
 			if (inputs > 1) *sp1 = nextState(s1, bit, 1);
 			if (inputs > 2) *sp2 = nextState(s2, bit, 2);
@@ -645,7 +673,7 @@ public:
 		}
 		if (kUseSSE) {
 			if (kUseLZP) {
-				if (kLZPBit) {
+				if (kBitType == kBitTypeLZP) {
 					sse2.update(bit);
 				} else if (!kUseSSEOnlyLZP || sse_ctx != 0) {
 					sse.update(bit);
@@ -654,7 +682,7 @@ public:
 				mixer_sse_ctx = mixer_sse_ctx * 2 + ret;
 			}
 		}
-		if (!kLZPBit) {
+		if (kBitType != kBitTypeLZP) {
 			match_model.updateBit(bit);
 		}
 		if (kStatistics) ++mixer_skip[ret];
@@ -693,7 +721,7 @@ public:
 				bit = code >> (sizeof(uint32_t) * 8 - 1);
 				code <<= 1;
 			}
-			bit = processBit<decode, false>(stream, bit, base_contexts, ctx_add2 + ctx, ctx);
+			bit = processBit<decode, kBitTypeNormal>(stream, bit, base_contexts, ctx_add2 + ctx, ctx);
 
 			// Encode the bit / decode at the last second.
 			if (use_huffman) {
@@ -749,6 +777,21 @@ public:
 		}
 		if (modelEnabled(kModelSparse34)) {
 			*(ctx_ptr++) = hash_lookup(hashFunc(p3, hashFunc(p2, 0x651A833E))); // Order 34
+		}
+		if (modelEnabled(kModelWordMask)) {
+			uint32_t mask = 0xFFFFFFFF;
+			mask ^= 1u << 10u;
+			mask ^= 1u << 26u;
+			mask ^= 1u << 24u;
+			mask ^= 1u << 4u;
+			mask ^= 1u << 25u;
+			mask ^= 1u << 28u;
+			mask ^= 1u << 5u;
+			mask ^= 1u << 27u;
+			mask ^= 1u << 3u;
+			mask ^= 1u << 29u;
+			//mask ^= 1u << opt_var;
+			*(ctx_ptr++) = hash_lookup((owhash & mask) * 0xac2bb7a9 + 19299412415); // Order 34
 		}
 		if (modelEnabled(kModelOrder2)) {
 			*(ctx_ptr++) = o2pos + (owhash & 0xFFFF) * o0size;
@@ -811,18 +854,29 @@ public:
 				size_t extra_len = mm_len - match_model.getMinMatch();
 				cur_preds = &preds[kPredArrays - 1];
 				dcheck(mm_len >= match_model.getMinMatch());
-				
 				size_t bit = decode ? 0 : expected_char == c;
-
 				sse_ctx = 256 * (1 + expected_char);
-				bit = processBit<decode, true>(stream, bit, base_contexts, expected_char ^ 256, 0);
-				
-				const uint64_t after_pos = kStatistics ? stream.tell() : 0;
+#if 1
+				// mixer_base = getProfileMixers(profile) + 256 * expected_char;
+				bit = processBit<decode, kBitTypeLZP>(stream, bit, base_contexts, expected_char ^ 256, 0);
+				// calcMixerBase();
+#else 
+				auto& mdl = lzp_mdl_[mm_len];
+				int p = mdl.getP();
+				p += p == 0;
+				if (decode) {
+					bit = ent.decode(stream, p, kShift);
+				} else {
+					ent.encode(stream, bit, p, kShift);
+				}
+				mdl.update(bit, 7);
+#endif
 				if (kStatistics) {
+					const uint64_t after_pos = kStatistics ? stream.tell() : 0;
 					(bit ? lzp_bit_match_bytes_ : lzp_bit_miss_bytes_) += after_pos - cur_pos; 
 					cur_pos = after_pos;
+					++(bit ? match_hits_ : match_miss_)[mm_len + match_model_order_ - 4];
 				}
-
 				if (bit) {
 					return expected_char;
 				}
@@ -881,6 +935,7 @@ public:
 			if (inputs > idx++) enableModel(kModelMask);
 			if (inputs > idx++) enableModel(kModelWord);
 			if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
+			setMatchModelOrder(10);
 #elif 1
 			if (inputs > idx++) enableModel(kModelOrder4);
 			if (inputs > idx++) enableModel(kModelWord1);
@@ -892,29 +947,37 @@ public:
 			if (inputs > idx++) enableModel(kModelOrder8);
 			if (inputs > idx++) enableModel(kModelOrder0);
 			if (inputs > idx++) enableModel(kModelWord12);
-#endif
 			setMatchModelOrder(10);
+#else
+			if (inputs > idx++) enableModel(kModelOrder0);
+			if (inputs > idx++) enableModel(kModelOrder1);
+			if (inputs > idx++) enableModel(kModelOrder2);
+			if (inputs > idx++) enableModel(kModelOrder3);
+			if (inputs > idx++) enableModel(kModelOrder4);
+			if (inputs > idx++) enableModel(kModelOrder5);
+			if (inputs > idx++) enableModel(kModelOrder6);
+			if (inputs > idx++) enableModel(kModelOrder7);
+			setMatchModelOrder(0);
+#endif
 			// if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
 			current_mask_map_ = text_mask_map_;
 			break;
 		default: // Binary
 			assert(profile == kProfileBinary);
-#if 1
+#if 0
 			if (inputs > idx++) enableModel(kModelOrder0);
-			if (inputs > idx++) enableModel(kModelOrder3);
-			if (inputs > idx++) enableModel(kModelSparse34);
-			if (inputs > idx++) enableModel(kModelMask);
-			if (inputs > idx++) enableModel(kModelOrder2);
-			if (inputs > idx++) enableModel(kModelOrder1);
-			if (inputs > idx++) enableModel(kModelSparse2);
-			if (inputs > idx++) enableModel(kModelSparse4);
 			if (inputs > idx++) enableModel(kModelOrder4);
+			if (inputs > idx++) enableModel(kModelOrder2);
+			if (inputs > idx++) enableModel(kModelOrder6);
+			// if (inputs > idx++) enableModel(kModelOrder1);
+			// if (inputs > idx++) enableModel(kModelOrder3);
 			if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
 #elif 1
 			// Default
 			if (inputs > idx++) enableModel(kModelOrder1);
 			if (inputs > idx++) enableModel(kModelOrder2);
 			if (inputs > idx++) enableModel(kModelSparse34);
+			// if (opt_var && inputs > idx++) enableModel(kModelWordMask);
 			if (inputs > idx++) enableModel(kModelOrder4);
 			if (inputs > idx++) enableModel(kModelSparse23);
 			if (inputs > idx++) enableModel(kModelMask);
@@ -968,8 +1031,8 @@ public:
 		owhash = (owhash << 8) | static_cast<byte>(c);
 	}
 
-	void compress(Stream* in_stream, Stream* out_stream);
-	void decompress(Stream* in_stream, Stream* out_stream);	
+	virtual void compress(Stream* in_stream, Stream* out_stream);
+	virtual void decompress(Stream* in_stream, Stream* out_stream);
 };
 
 #endif

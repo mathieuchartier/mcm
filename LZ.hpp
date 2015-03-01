@@ -25,8 +25,11 @@
 #define _LZ_HPP_
 
 #include "CyclicBuffer.hpp"
+#include "Log.hpp"
+#include "Mixer.hpp"
 #include "Model.hpp"
 #include "Range.hpp"
+#include "StateMap.hpp"
 
 class Match {
 public:
@@ -123,6 +126,101 @@ class MemoryLZ : public MemoryCompressor {
 public:
 	// Assumes 8 bytes buffer overrun possible per run.
 	size_t getMatchLen(byte* m1, byte* m2, byte* limit1);
+};
+
+class CMRolz : public Compressor {
+	// SS table
+	static const uint32_t kShift = 12;
+	static const int kMaxValue = 1 << kShift;
+	static const int kMinST = -kMaxValue / 2;
+	static const int kMaxST = kMaxValue / 2;
+	typedef ss_table<short, kMaxValue, kMinST, kMaxST, 8> SSTable;
+	typedef fastBitModel<int, kShift, 9, 30> StationaryModel;
+
+	struct Entry {
+		void set(uint32_t pos, uint32_t hash) {
+			pos_ = pos;
+			hash_ = hash;
+		}
+		uint32_t pos_;
+		uint32_t hash_;
+	};
+
+	static const size_t kMinMatch = 4;
+	static const size_t kNumberRolzEntries = 256;
+	CyclicDeque<uint8_t> lookahead_;
+	CyclicBuffer<uint8_t> buffer_;
+	Entry entries_[256][kNumberRolzEntries];
+	MTF<uint8_t> mtf_[256];
+	// CM
+	typedef Mixer<int, 2, 17, 11> CMMixer;
+	std::vector<CMMixer> mixers_;
+	static const uint32_t kNumStates = 256;
+	StationaryModel probs_[2][kNumStates];
+	uint8_t state_trans_[kNumStates][2];
+	uint8_t order1_[256 * 256];
+	uint8_t order2_[256 * 256 * 256];
+	uint32_t owhash_;
+	// Range coder.
+	Range7 ent_;
+	SSTable table_;
+	forceinline uint32_t hashFunc(uint32_t a, uint32_t b) const {
+		b += a;
+		b += rotate_left(b, 11);
+		return b ^ (b >> 6);
+	}
+
+private:
+	template <const bool decode, typename TStream>
+	uint32_t processByte(TStream& stream, uint8_t* ctx1, uint8_t* ctx2, uint32_t c = 0) {
+		if (!decode) {
+			c <<= 24;
+		}
+		size_t o0 = 1;
+		while ((o0 & 256) == 0) {
+			size_t bit = processBit<decode>(stream, decode ? 0 : c >> 31, o0, ctx1, ctx2);
+			o0 = o0 * 2 + bit;
+			c <<= 1;
+		}
+		return o0 ^ 256;
+	}
+	forceinline byte nextState(uint8_t state, uint32_t bit, uint32_t ctx) {
+		probs_[ctx][state].update(bit, 9);
+		return state_trans_[state][bit];
+	}
+	
+	forceinline int getP(uint8_t state, uint32_t ctx) const {
+		return table_.st(probs_[ctx][state].getP());
+	}
+	template <const bool decode, typename TStream>
+	size_t processBit(TStream& stream, size_t bit, size_t o0, uint8_t* ctx1, uint8_t* ctx2) {
+		auto s0 = ctx1[o0];
+		int p0 = getP(s0, 0);
+		auto s1 = ctx2[o0];
+		int p1 = getP(s1, 1);
+		auto* const cur_mixer = &mixers_[o0];
+		int stp = cur_mixer->p(9, p0, p1);
+		int p = table_.sq(stp); // Mix probabilities.
+		if (decode) { 
+			bit = ent_.getDecodedBit(p, kShift);
+		}
+		dcheck(bit < 2);
+		const bool ret = cur_mixer->update(p, bit, kShift, 28, 1, p0, p1);
+		if (true || ret) {
+			ctx1[o0] = nextState(s0, bit, 0);
+			ctx2[o0] = nextState(s1, bit, 1);
+		}
+		if (decode) {
+			ent_.Normalize(stream);
+		} else {
+			ent_.encode(stream, bit, p, kShift);
+		}
+		return bit;
+	}
+public:
+	void init();
+	virtual void compress(Stream* in_stream, Stream* out_stream);
+	virtual void decompress(Stream* in_stream, Stream* out_stream);
 };
 
 // variable order rolz.

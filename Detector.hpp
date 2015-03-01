@@ -89,10 +89,11 @@ public:
 		}
 		size_t write(uint8_t* ptr) {
 			const auto* orig_ptr = ptr;
-			const auto length_bytes = calculateLengthBytes(length_);
+			size_t enc_len = length_ - 1;
+			const auto length_bytes = calculateLengthBytes(enc_len);
 			*(ptr++) = static_cast<uint8_t>(profile_) | ((length_bytes - 1) << kLengthBytesShift);
 			for (size_t i = 0; i < length_bytes; ++i) {
-				*(ptr++) = static_cast<uint8_t>(length_ >> (i * 8));
+				*(ptr++) = static_cast<uint8_t>(enc_len >> (i * 8));
 			}
 			return ptr - orig_ptr;
 		}
@@ -105,6 +106,7 @@ public:
 			for (size_t i = 0; i < length_bytes; ++i) {
 				length_ |= static_cast<uint32_t>(*(ptr++)) << (i * 8);
 			}
+			++length_;
 			return ptr - orig_ptr;
 		}
 		Profile profile() const {
@@ -126,11 +128,25 @@ public:
 		uint32_t length_;
 	};
 
+	static std::string profileToString(Profile profile) {
+		switch (profile) {
+		case kProfileBinary: return "binary";
+		case kProfileText: return "text";
+		}
+		return "unknown";
+	}
+
 	// std::vector<DetectedBlock> detected_blocks_;
 	DetectedBlock current_block_;
 
 	// Detected but not already read.
 	DetectedBlock detected_block_;
+
+	// Statistics
+	uint64_t num_blocks_[kProfileCount];
+	uint64_t num_bytes_[kProfileCount];
+	uint64_t overhead_bytes_;
+	uint64_t small_len_;
 public:
 
 	Detector(Stream* stream) : stream_(stream), opt_var_(0) {
@@ -142,6 +158,11 @@ public:
 	}
 
 	void init() {
+		overhead_bytes_ = 0;
+		small_len_ = 0;
+		for (size_t i = 0; i < kProfileCount; ++i) {
+			num_blocks_[i] = num_bytes_[i] = 0;
+		}
 		out_buffer_pos_ = out_buffer_size_ = 0;
 		for (auto& b : is_forbidden) b = false;
 
@@ -155,7 +176,7 @@ public:
 		};
 		for (auto c : forbidden_arr) is_forbidden[c] = true;
 		
-		buffer_.resize(64 * KB);
+		buffer_.resize(256 * KB);
 		// Exe pattern
 		byte p[] = {0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0xFF, 0xFF,};
 		exe_pattern.clear();
@@ -231,6 +252,9 @@ public:
 
 	int get(Profile& profile) {
 		// Profile can't extend past the end of the buffer.
+		if (false && current_block_.length() == 0) {
+			current_block_ = detectBlock();
+		}
 		if (current_block_.length() > 0) {
 			current_block_.pop();
 			profile = current_block_.profile();
@@ -243,6 +267,7 @@ public:
 			if (++out_buffer_pos_ == out_buffer_size_) {
 				current_block_ = detected_block_;
 			}
+			overhead_bytes_ += out_buffer_size_;
 			profile = kProfileBinary;
 			return out_buffer_[out_buffer_pos_  - 1];
 		} 
@@ -251,10 +276,21 @@ public:
 			return EOF;
 		}
 		detected_block_ = detectBlock();
+		++num_blocks_[detected_block_.profile()];
+		num_bytes_[detected_block_.profile()] += detected_block_.length();
+		if (detected_block_.length() < 64) ++small_len_;
 		out_buffer_size_ = detected_block_.write(&out_buffer_[0]);
 		profile = kProfileBinary;
 		out_buffer_pos_ = 1;
 		return out_buffer_[0];
+	}
+
+	void dumpInfo() {
+		std::cout << "Detector overhead " << formatNumber(overhead_bytes_) << " small=" << small_len_ <<std::endl;
+		for (size_t i = 0; i < kProfileCount; ++i) {
+			std::cout << profileToString(static_cast<Profile>(i)) << "("
+				<< formatNumber(num_blocks_[i]) << ") : " << formatNumber(num_bytes_[i]) << std::endl;
+		}
 	}
 
 	DetectedBlock detectBlock() {
@@ -267,6 +303,7 @@ public:
 			return DetectedBlock(kProfileText, static_cast<uint32_t>(buffer_.size()));
 		}
 
+		// return DetectedBlock(kProfileText, buffer_size);
 		size_t binary_len = 0;
 		while (binary_len < buffer_size) {
 			UTF8Decoder<true> decoder;
@@ -279,7 +316,7 @@ public:
 				}
 				++text_len;
 			}
-			if (text_len > 28) {
+			if (text_len > 146) {
 				if (binary_len == 0) {
 					return DetectedBlock(kProfileText, text_len);
 				} else {
