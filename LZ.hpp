@@ -146,7 +146,8 @@ class CMRolz : public Compressor {
 		uint32_t hash_;
 	};
 
-	static const size_t kMinMatch = 4;
+	static const size_t kMinMatch = 6;
+	static const size_t kMaxMatch = 255;
 	static const size_t kNumberRolzEntries = 256;
 	CyclicDeque<uint8_t> lookahead_;
 	CyclicBuffer<uint8_t> buffer_;
@@ -160,6 +161,10 @@ class CMRolz : public Compressor {
 	uint8_t state_trans_[kNumStates][2];
 	uint8_t order1_[256 * 256];
 	uint8_t order2_[256 * 256 * 256];
+	uint8_t order1p_[256 * 256];
+	uint8_t order2p_[256 * 256 * 256];
+	uint8_t order1l_[256 * 256];
+	uint8_t order2l_[256 * 256 * 256];
 	uint32_t owhash_;
 	// Range coder.
 	Range7 ent_;
@@ -206,7 +211,7 @@ private:
 		}
 		dcheck(bit < 2);
 		const bool ret = cur_mixer->update(p, bit, kShift, 28, 1, p0, p1);
-		if (true || ret) {
+		if (ret) {
 			ctx1[o0] = nextState(s0, bit, 0);
 			ctx2[o0] = nextState(s1, bit, 1);
 		}

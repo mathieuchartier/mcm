@@ -820,6 +820,10 @@ void CMRolz::init() {
 	};
 	for (auto& c : order1_) c = 0;
 	for (auto& c : order2_) c = 0;
+	for (auto& c : order1p_) c = 0;
+	for (auto& c : order2p_) c = 0;
+	for (auto& c : order1l_) c = 0;
+	for (auto& c : order2l_) c = 0;
 	for (uint32_t i = 0; i < kNumStates; ++i) {
 		for (uint32_t j = 0; j < 2; ++j) {
 			state_trans_[i][j] = sm.getTransition(i, j);
@@ -843,7 +847,7 @@ void CMRolz::compress(Stream* in_stream, Stream* out_stream) {
 			if (c == EOF) break;
 			lookahead_.push_back(static_cast<uint8_t>(c));
 		}
-		if (false && lookahead_.size() >= kMinMatch) {
+		if (lookahead_.size() >= kMinMatch) {
 			uint32_t h = 0x987654321;
 			for (size_t order = 0; order < kMinMatch; ++order) {
 				h = hashFunc(lookahead_[order], h);
@@ -857,7 +861,7 @@ void CMRolz::compress(Stream* in_stream, Stream* out_stream) {
 					uint32_t pos = e.pos_;
 					// Check the match.
 					size_t match_len = 0;
-					while (match_len < lookahead_.size()) {
+					while (match_len < lookahead_.size() && match_len < kMaxMatch) {
 						if (buffer_[pos + match_len] != lookahead_[match_len]) break;
 						++match_len;
 					}
@@ -868,6 +872,9 @@ void CMRolz::compress(Stream* in_stream, Stream* out_stream) {
 				}
 			}
 			if (best_len >= kMinMatch) {
+				processBit<false>(sout, 0, 0, order1_ + (owhash_ & 0xFF) * 256, order2_ + (owhash_ & 0xFFFF) * 256); 
+				processByte<false>(sout, order1p_ + (owhash_ & 0xFF) * 256, order2p_ + (owhash_ & 0xFFFF) * 256, best_idx);
+				processByte<false>(sout, order1l_ + (owhash_ & 0xFF) * 256, order2l_ + (owhash_ & 0xFFFF) * 256, best_len - kMinMatch);
 				entries_[ctx][best_idx].pos_ = buffer_.getPos();
 				size_t mtf_idx = mtf_[ctx].find(best_idx);
 				mtf_[ctx].moveToFront(mtf_idx);
@@ -887,9 +894,8 @@ void CMRolz::compress(Stream* in_stream, Stream* out_stream) {
 			break;
 		}
 		auto c = lookahead_.front();
-		auto new_c =
-			processByte<false>(sout, order1_ + (owhash_ & 0xFF) * 256, order2_ + (owhash_ & 0xFFFF) * 256, c);
-		dcheck(c == new_c);
+		processBit<false>(sout, 1, 0, order1_ + (owhash_ & 0xFF) * 256, order2_ + (owhash_ & 0xFFFF) * 256); 
+		processByte<false>(sout, order1_ + (owhash_ & 0xFF) * 256, order2_ + (owhash_ & 0xFFFF) * 256, c);
 		buffer_.push(c);
 		owhash_ = (owhash_ << 8) | c;
 		lookahead_.pop_front();
