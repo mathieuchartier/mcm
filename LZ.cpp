@@ -151,7 +151,6 @@ public:
 		uint32_t code = sin.read();
 		uint32_t prev_char = code;
 		uint32_t ctx_char = 0, last_char = code;
-		ProgressMeter meter;
 		for (;;) {
 			uint32_t c = sin.read();
 			if (c == EOF) break;
@@ -170,7 +169,6 @@ public:
 				}
 				last_char = code = c;
 			}
-			meter.addBytePrint(sout.getTotal());
 		}
 		writeCode(sout, code, dict.getCodeCount());
 		if (use_range) {
@@ -189,7 +187,6 @@ public:
 		if (use_range) {
 			ent.initDecoder(sin);
 		}
-		ProgressMeter meter(false);
 		uint32_t prev_code = readCode(sin, 256);
 		if (!sin.eof()) {
 			sout.write(prev_code);
@@ -212,12 +209,10 @@ public:
 				buffer[bpos++] = (byte)first_char;
 				while (bpos) {
 					sout.write(buffer[--bpos]);
-					meter.addBytePrint(sin.getTotal());
 				}
 
 				if (code == limit) {
 					sout.write(first_char);
-					meter.addBytePrint(sin.getTotal());
 					dict.add((prev_code << 8) | first_char);
 				} else {
 					if (limit < dict_size) {
@@ -280,7 +275,6 @@ class RLZW : public LZW<true> {
 		uint32_t prev_char = code;
 		uint32_t ctx_char = 0, last_char = code;
 		cur_dict = &dict[0];
-		ProgressMeter meter;
 		for (;;) {
 			uint32_t c = sin.read();
 			if (c == EOF) break;
@@ -300,7 +294,6 @@ class RLZW : public LZW<true> {
 				//cur_dict = &dict[last_char];
 				last_char = code = c;
 			}
-			meter.addBytePrint(sout.getTotal());
 		}
 		ent.encodeDirect(sout, code, cur_dict->getCodeCount());
 		ent.flush(sout);
@@ -316,7 +309,6 @@ class RLZW : public LZW<true> {
 		}
 		init();
 		ent.initDecoder(sin);
-		ProgressMeter meter(false);
 		uint32_t prev_code = 0;
 		cur_dict = &dict[0];
 		for (;;) {
@@ -345,12 +337,10 @@ class RLZW : public LZW<true> {
 			buffer[bpos++] = (byte)first_char;
 			while (bpos) {
 				sout.write(buffer[--bpos]);
-				meter.addBytePrint(sin.getTotal());
 			}
 
 			if (code == limit) {
 				sout.write(first_char);
-				meter.addBytePrint(sin.getTotal());
 				cur_dict->add((prev_code << 8) | first_char);
 				//cur_dict = &dict[first_char];
 			} else {

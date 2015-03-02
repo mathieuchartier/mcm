@@ -9,6 +9,7 @@ bool fileExists(const char* name) {
     return fin.good();
 }
 
+
 std::string prettySize(uint64_t size) {
 	uint64_t units;
 	const char* name;
@@ -94,4 +95,18 @@ std::string trimExt(const std::string& str) {
 		start = std::max(start, pos + 1);
 	}
 	return str.substr(static_cast<uint32_t>(start));
+}
+
+#ifdef WIN32
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
+void sleep(size_t ms) {
+#ifdef WIN32
+Sleep(ms);
+#else
+usleep(ms * 1000);
+#endif
 }

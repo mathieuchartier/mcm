@@ -388,5 +388,6 @@ std::vector<byte> randomArray(size_t size);
 uint64_t computeRate(uint64_t size, uint64_t delta_time);
 std::vector<byte> loadFile(const std::string& name, uint32_t max_size = 0xFFFFFFF);
 std::string trimExt(const std::string& str);
+void sleep(size_t ms);
 
 #endif

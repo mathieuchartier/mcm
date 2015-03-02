@@ -29,6 +29,7 @@
 #include <set>
 
 #include "Compressor.hpp"
+#include "ProgressMeter.hpp"
 #include "Range.hpp"
 
 class Huffman {

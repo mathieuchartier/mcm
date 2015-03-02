@@ -37,6 +37,7 @@
 #include "File.hpp"
 #include "Huffman.hpp"
 #include "LZ.hpp"
+#include "ProgressMeter.hpp"
 #include "Tests.hpp"
 #include "TurboCM.hpp"
 #include "X86Binary.hpp"
@@ -324,12 +325,14 @@ void decompress(Stream* in, Stream* out) {
 	}
 	Archive::Algorithm algo;
 	algo.read(in);
+	ProgressThread thr(out, in, false);
 	DefaultFilter f(out);
 	auto start = clock();
 	std::unique_ptr<Compressor> comp(algo.createCompressor());
 	comp->decompress(in, &f);
 	f.flush();
 	auto time = clock() - start;
+	thr.done();
 	std::cout << std::endl << "DeCompression took " << clockToSeconds(time) << "s" << std::endl;
 }
 
@@ -459,9 +462,9 @@ int main(int argc, char* argv[]) {
 					continue;
 				}
 				{
-					ProgressStream rms(&fin, &fout);
-					DefaultFilter f(&rms);
+					DefaultFilter f(&fin);
 					f.setOpt(opt_var);
+					ProgressThread thr(&fin, &fout);
 					comp->compress(&f, &fout);
 					f.dumpInfo();
 				}
@@ -489,8 +492,8 @@ int main(int argc, char* argv[]) {
 
 			std::unique_ptr<Compressor> comp(algorithm.createCompressor());
 			{
-				ProgressStream rms(&fin, &fout);
-				DefaultFilter f(&rms);
+				DefaultFilter f(&fin);
+				ProgressThread thr(&fin, &fout);
 				comp->compress(&f, &fout);
 				f.dumpInfo();
 			}
@@ -512,8 +515,7 @@ int main(int argc, char* argv[]) {
 			
 				std::cout << "Decompresing & verifying file" << std::endl;		
 				VerifyStream verifyStream(in_file);
-				ProgressStream rms(&fin, &verifyStream, false);
-				decompress(&fin, &rms);
+				decompress(&fin, &verifyStream);
 				verifyStream.summary();
 				fin.close();
 			}
@@ -554,8 +556,7 @@ int main(int argc, char* argv[]) {
 		}
 		printHeader();
 		std::cout << "Decompresing file " << in_file << std::endl;
-		ProgressStream rms(&fin, &fout, false);
-		decompress(&fin, &rms);
+		decompress(&fin, &fout);
 		fin.close();
 		fout.close();
 		// Decompress the single file in the archive to the output out.
