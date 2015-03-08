@@ -387,7 +387,8 @@ public:
 // Detector analyzer, analyze a whole stream.
 class Analyzer {
 public:
-	std::vector<Detector::DetectedBlock> blocks_;
+	typedef std::vector<Detector::DetectedBlock> Blocks;
+
 	void analyze(Stream* stream) {
 		Detector detector(stream);
 		detector.init();
@@ -434,6 +435,12 @@ public:
 			}
 		}
 	}
+	Blocks& getBlocks() {
+		return blocks_;
+	}
+
+private:
+ 	Blocks blocks_;
 };
 
 #endif

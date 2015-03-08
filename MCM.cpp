@@ -336,13 +336,17 @@ void decompress(Stream* in, Stream* out) {
 	std::cout << std::endl << "DeCompression took " << clockToSeconds(time) << "s" << std::endl;
 }
 
-void compress(Compressor* comp, Stream* in, Stream* out, size_t opt_var = 0) {
+void compress(Compressor* comp, File* in, Stream* out, size_t opt_var = 0) {
 	ProgressThread thr(in, out);
 	Analyzer analyzer;
+	// Analyze each file.
 	std::cout << "Analyzing" << std::endl;
 	analyzer.analyze(in);
 	std::cout << std::endl;
 	analyzer.dump();
+	// thr.done();
+	auto& blocks = analyzer.getBlocks();
+	// Compress each stream type.
 	std::cout << "Compressing" << std::endl;
 	in->seek(0);
 	DefaultFilter f(in);
@@ -449,8 +453,8 @@ int main(int argc, char* argv[]) {
 		printHeader();
 
 		int err = 0;
-		ReadFileStream fin;
-		WriteFileStream fout;
+		File fin;
+		File fout;
 		auto in_file = options.files.back().getName();
 		auto out_file = options.archive_file.getName();
 
@@ -484,7 +488,7 @@ int main(int argc, char* argv[]) {
 					best_var = opt_var;
 				}
 				std::cout << "opt_var=" << opt_var << " best=" << best_var << "(" << formatNumber(best_size) << ") "
-					<< formatNumber(fin.getCount()) << "->" << formatNumber(size) << " took " << std::setprecision(3)
+					<< formatNumber(fin.tell()) << "->" << formatNumber(size) << " took " << std::setprecision(3)
 					<< clockToSeconds(time) << "s" << std::endl;
 			}
 		} else {
@@ -502,10 +506,10 @@ int main(int argc, char* argv[]) {
 			std::unique_ptr<Compressor> comp(algorithm.createCompressor());
 			compress(comp.get(), &fin, &fout);
 			clock_t time = clock() - start;
-			std::cout << "Compressing " << formatNumber(fin.getCount()) << "->" << formatNumber(fout.getCount())
+			std::cout << "Compressing " << formatNumber(fin.tell()) << "->" << formatNumber(fout.tell())
 				<< " took " << std::setprecision(3) << clockToSeconds(time) << "s"
-				<< " bpc " << double(fout.getCount()) * 8.0 / double(fin.getCount()) << " bpc" << std::endl;
-			std::cout << "Avg rate: " << std::setprecision(3) << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fin.getCount()) << " ns/B" << std::endl;
+				<< " bpc " << double(fout.tell()) * 8.0 / double(fin.tell()) << " bpc" << std::endl;
+			std::cout << "Avg rate: " << std::setprecision(3) << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fin.tell()) << " ns/B" << std::endl;
 
 			fout.close();
 			fin.close();
@@ -547,8 +551,8 @@ int main(int argc, char* argv[]) {
 	case Options::kModeDecompress: {
 		auto in_file = options.archive_file.getName();
 		auto out_file = options.files.back().getName();
-		ReadFileStream fin;
-		WriteFileStream fout;
+		File fin;
+		File fout;
 		int err = 0;
 		if (err = fin.open(in_file, std::ios_base::in | std::ios_base::binary)) {
 			std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;

@@ -75,7 +75,7 @@ inline std::vector<FileInfo> EnumerateFiles(const std::string& dir) {
 	return ret;
 }
 
-class File {
+class File : public Stream {
 protected:
 	std::mutex lock;
 	uint64_t offset; // Current offset in the file.
@@ -91,16 +91,16 @@ public:
 	}
 
 	// Not thread safe.
-	forceinline size_t write(const void* bytes, size_t count) {
+	void write(const uint8_t* bytes, size_t count) {
 		size_t ret = fwrite(bytes, 1, count, handle);
 		offset += ret;
-		return ret;
+		check(ret == count);
 	}
 
 	// Not thread safe.
-	forceinline int put(byte c) {
+	forceinline void put(int c) {
 		++offset;
-		return fputc(static_cast<int>(c), handle);
+		fputc(c, handle);
 	}
 
 	int close() {
@@ -146,23 +146,26 @@ public:
 	}
 
 	// Not thread safe.
-	forceinline size_t read(void* buffer, size_t bytes) {
+	size_t read(uint8_t* buffer, size_t bytes) {
 		size_t ret = fread(buffer, 1, bytes, handle);
 		offset += ret;
 		return ret;
 	}
 
 	// Not thread safe.
-	forceinline int get() {
+	int get() {
 		++offset;
 		return fgetc(handle);
 	}
 
-	forceinline int64_t tell() const {
+	uint64_t tell() const {
 		return offset;
 	}
 
-	forceinline int seek(int64_t pos, int origin = SEEK_SET) {
+	void seek(uint64_t pos) {
+		seek(static_cast<uint64_t>(pos), SEEK_SET);
+	}
+	int seek(int64_t pos, int origin) {
 		if (origin == SEEK_SET && pos == offset) {
 			return 0; // No need to do anything.
 		}
@@ -184,48 +187,39 @@ public:
 
 	// Atomic read.
 	// TODO: fread already acquires a lock.
-	forceinline size_t aread(uint64_t pos, void* buffer, size_t bytes) {
-		lock.lock();
+	forceinline size_t aread(uint64_t pos, uint8_t* buffer, size_t bytes) {
+		std::unique_lock<std::mutex> mu(lock);
 		seek(pos); // Only seeks if necessary.
-		size_t ret = read(buffer, bytes);
-		lock.unlock();
-		return ret;
+		return read(buffer, bytes);
 	}
 
 	// Atomic write.
 	// TODO: fwrite already acquires a lock.
-	forceinline size_t awrite(uint64_t pos, const void* buffer, size_t bytes) {
-		lock.lock();
+	forceinline void awrite(uint64_t pos, const uint8_t* buffer, size_t bytes) {
+		std::unique_lock<std::mutex> mu(lock);
 		seek(pos); // Only seeks if necessary.
-		size_t ret = write(buffer, bytes);
-		lock.unlock();
-		return ret;
+		write(buffer, bytes);
 	}
 
 	// Atomic get (slow).
 	forceinline int aget(uint64_t pos) {
-		lock.lock();
+		std::unique_lock<std::mutex> mu(lock);
 		seek(pos); // Only seeks if necessary.
-		int ret = get();
-		lock.unlock();
-		return ret;
+		return get();
 	}
 
 	// Atomic write (slow).
-	forceinline int aput(uint64_t pos, byte c) {
-		lock.lock();
+	forceinline void aput(uint64_t pos, byte c) {
+		std::unique_lock<std::mutex> mu(lock);
 		seek(pos); // Only seeks if necessary.
-		int ret = put(c);
-		lock.unlock();
-		return ret;
+		put(c);
 	}
 
 	forceinline uint64_t length() {
-		lock.lock();
+		std::unique_lock<std::mutex> mu(lock);
 		seek(0, SEEK_END);
 		uint64_t length = tell();
 		seek(0, SEEK_SET);
-		lock.unlock();
 		return length;
 	}
 };
@@ -259,173 +253,6 @@ public:
 	}
 	uint64_t getOffset() const {
 		return offset_;
-	}
-};
-
-class OffsetFileWriteStream : public WriteStream {
-	File* file;
-	uint64_t offset;
-
-public:
-	OffsetFileWriteStream(File* file) : file(file) {
-		offset = static_cast<uint64_t>(file->tell());
-	}
-
-	File* getFile() {
-		return file;
-	}
-
-	uint64_t tell() const {
-		return offset;
-	}
-
-	virtual void put(int c) {
-		file->aput(offset, c);
-		++offset;
-	}
-
-    virtual void write(const byte* buf, uint32_t n) {
-		offset += file->awrite(offset, buf, n);
-	}
-
-	void seek(uint64_t pos) {
-		offset = pos;
-	}
-
-	virtual ~OffsetFileWriteStream() {
-	}
-};
-
-class OffsetFileReadStream : public ReadStream {
-public:
-	OffsetFileReadStream(File* file = nullptr) : file(file), offset(0) {
-	}
-
-	void setFile(File* newFile) {
-		file = newFile;
-		offset = 0;
-	}
-
-	File* getFile() {
-		return file;
-	}
-
-	uint64_t getOffset() const {
-		return offset;
-	}
-
-	virtual int get() {
-		return file->aget(offset++);
-	}
-
-    virtual size_t read(byte* buf, size_t n) {
-		size_t count = file->aread(offset, buf, n);
-		offset += count;
-		return count;
-	}
-
-	void seek(uint64_t pos) {
-		offset = pos;
-	}
-
-	virtual ~OffsetFileReadStream() {
-	}
-
-private:
-	File* file;
-	uint64_t offset;
-};
-
-class WriteFileStream : public WriteStream {
-	File file;
-	uint64_t count;
-public:
-	WriteFileStream() : count(0) {
-	}
-
-	int open(const std::string& fileName, std::ios_base::open_mode mode = std::ios_base::binary) {
-		count = 0;
-		return file.open(fileName, mode | std::ios_base::out);
-	}
-	
-	File& getFile() {
-		return file;
-	}
-
-	void close() {
-		file.close();
-	}
-
-	uint64_t getCount() const {
-		return count;
-	}
-
-	virtual void put(int c) {
-		++count;
-		file.put(c);
-	}
-
-    virtual void write(const byte* buf, size_t n) {
-		count += n;
-		file.write(buf, n);
-	}
-
-	virtual uint64_t tell() const {
-		return count;
-	}
-
-	virtual ~WriteFileStream() {
-	}
-};
-
-class ReadFileStream : public ReadStream {
-	File file;
-	uint64_t count;
-public:
-	ReadFileStream() : count(0) {
-	}
-
-	int open(const std::string& fileName, std::ios_base::open_mode mode = std::ios_base::binary) {
-		count = 0;
-		return file.open(fileName, mode | std::ios_base::in);
-	}
-
-	File& getFile() {
-		return file;
-	}
-
-	void close() {
-		file.close();
-	}
-
-	uint64_t getCount() const {
-		return count;
-	}
-
-	void seek(uint64_t pos) {
-		file.seek(pos, SEEK_SET);
-		count = pos;
-	}
-
-    virtual int get() {
-		int c = file.get();
-		if (c != EOF) {
-			++count;
-		}
-		return c;
-	}
-
-    virtual size_t read(byte* buf, size_t n) {
-		size_t ret = file.read(buf, n);
-		count += ret;
-		return ret;
-	}
-
-	virtual uint64_t tell() const {
-		return count;
-	}
-
-    virtual ~ReadFileStream() {
 	}
 };
 
@@ -583,7 +410,7 @@ private:
 			const size_t max_c = std::min(n, cur_end_ - cur_pos_);
 			size_t count;
 			if (w) {
-				count = cur_file_->awrite(cur_pos_, buf, max_c);
+				cur_file_->awrite(cur_pos_, buf, max_c);
 			} else {
 				count = cur_file_->aread(cur_pos_, buf, max_c);
 			}

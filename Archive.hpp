@@ -258,7 +258,7 @@ public:
 				return false;
 			}
 			File* file = cached_file_->getFile();
-			file_read_stream_.setFile(file);
+			// file_read_stream_.setFile(file);
 			remain_ = file->length();
 			offset_ = 0;
 			return true;
@@ -273,7 +273,7 @@ public:
 			}
 			--remain_;
 			offset_++;
-			return file_read_stream_.get();
+			return 0; // file_read_stream_.get();
 		}
 
 		virtual size_t read(byte* buf, size_t n) {
@@ -284,7 +284,7 @@ public:
 						goto END_OF_FILE; // No more files.
 					}
 				}
-				size_t read_count = file_read_stream_.read(buf, std::min(static_cast<size_t>(remain_), n));
+				size_t read_count = 0; // file_read_stream_.read(buf, std::min(static_cast<size_t>(remain_), n));
 				if (!read_count) {
 					break;
 				}
@@ -309,7 +309,7 @@ public:
 				if (pos < fseg.getLength()) {
 					openFile(file_index_);
 					assert(cached_file_ != nullptr);
-					file_read_stream_.seek(fseg.getOffset() + pos);
+					// file_read_stream_.seek(fseg.getOffset() + pos);
 					break;
 				}
 				pos -= fseg.getLength();
@@ -323,7 +323,7 @@ public:
 		uint32_t file_index_;
 		uint64_t remain_;
 		uint64_t offset_;
-		OffsetFileReadStream file_read_stream_;
+		// OffsetFileReadStream file_read_stream_;
 		FileManager::CachedFile* cached_file_;
 	};
 
@@ -361,9 +361,9 @@ public:
 	void open(const FilePath& file_path, bool overwrite, std::ios_base::open_mode mode = 0);
 	Job* startCompressionJob();
 	// OffsetFileReadStream* compressFiles(uint32_t method, OffsetFileWriteStream* out_stream, FileHeaderBlock& block, uint32_t mem);
-	static void compressBlock(OffsetFileWriteStream* out_stream, uint32_t method, ReadStream* stream, uint32_t mem);
+	// static void compressBlock(OffsetFileWriteStream* out_stream, uint32_t method, ReadStream* stream, uint32_t mem);
 	// Compress some files.
-	void compressFiles(OffsetFileWriteStream* out_stream, uint32_t method, FileSegment::Vector* block, uint32_t mem);
+	// void compressFiles(OffsetFileWriteStream* out_stream, uint32_t method, FileSegment::Vector* block, uint32_t mem);
 	void compressFiles(uint32_t method, FileSegment::Vector* block, uint32_t mem);
 	void Dump(std::ostream& os);
 

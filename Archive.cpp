@@ -203,11 +203,11 @@ void Archive::FSegment::setId(uint32_t id) {
 }
 
 void Archive::FSegment::write(uint64_t pos, File* file) {
-	file->awrite(pos, this, sizeof(*this));
+	// file->awrite(pos, this, sizeof(*this));
 }
 
 void Archive::FSegment::read(uint64_t pos, File* file) {
-	file->aread(pos, this, sizeof(*this));
+	// file->aread(pos, this, sizeof(*this));
 }
 
 Archive::FSegment& Archive::FileSegment::getFSegment() {
@@ -242,7 +242,7 @@ void Archive::addNewFileBlock(const std::vector<FilePath>& files) {
 		file_list->addFilePath(file);
 		std::string name = file.getName();
 		// +1 for null char.
-		getFile().write(&name[0], name.length() + 1);
+		// getFile().write(&name[0], name.length() + 1);
 	}
 }
 
@@ -262,7 +262,8 @@ Archive::Job* Archive::startCompressionJob() {
 	return nullptr;
 }
 
-void Archive::compressBlock(OffsetFileWriteStream* out_stream, uint32_t method, ReadStream* stream, uint32_t /*mem*/) {
+/*
+void Archive::compressBlock(OffsetFileWriteStream* out_stream, uint32_t method, ReadStream* stream, uint32_t) {
 	assert(out_stream != nullptr);
 	Compressor* compressor = CompressorFactories::makeCompressor(method);
 	assert(compressor != nullptr);
@@ -284,7 +285,9 @@ void Archive::compressBlock(OffsetFileWriteStream* out_stream, uint32_t method, 
 	out_stream->write(reinterpret_cast<byte*>(&header), sizeof(header));
 #endif
 }
-	
+*/
+
+	/*
 void Archive::compressFiles(OffsetFileWriteStream* out_stream, uint32_t method, FileSegment::Vector* block, uint32_t mem) {
 	// Start by writing out the header.
 	FListHeader header(FListHeader::kBlockTypeSegment, static_cast<uint64_t>(block->size()));
@@ -347,6 +350,7 @@ std::vector<Archive::FileSegment::Vector> Archive::splitFiles(const std::vector<
 	}
 	return ret;
 }
+*/
 
 Archive::FListHeader::FListHeader(BlockType type, uint64_t count)
 	: type_(type), count_(count), next_block_(0) {
