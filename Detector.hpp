@@ -115,10 +115,13 @@ public:
 		uint32_t length() const {
 			return length_;
 		}
+		void extend(uint32_t len) {
+			length_ += len;
+		}
 		// Remove one character from length.
-		void pop() {
-			assert(length_ > 0);
-			--length_;
+		void pop(uint32_t count = 1) {
+			assert(length_ >= count);
+			length_ -= count;
 		}
 
 	private:
@@ -150,7 +153,6 @@ public:
 public:
 
 	Detector(Stream* stream) : stream_(stream), opt_var_(0) {
-		init();
 	}
 
 	void setOptVar(size_t var) {
@@ -256,11 +258,8 @@ public:
 			current_block_ = detectBlock();
 		}
 		if (current_block_.length() > 0) {
-			current_block_.pop();
 			profile = current_block_.profile();
-			auto ret = buffer_.front();
-			buffer_.pop_front();
-			return ret;
+			return readChar();
 		} 
 		// Still have some header to read?
 		if (out_buffer_pos_ < out_buffer_size_) {
@@ -283,6 +282,26 @@ public:
 		profile = kProfileBinary;
 		out_buffer_pos_ = 1;
 		return out_buffer_[0];
+	}
+
+	// Read char without detection.
+	uint8_t readChar() {
+		current_block_.pop();
+		return popChar();
+	}
+	uint8_t popChar() {
+		auto ret = buffer_.front();
+		buffer_.pop_front();
+		return ret;
+	}
+	size_t read(uint8_t* out, size_t count) {
+		const auto n = std::min(count, buffer_.size());
+		for (size_t i = 0; i < n; ++i) {
+			out[i] = buffer_[i];
+		}
+		buffer_.pop_front(n);
+		current_block_.pop(n);
+		return n;
 	}
 
 	void dumpInfo() {
@@ -363,6 +382,58 @@ public:
 		} 
 	}
 	*/
+};
+
+// Detector analyzer, analyze a whole stream.
+class Analyzer {
+public:
+	std::vector<Detector::DetectedBlock> blocks_;
+	void analyze(Stream* stream) {
+		Detector detector(stream);
+		detector.init();
+		for (;;) {
+			auto block = detector.detectBlock();
+			if (block.profile() == Detector::kProfileEOF) break;
+			for (size_t i = 0; i < block.length(); ++i) {
+				// TODO: Huffman + dictionary.
+				detector.popChar();
+			}
+			const size_t size = blocks_.size();
+			if (size > 0 && blocks_.back().profile() == block.profile()) {
+				// Same type, extend.
+				blocks_.back().extend(block.length());
+			} else {
+				const size_t min_binary_length = 1;
+				// replace <text> <bin> <text> with <text> if |<bin>| < min_binary_length.
+				if (block.profile() == Detector::kProfileText && size >= 2) {
+					auto& b1 = blocks_[size - 1];
+					auto& b2 = blocks_[size - 2];
+					if (b1.profile() == Detector::kProfileBinary &&
+						b2.profile() == Detector::kProfileText && 
+						b1.length() < min_binary_length) {
+						b2.extend(b1.length() + block.length());
+						blocks_.pop_back();
+						continue;
+					}
+				}
+				blocks_.push_back(block);
+			}
+		}
+	}
+	void dump() {
+		uint64_t blocks[Detector::kProfileCount] = { 0 };
+		uint64_t bytes[Detector::kProfileCount] = { 0 };
+		for (auto& b : blocks_) {
+			++blocks[b.profile()];
+			bytes[b.profile()] += b.length();
+		}
+		for (size_t i = 0; i < Detector::kProfileCount; ++i) {
+			if (bytes[i] > 0) {
+				std::cout << Detector::profileToString(static_cast<Detector::Profile>(i))
+					<< " : " << blocks[i] << "(" << prettySize(bytes[i]) << ")" << std::endl;
+			}
+		}
+	}
 };
 
 #endif

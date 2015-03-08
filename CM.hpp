@@ -207,15 +207,12 @@ public:
 	static const uint32_t huffman_len_limit = 16;
 	Huffman huff;
 	
-	// End of block signal.
-	BitModel end_of_block_mdl;
-	CMProfile profile;
-
-	typedef bitContextModel<BitModel, 255> BlockFlagModel;
-	BlockFlagModel block_flag_model;
-
-	typedef bitContextModel<BitModel, (uint32_t)kProfileCount+1> BlockProfileModel;
-	BlockProfileModel block_profile_models[(uint32_t)kProfileCount];
+	// If force profile is true then we dont use a detector.
+	bool force_profile_;
+	// Current profile.
+	CMProfile profile_;
+	// Bytes to process.
+	uint64_t remain_bytes_;
 
 	// Mask model.
 	uint32_t mask_model_;
@@ -302,7 +299,9 @@ public:
 		mem_usage = usage;
 	}
 
-	CM(uint32_t mem = 8, bool lzp_enabled = kUseLZP) : mem_usage(mem), opt_var(0), lzp_enabled_(lzp_enabled) {
+	CM(uint32_t mem = 8, bool lzp_enabled = kUseLZP)
+		: mem_usage(mem), opt_var(0), lzp_enabled_(lzp_enabled), profile_(kProfileBinary), force_profile_(false) {
+		remain_bytes_ = std::numeric_limits<uint64_t>::max();
 	}
 
 	bool setOpt(uint32_t var) {
@@ -374,11 +373,6 @@ public:
 		hash_table = reinterpret_cast<uint8_t*>(hash_storage.getData()); // Here is where the real hash table starts
 
 		buffer.resize((MB / 4) << mem_usage, sizeof(uint32_t));
-
-		// Models.
-		end_of_block_mdl.init();
-		block_flag_model.init();
-		for (auto& m : block_profile_models) m.init();
 
 		// Match model.
 		match_model.resize(buffer.getSize() / 2);
@@ -488,7 +482,7 @@ public:
 			mixer_ctx |= word_model_ctx_map_[word_model.getLength()];
 		}
 		
-		const uint32_t mm_len = match_model.getLength();
+		const size_t mm_len = match_model.getLength();
 		mixer_ctx <<= 2;
 		if (mm_len != 0) {
 			if (word_enabled) {
@@ -507,7 +501,7 @@ public:
 	}
 
 	void calcProbBase() {
-		cur_preds = &preds[static_cast<size_t>(profile)];
+		cur_preds = &preds[static_cast<size_t>(profile_)];
 	}
 
 	forceinline byte nextState(uint8_t state, uint32_t bit, uint32_t ctx) {
@@ -556,7 +550,7 @@ public:
 				s0 = *sp0;
 				p0 = getP(s0, 0);
 			}
-			if (false && kBitType != kBitTypeLZP && profile == kProfileBinary) {
+			if (false && kBitType != kBitTypeLZP && profile_ == kProfileBinary) {
 				p0 += getP(hash_table[s2pos + (owhash & 0xFF00) + ctx], 0);
 				p0 += getP(hash_table[s3pos + ((owhash & 0xFF0000) >> 8) + ctx], 0);
 				p0 += getP(hash_table[s4pos + ((owhash & 0xFF000000) >> 16) + ctx], 0);
@@ -655,7 +649,7 @@ public:
 				match_model.updateCurMdl(1, bit);
 			} else if (mm_l == 0) {
 				if (inputs > 0) *sp0 = nextState(s0, bit, 0);
-				if (false && kBitType != kBitTypeLZP && profile == kProfileBinary) {
+				if (false && kBitType != kBitTypeLZP && profile_ == kProfileBinary) {
 					hash_table[s2pos + (owhash & 0xFF00) + ctx] = nextState(hash_table[s2pos + (owhash & 0xFF00) + ctx], bit, 0);
 					hash_table[s3pos + ((owhash & 0xFF0000) >> 8) + ctx] = nextState(hash_table[s3pos + ((owhash & 0xFF0000) >> 8) + ctx], bit, 0);
 					hash_table[s4pos + ((owhash & 0xFF000000) >> 16) + ctx] = nextState(hash_table[s4pos + ((owhash & 0xFF000000) >> 16) + ctx], bit, 0);
@@ -697,7 +691,6 @@ public:
 
 	template <const bool decode, typename TStream>
 	size_t processNibble(TStream& stream, size_t c, size_t* base_contexts, size_t ctx_add, size_t ctx_add2) {
-		// Maximize performance!
 		uint32_t huff_state = huff.start_state, code = 0;
 		if (!decode) {
 			if (use_huffman) {
@@ -919,13 +912,13 @@ public:
 	}
 
 	void setDataProfile(CMProfile new_profile) {
-		profile = new_profile;
-		cur_profile_mixers_ = getProfileMixers(profile);
+		profile_ = new_profile;
+		cur_profile_mixers_ = getProfileMixers(profile_);
 		mask_model_ = 0;
 		word_model.reset();
 		setEnabledModels(0);
 		size_t idx = 0;
-		switch (profile) {
+		switch (profile_) {
 		case kProfileText: // Text data types (tuned for xml)
 #if 0
 			if (inputs > idx++) enableModel(kModelOrder0);
@@ -963,7 +956,7 @@ public:
 			current_mask_map_ = text_mask_map_;
 			break;
 		default: // Binary
-			assert(profile == kProfileBinary);
+			assert(profile_ == kProfileBinary);
 #if 0
 			if (inputs > idx++) enableModel(kModelOrder0);
 			if (inputs > idx++) enableModel(kModelOrder4);
@@ -1015,7 +1008,7 @@ public:
 		calcProbBase();
 	};
 
-	void update(uint32_t c) {
+	void update(uint32_t c) {;
 		if (modelEnabled(kModelWord1) || modelEnabled(kModelWord2) || modelEnabled(kModelWord12)) {
 			word_model.update(c);
 			if (word_model.getLength() > 2) {

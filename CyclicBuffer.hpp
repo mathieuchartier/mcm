@@ -127,10 +127,10 @@ public:
 	forceinline size_t capacity() const {
 		return this->mask_ + 1;
 	}
-	void pop_front() {
-		dcheck(size_ > 0);
-		++front_pos_;
-		--size_;
+	void pop_front(size_t count = 1) {
+		dcheck(size_ >= count);
+		front_pos_ += count;
+		size_ -= count;
 	}
 	void push_back(T c) {
 		assert(size_ < capacity());

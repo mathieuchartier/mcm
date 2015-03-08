@@ -156,6 +156,7 @@ public:
 	}
 	virtual ~ProgressThread() {
 		done();
+		delete thread_;
 	}
 	void done() {
 		if (!done_) {

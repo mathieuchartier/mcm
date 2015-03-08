@@ -523,6 +523,97 @@ public:
 	} 
 };
 
+// FileSegmentStream is an advanced stream which reads / writes from arbitrary sections from multiple files.
+class FileSegmentStream : public Stream {
+	struct SegmentRange {
+		// 32 bits for reducing memory usage.
+		uint32_t offset_;
+		uint32_t length_;
+	};
+	class FileSegments {
+	public:
+		File* file_;
+		uint64_t base_offset_;
+		uint64_t total_size_;  // Used to optimized seek.
+		std::vector<SegmentRange> ranges_;
+
+		void calculateTotalSize() {
+			total_size_ = 0;
+			for (const auto& seg : ranges_) total_size_ += seg.length_;
+		}
+	};
+
+	FileSegmentStream(std::vector<FileSegments>* segments)
+		: segments_(segments), file_idx_(-1), cur_file_(nullptr)
+		, range_idx_(0), num_ranges_(0), cur_pos_(0), cur_end_(0) {
+	}
+	virtual void put(int c) {
+		const uint8_t b = c;
+		write(&b, 1);
+	}
+	virtual void write(const uint8_t* buf, size_t n) {
+		process<true>(const_cast<uint8_t*>(buf), n);
+	}
+	virtual int get() {
+		uint8_t c;
+		if (!read(&c, 1)) return EOF;
+		return c;
+	}
+	virtual size_t read(uint8_t* buf, size_t n) {
+		return process<false>(buf, n);
+	}
+
+private:
+	std::vector<FileSegments>* const segments_;
+	int file_idx_;
+	File* cur_file_;
+	size_t range_idx_;
+	size_t num_ranges_;
+	uint64_t cur_pos_;
+	uint64_t cur_end_;
+
+	template <bool w>
+	size_t process(uint8_t* buf, size_t n) {
+		const size_t start = n;
+		while (n != 0) {
+			if (cur_pos_ >= cur_end_) {
+				nextRange();
+				if (cur_pos_ >= cur_end_) break;
+			}
+			const size_t max_c = std::min(n, cur_end_ - cur_pos_);
+			size_t count;
+			if (w) {
+				count = cur_file_->awrite(cur_pos_, buf, max_c);
+			} else {
+				count = cur_file_->aread(cur_pos_, buf, max_c);
+			}
+			cur_pos_ += count;
+			n -= count;
+		}
+		return start - n;
+	}
+	void nextRange() {
+		while (cur_pos_ >= cur_end_) {
+			while (range_idx_ >= num_ranges_) {
+				// Out of ranges in current file, go to next file.
+				++file_idx_;
+				if (file_idx_ >= segments_->size()) return;
+				auto* segs = &segments_->operator[](file_idx_);
+				num_ranges_ = segs->ranges_.size();
+				cur_file_ = segs->file_;
+				range_idx_ = 0;
+			}
+			if (range_idx_ < num_ranges_) {
+				auto* segs = &segments_->operator[](file_idx_);
+				auto* range = &segs->ranges_[range_idx_];
+				cur_pos_ = segs->base_offset_ + range->offset_;
+				cur_end_ = cur_pos_ + range->length_;
+				++range_idx_;
+			}
+		}
+	}
+};
+
 class FileManager {
 public:
 	class CachedFile {

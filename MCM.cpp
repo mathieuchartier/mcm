@@ -336,6 +336,21 @@ void decompress(Stream* in, Stream* out) {
 	std::cout << std::endl << "DeCompression took " << clockToSeconds(time) << "s" << std::endl;
 }
 
+void compress(Compressor* comp, Stream* in, Stream* out, size_t opt_var = 0) {
+	ProgressThread thr(in, out);
+	Analyzer analyzer;
+	std::cout << "Analyzing" << std::endl;
+	analyzer.analyze(in);
+	std::cout << std::endl;
+	analyzer.dump();
+	std::cout << "Compressing" << std::endl;
+	in->seek(0);
+	DefaultFilter f(in);
+	f.setOpt(opt_var);
+	comp->compress(&f, out);
+	f.dumpInfo();
+}
+
 int main(int argc, char* argv[]) {
 	CompressorFactories::init();
 	// runAllTests();
@@ -461,13 +476,7 @@ int main(int argc, char* argv[]) {
 				if (!comp->setOpt(opt_var)) {
 					continue;
 				}
-				{
-					DefaultFilter f(&fin);
-					f.setOpt(opt_var);
-					ProgressThread thr(&fin, &fout);
-					comp->compress(&f, &fout);
-					f.dumpInfo();
-				}
+				compress(comp.get(), &fin, &fout, opt_var);
 				clock_t time = clock() - start;
 				const auto size = fout.tell();
 				if (size < best_size) {
@@ -491,12 +500,7 @@ int main(int argc, char* argv[]) {
 			algorithm.write(&fout);
 
 			std::unique_ptr<Compressor> comp(algorithm.createCompressor());
-			{
-				DefaultFilter f(&fin);
-				ProgressThread thr(&fin, &fout);
-				comp->compress(&f, &fout);
-				f.dumpInfo();
-			}
+			compress(comp.get(), &fin, &fout);
 			clock_t time = clock() - start;
 			std::cout << "Compressing " << formatNumber(fin.getCount()) << "->" << formatNumber(fout.getCount())
 				<< " took " << std::setprecision(3) << clockToSeconds(time) << "s"

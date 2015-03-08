@@ -29,26 +29,14 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 	assert(in_stream != nullptr);
 	assert(out_stream != nullptr);
 	Detector detector(in_stream);
-	detector.setOptVar(opt_var);
-	detector.init();
-
-	// Compression profiles.
-	std::vector<uint64_t> profile_counts(static_cast<uint32_t>(Detector::kProfileCount), 0);
-	std::vector<uint64_t> profile_len(static_cast<uint32_t>(Detector::kProfileCount), 0);
-
-// #define SPLIT_TYPES
-#if SPLIT_TYPES
-	std::ofstream fbinary("binary.out", std::ios_base::out | std::ios_base::binary);
-	std::ofstream ftext("text.out", std::ios_base::out | std::ios_base::binary);
-#endif
-
-	// Start by writing out archive header.
+	if (!force_profile_) {
+		detector.setOptVar(opt_var);
+		detector.init();
+	}
 	init();
 	ent.init();
-
-	// TODO: Disable if entropy is too high?
 	if (use_huffman) {
-		clock_t start = clock();
+		const clock_t start = clock();
 		size_t freqs[256] = { 1 };
 		std::cout << "Building huffman tree" << std::endl;
 		/*
@@ -64,47 +52,34 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 		huff.build(tree);	
 		std::cout << "Building huffman tree took: " << clock() - start << " MS" << std::endl;
 	}
-	size_t freqs[Detector::kProfileCount][256] = { 0 };
-	for (;;) {
-		Detector::Profile new_profile;
-		auto c = detector.get(new_profile);
-		if (new_profile == Detector::kProfileEOF) break;
-		auto cm_profile = profileForDetectorProfile(new_profile);
-		if (cm_profile != profile) {
-			setDataProfile(cm_profile);
+	while (remain_bytes_ > 0) {
+		uint32_t c;
+		if (!force_profile_) {
+			Detector::Profile new_profile;
+			c = detector.get(new_profile);
+			if (new_profile == Detector::kProfileEOF) break;
+			auto cm_profile = profileForDetectorProfile(new_profile);
+			if (cm_profile != profile_) {
+				setDataProfile(cm_profile);
+			}
+		} else {
+			c = in_stream->get();
 		}
-#if SPLIT_TYPES
-		if (cm_profile == kProfileBinary)  fbinary.put(c);
-		else ftext.put(c);
-#endif
-		// Initial detection.
 		dcheck(c != EOF);
 		processByte<false>(sout, c);
 		update(c);
-		// profile_len[(uint64_t)block.profile] += block_size;
+		--remain_bytes_;
 	}
 	ent.flush(sout);
-#ifndef _WIN64
-	_mm_empty();
-#endif
-	std::cout << std::endl;
-		
+
 	// TODO: Put in statistics??
 	uint64_t total = 0;
-	for (size_t i = 0; i < kProfileCount; ++i) {
-		auto cnt = profile_counts[i];
-		if (cnt) {
-			std::cout << static_cast<CMProfile>(i) << " : " << cnt << "(" << profile_len[i] / KB << "KB)" << std::endl;
-		}
-		if (false) {
-			Huffman h2;
-			auto* tree = h2.buildTreePackageMerge(freqs[i]);
-			tree->printRatio("Tree");
-			total += tree->getCost() / 8;
-		}
-	}
-	if (false) {
-		std::cout << "Total huffman: " << total << std::endl;
+	if (use_huffman) {
+		Huffman h2;
+		// auto* tree = h2.buildTreePackageMerge(freqs[i]);
+		// tree->printRatio("Tree");
+		// total += tree->getCost() / 8;
+		// std::cout << "Total huffman: " << total << std::endl;
 	}
 
 	if (kStatistics) {
@@ -186,9 +161,10 @@ template <CMType kCMType>
 void CM<kCMType>::decompress(Stream* in_stream, Stream* out_stream) {
 	BufferedStreamReader<4 * KB> sin(in_stream);
 	Detector detector(out_stream);
-	detector.setOptVar(opt_var);
-	detector.init();
-
+	if (!force_profile_) {
+		detector.setOptVar(opt_var);
+		detector.init();
+	}
 	init();
 	ent.initDecoder(sin);
 	if (use_huffman) {
@@ -196,20 +172,29 @@ void CM<kCMType>::decompress(Stream* in_stream, Stream* out_stream) {
 		huff.build(tree);
 		delete tree;
 	}
-	for (;;) {
-		auto new_profile = detector.detect();
-		if (new_profile == Detector::kProfileEOF) {
-			break;
-		}
-		auto cm_profile = profileForDetectorProfile(new_profile);
-		if (cm_profile != profile) {
-			setDataProfile(cm_profile);
+	while (remain_bytes_ > 0) {
+		if (!force_profile_) {
+			auto new_profile = detector.detect();
+			if (new_profile == Detector::kProfileEOF) {
+				break;
+			}
+			auto cm_profile = profileForDetectorProfile(new_profile);
+			if (cm_profile != profile_) {
+				setDataProfile(cm_profile);
+			}
 		}
 		size_t c = processByte<true>(sin);
 		update(c);
-		detector.put(c);
+		if (force_profile_) {
+			out_stream->put(c);
+		} else {
+			detector.put(c);
+		}
+		--remain_bytes_;
 	}
-	detector.flush();
+	if (!force_profile_) {
+		detector.flush();
+	}
 }	
 
 
