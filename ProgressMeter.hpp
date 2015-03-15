@@ -66,10 +66,6 @@ public:
 
 	// Surprisingly expensive to call...
 	void printRatio(uint64_t comp_size, uint64_t in_size, const std::string& extra) const {
-#ifndef _WIN64
-		// Be sure to empty mmx before printing progress meter.
-		_mm_empty();
-#endif
 		const auto ratio = double(comp_size) / in_size;
 		auto cur_time = clock();
 		auto time_delta = cur_time - start;
@@ -77,9 +73,17 @@ public:
 			++time_delta;
 		}
 		const uint32_t rate = uint32_t(double(in_size / KB) / (double(time_delta) / double(CLOCKS_PER_SEC)));
-		std::cout
-			<< in_size / KB << "KB " << (encode ? "->" : "<-") << " "
-			<< comp_size / KB << "KB " << rate << "KB/s ratio: " << std::setprecision(5) << std::fixed << ratio << extra.c_str() << "\t\r" << std::flush;
+		std::cout << in_size / KB << "KB ";
+		if (comp_size > KB) {
+			std::cout << (encode ? "->" : "<-") << " " << comp_size / KB << "KB ";
+		} else {
+			std::cout << ", ";
+		}
+		std::cout << rate << "KB/s";
+		if (comp_size > KB) {
+			std::cout << " ratio: " << std::setprecision(5) << std::fixed << ratio << extra.c_str();
+		}
+		std::cout << "\t\r" << std::flush;
 	}
 
 	forceinline void addBytePrint(uint64_t total, const char* extra = "") {
@@ -150,8 +154,8 @@ private:
 
 class ProgressThread {
 public:
-	ProgressThread(Stream* in_stream, Stream* out_stream, bool encode = true, uintptr_t interval = 250)
-		: done_(false), interval_(interval), in_stream_(in_stream), out_stream_(out_stream), meter_(encode) {
+	ProgressThread(Stream* in_stream, Stream* out_stream, bool encode = true, uint64_t sub_out = 0, uintptr_t interval = 250)
+		: done_(false), interval_(interval), in_stream_(in_stream), out_stream_(out_stream), sub_out_(sub_out), meter_(encode) {
 		thread_ = new std::thread(Callback, this);
 	}
 	virtual ~ProgressThread() {
@@ -169,7 +173,7 @@ public:
 		}
 	}
 	void print() {
-		auto out_c = out_stream_->tell();
+		auto out_c = out_stream_->tell() - sub_out_;
 		auto in_c = in_stream_->tell();
 		if (in_c != 0 && out_c != 0) {
 			meter_.printRatio(out_c, in_c, "");
@@ -178,9 +182,10 @@ public:
 
 private:
 	bool done_;
-	uintptr_t interval_;
+	const uintptr_t interval_;
 	Stream* const in_stream_;
 	Stream* const out_stream_;
+	const uint64_t sub_out_;
 	ProgressMeter meter_;
 	std::thread* thread_;
 	std::mutex mutex_;

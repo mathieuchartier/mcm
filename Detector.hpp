@@ -28,6 +28,7 @@
 #include <deque>
 
 #include "CyclicBuffer.hpp"
+#include "Dict.hpp"
 #include "Stream.hpp"
 #include "UTF8.hpp"
 #include "Util.hpp"
@@ -59,6 +60,8 @@ public:
 		kProfileBinary,
 		kProfileEOF,
 		kProfileCount,
+		// Not a real profile, tells CM to use streaming detection.
+		kProfileDetect,
 	};
 
 	class DetectedBlock {
@@ -394,10 +397,14 @@ public:
 		detector.init();
 		for (;;) {
 			auto block = detector.detectBlock();
-			if (block.profile() == Detector::kProfileEOF) break;
+			if (block.profile() == Detector::kProfileEOF) {
+				break;
+			}
 			for (size_t i = 0; i < block.length(); ++i) {
-				// TODO: Huffman + dictionary.
-				detector.popChar();
+				auto c = detector.popChar();
+				if (block.profile() == Detector::kProfileText) {
+					dict_builder_.addChar(c);
+				}
 			}
 			const size_t size = blocks_.size();
 			if (size > 0 && blocks_.back().profile() == block.profile()) {
@@ -438,9 +445,13 @@ public:
 	Blocks& getBlocks() {
 		return blocks_;
 	}
+	Dict::Builder& getDictBuilder() {
+		return dict_builder_;
+	}
 
 private:
  	Blocks blocks_;
+	Dict::Builder dict_builder_;
 };
 
 #endif

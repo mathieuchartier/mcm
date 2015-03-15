@@ -31,6 +31,47 @@
 #include "File.hpp"
 #include "Stream.hpp"
 
+// Force filter
+enum FilterType {
+	kFilterTypeNone,
+	kFilterTypeDict,
+	kFilterTypeX86,
+	kFilterTypeAuto,
+	kFilterTypeCount,
+};
+
+enum CompLevel {
+	kCompLevelStore,
+	kCompLevelTurbo,
+	kCompLevelFast,
+	kCompLevelMid,
+	kCompLevelHigh,
+	kCompLevelMax,
+};
+std::ostream& operator<<(std::ostream& os, CompLevel comp_level);
+
+enum LZPType {
+	kLZPTypeAuto,
+	kLZPTypeEnable,
+	kLZPTypeDisable,
+};
+
+class CompressionOptions {
+public:
+	static const size_t kDefaultMemUsage = 6;
+	static const CompLevel kDefaultLevel = kCompLevelMid;
+	static const FilterType kDefaultFilter = kFilterTypeAuto;
+	static const LZPType kDefaultLZPType = kLZPTypeAuto;
+	CompressionOptions() : mem_usage_(kDefaultMemUsage), comp_level_(kDefaultLevel), filter_type_(kDefaultFilter), lzp_type_(kDefaultLZPType) {
+	}
+
+public:
+	size_t mem_usage_;
+	CompLevel comp_level_;
+	FilterType filter_type_;
+	LZPType lzp_type_;
+};
+
 // File headers are stored in a list of blocks spread out through data.
 class Archive {
 public:
@@ -47,7 +88,7 @@ public:
 		void read(Stream* stream);
 		void write(Stream* stream);
 		bool isArchive() const;
-		bool isSameVersion();
+		bool isSameVersion() const;
 		uint16_t majorVersion() const {
 			return major_version_;
 		}
@@ -63,324 +104,54 @@ public:
 
 	class Algorithm {
 	public:
-		Algorithm(uint8_t mem_usage = 6, uint8_t algorithm = 0, bool lzp_enabled = false);
+		Algorithm(const CompressionOptions& options, Detector::Profile profile);
+		Algorithm(Stream* stream);
 		Compressor* createCompressor();
 		void read(Stream* stream);
 		void write(Stream* stream);
+		Filter* createFilter(Stream* stream, Analyzer* analyzer);
 
 	private:
 		uint8_t mem_usage_;
-		uint8_t algorithm_;
+		Compressor::Type algorithm_;
 		bool lzp_enabled_;
+		FilterType filter_;
+		Detector::Profile profile_;
 	};
 
-	// Archive consists of a list of these.
-	class FBlockHeader {
-		static const uint32_t kTypeBits = 8;
-		static const uint64_t kTypeMask = (1 << kTypeBits) - 1;
+	class BlockHeader {
 	public:
-		enum Type { 
-			kTypeFileList,  // Compressed file names.
-		};
-		Type getType() const;
-		void setType(Type type);
-		uint64_t getLength() const;
-		void setLength(uint64_t next_block);
 
 	private:
-		uint64_t data_;
-		void setData(Type type, uint64_t length);
+		Algorithm algorithm_;
 	};
 
-	class BlockHeader : public FileMirror {
-	public:
-		BlockHeader(Archive* archive);
-		virtual ~BlockHeader();
-		FBlockHeader& getHeader();
-		const FBlockHeader& getHeader() const;
-		void write();
-		void read();
-		void setDataOffset(uint64_t offset);
-		uint64_t getDataOffset() const;
-		Archive* getArchive();
+	// Compression.
+	Archive(Stream* stream, const CompressionOptions& options);
+	// Decompression.
+	Archive(Stream* stream);
 
-	private:
-		Archive* archive_;
-		FBlockHeader header_;
-		uint64_t data_offset_;
-	};
+	const Header& getHeader() const {
+		return header_;
+	}
 
-	class FileListBlock {
-	public:
-		FileListBlock(BlockHeader* block_header) {}
-		void addFilePath(const FilePath& path) {}
+	bool setOpt(size_t var) {
+		opt_var_ = var;
+		return true;
+	}
 
-	private:
-		BlockHeader* block_header_;
-		std::vector<std::string> files_;
-	};
-
-	class ScopedBlockHeader {
-	public:
-		explicit ScopedBlockHeader(FBlockHeader::Type type, Archive* archive);
-		~ScopedBlockHeader();
-		BlockHeader* getHeader();
-
-	private:
-		BlockHeader* header_;
-		uint64_t data_start_;
-	};
-
-	class FListHeader {
-	public:
-		enum BlockType {
-			kBlockTypeFile,
-			kBlockTypeSegment,
-		};
-		FListHeader(BlockType type, uint64_t count);
-		void setNextBlock(uint64_t next_block);
-
-	private:	
-		BlockType type_;
-		uint64_t count_;
-		uint64_t next_block_;
-	};
-
-	// File header is part of a file block.
-	class FFileHeader {
-	public:
-		FFileHeader();
-		FFileHeader(const FilePath& file_path);
-		const std::string& getName() const;
-		int getAttributes();
-
-	public:
-		// Filename
-		std::string name_;
-		// Attributes.
-		int attributes_;
-	};
-
-	class FSegment {
-	public:
-		FSegment();
-		uint64_t getOffset() const;
-		void setOffset(uint64_t offset);
-		uint64_t getLength() const;
-		void setLength(uint64_t length);
-		uint32_t getId() const;
-		void setId(uint32_t id);
-		void write(uint64_t pos, File* file);
-		void read(uint64_t pos, File* file);
-
-	private:
-		// File ID (which file the segment belongs to).
-		// Note: support at most 4B files.
-		uint32_t id_;
-		// Offset into the file. 
-		uint64_t offset_;
-		// Length of the segment.
-		uint64_t length_;
-	};
-
-	class FileSegment {
-	public:
-		FSegment& getFSegment();
-		void setName(const std::string& name);
-		const std::string& getName() const;
-		typedef std::vector<FileSegment> Vector;
-
-	private:
-		std::string name_;
-		FSegment fsegment_;
-	};
-
-	// A solidly compressed block.
-	class SolidBlock {
-	public:
-		SolidBlock() 
-			: offset(0)
-			, in_file(nullptr)
-			, compressor(nullptr) {
-		}
-
-		class Header {
-		public:
-			// Compression algorithm.
-			byte algorithm;
-			// Memory level.
-			byte mem;
-			// Padding.
-			byte pad1, pad2;
-			// Compressed size of the block (not including header!).
-			uint64_t csize;
-		};
-
-		Header& getHeader() {
-			return header;
-		}
-
-	private:
-		Header header;
-		uint64_t offset;
-		ReadStream* in_file;
-		Compressor* compressor;
-	};
-
-	class FileSegmentReadStream : public ReadStream {
-	public:
-		FileSegmentReadStream(Archive* archive, FileSegment::Vector* block)
-			: archive_(archive), block_(block), file_index_(0), remain_(0), offset_(0), cached_file_(nullptr) {
-		}
-
-		void closeFile() {
-			if (cached_file_ != nullptr) {
-				archive_->getFileManager().close_file(cached_file_);
-				cached_file_ = nullptr;
-			}
-		}
-
-		bool openNextFile() {
-			if (file_index_ >= block_->size()) {
-				return false;
-			}
-			return openFile(file_index_++);
-		}
-
-		bool openFile(uint32_t index) {
-			assert(block_ != nullptr);
-			auto& file_manager = archive_->getFileManager();
-			// Close the currently opened file.
-			closeFile();
-			// Open the next file.
-			cached_file_ = file_manager.open(block_->at(index).getName(), std::ios_base::in | std::ios_base::binary);
-			if (cached_file_ == nullptr) {
-				return false;
-			}
-			File* file = cached_file_->getFile();
-			// file_read_stream_.setFile(file);
-			remain_ = file->length();
-			offset_ = 0;
-			return true;
-		}
-
-		virtual int get() {
-			while (!remain_) {
-				if (!openNextFile()) {
-					// No more files.
-					return EOF;
-				}
-			}
-			--remain_;
-			offset_++;
-			return 0; // file_read_stream_.get();
-		}
-
-		virtual size_t read(byte* buf, size_t n) {
-			size_t total_read = 0;
-			while (n) {
-				while (!remain_) {
-					if (!openNextFile()) {
-						goto END_OF_FILE; // No more files.
-					}
-				}
-				size_t read_count = 0; // file_read_stream_.read(buf, std::min(static_cast<size_t>(remain_), n));
-				if (!read_count) {
-					break;
-				}
-				buf += read_count;
-				n -= read_count;
-				remain_ -= read_count;
-				total_read += read_count;
-				offset_ += read_count;
-			}
-			END_OF_FILE:
-			return total_read;
-		}
-
-		virtual uint64_t tell() const {
-			return offset_;
-		}
-
-		virtual void seek(uint64_t pos) {
-			for (file_index_ = 0; file_index_ < block_->size(); ++file_index_) {
-				auto& file = block_->at(file_index_);
-				auto& fseg = file.getFSegment();
-				if (pos < fseg.getLength()) {
-					openFile(file_index_);
-					assert(cached_file_ != nullptr);
-					// file_read_stream_.seek(fseg.getOffset() + pos);
-					break;
-				}
-				pos -= fseg.getLength();
-			}
-			offset_ = pos;
-		}
-
-	private:
-		Archive* archive_;
-		FileSegment::Vector* block_;
-		uint32_t file_index_;
-		uint64_t remain_;
-		uint64_t offset_;
-		// OffsetFileReadStream file_read_stream_;
-		FileManager::CachedFile* cached_file_;
-	};
-
-	class Job : CompressionJob {
-	public:
-		void join() {
-			thread_->join();
-			delete thread_;
-		}
-		virtual void updateProgress() {
-		}
-
-		virtual bool isDone() const {
-			return progress_ >= limit_;
-		}
-
-	private:
-		uint64_t progress_;
-		uint64_t limit_;
-		Stream* stream_;
-		std::thread* thread_;
-	};
-
-public:
-	Archive();
-	virtual ~Archive();
-	File& getFile();
-	// Resolve file id.
-	uint32_t resolveFilename(const std::string& file_name);
-	// Add a new file block.
-	void addNewFileBlock(const std::vector<FilePath>& files);
-	// Simply way of splitting files.
-	static std::vector<FileSegment::Vector> splitFiles(const std::vector<FilePath>& files, uint32_t blocks, uint64_t min_block_size);
-	FileManager& getFileManager();
-	void open(const FilePath& file_path, bool overwrite, std::ios_base::open_mode mode = 0);
-	Job* startCompressionJob();
-	// OffsetFileReadStream* compressFiles(uint32_t method, OffsetFileWriteStream* out_stream, FileHeaderBlock& block, uint32_t mem);
-	// static void compressBlock(OffsetFileWriteStream* out_stream, uint32_t method, ReadStream* stream, uint32_t mem);
-	// Compress some files.
-	// void compressFiles(OffsetFileWriteStream* out_stream, uint32_t method, FileSegment::Vector* block, uint32_t mem);
-	void compressFiles(uint32_t method, FileSegment::Vector* block, uint32_t mem);
-	void Dump(std::ostream& os);
+	// Analyze and compress.
+	void compress(Stream* in);
+	// Decompress.
+	void decompress(Stream* out);
 
 private:
-	// Main file.
-	File file_;
-	// The header.
-	// FHeader header_;
-	// File manager.
-	FileManager file_manager_;
-	// Mutex
-	std::mutex lock_;
-	// New block header.
-	std::vector<BlockHeader*> block_headers_;
+	Stream* stream_;
+	Header header_;
+	CompressionOptions options_;
+	size_t opt_var_;
 
-	// Cached version of the blocks. Requires archive lock.
-	BlockHeader* newBlockHeader(FBlockHeader::Type type);
+	void init();
 };
 
 #endif

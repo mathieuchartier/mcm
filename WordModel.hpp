@@ -41,7 +41,7 @@ public:
 			transform[i] = index++;
 		}
 		for (uint32_t i = 'A'; i <= 'Z'; ++i) {
-			transform[i] = transform[(byte)lower_case((char)i)];
+			transform[i] = transform[makeLowerCase(static_cast<int>(i))];
 		}
 #if 0
 		for (uint32_t i = '0'; i <= '9'; ++i) {

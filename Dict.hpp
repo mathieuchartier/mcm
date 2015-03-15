@@ -24,16 +24,509 @@
 #ifndef _DICT_HPP_
 #define _DICT_HPP_
 
+#include <algorithm>
+#include <map>
 #include <memory>
 #include <numeric>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "Filter.hpp"
 
-class DictBuilder {
+class Dict {
 public:
+	static const size_t kMaxWordLen = 256;
+	static const size_t kInvalidChar = 256;
+	typedef std::pair<size_t, std::string> WCPair;
+	
+	class CompareWCPair {
+	public:
+		CompareWCPair(size_t extra_cost = 0) : extra_cost_(extra_cost) {
+		}
+		bool operator()(const WCPair& a, const WCPair& b) const {
+			return (a.first - 1) * (std::max(extra_cost_, a.second.length()) - extra_cost_) <
+				(b.first - 1) * (std::max(extra_cost_, b.second.length()) - extra_cost_);
+		}
+
+	private:
+		const size_t extra_cost_;
+	};
+
+	// Maybe not very memory efficient.
+	class WordCollectionMap {
+		std::unordered_map<std::string, uint32_t> words_;
+		size_t max_words_;
+	public:
+
+		WordCollectionMap(size_t max_words = 10000000) : max_words_(max_words) {
+		}
+		void getWords(std::vector<WCPair>& out_pairs, size_t min_occurences = 10) {
+			for (auto& p : words_) {
+				if (p.second > min_occurences) {
+					out_pairs.push_back(WCPair(p.second, p.first));
+				}
+			}
+		}
+		forceinline size_t size() const {
+			return words_.size();
+		}
+		void clear() {
+			words_.clear();
+		}
+		void addWord(const uint8_t* begin, const uint8_t* end) {
+			while (words_.size() > max_words_) {
+				for (auto it = words_.begin(); it != words_.end(); ) {
+					it->second /= 2;
+					if (it->second == 0) {
+						it = words_.erase(it);
+					} else {
+						++it;
+					}
+				}
+			}
+			++words_[std::string(begin, end)];
+		}
+	};
+
+	class CodeWord {
+	public:
+		uint32_t code_;
+
+		void setCode(uint32_t code) {
+			code_ = code;
+		}
+		CodeWord(uint8_t num_bytes = 0u, uint8_t c1 = 0u, uint8_t c2 = 0u, uint8_t c3 = 0u) {
+			code_ = num_bytes;
+			code_ = (code_ << 8) | c1;
+			code_ = (code_ << 8) | c2;
+			code_ = (code_ << 8) | c3;
+		}
+		uint32_t byte1() const {
+			return (code_ >> 16) & 0xFFu;
+		}
+		uint32_t byte2() const {
+			return (code_ >> 8) & 0xFFu;
+		}
+		uint32_t byte3() const {
+			return (code_ >> 0) & 0xFFu;
+		}
+		size_t numBytes() const {
+			auto bytes = code_ >> 24;
+			assert(bytes <= 3);
+			return bytes;
+		}
+	};
+
+	typedef std::pair<std::string, CodeWord> CodeWordPair;
+	// Simple collection of words and their codes.
+	class CodeWordSet {
+	public:
+		// Map from words to their codes.
+		size_t num1_;
+		size_t num2_;
+		size_t num3_;
+		std::vector<std::string> codewords_;
+
+		std::vector<std::string>* getCodeWords() {
+			return &codewords_;
+		}
+	};
+
+	class Builder {
+		static const size_t kSuffixSize = 100 * MB;
+		// Suffix array buffer.
+		std::vector<uint8_t> buffer_;
+		size_t buffer_pos_;
+		// Current word.
+		static const size_t kMinWordLen = 3;
+		static const size_t kMaxWordLen = 0x20;
+		static const size_t kMinOccurences = 100;
+		uint8_t word_[kMaxWordLen];
+		size_t word_pos_;
+		// CC: first char EOR whole word.
+		WordCollectionMap words_;
+	public:
+		class SuffixSortComparator {
+		public:
+			SuffixSortComparator(const uint8_t* arr) : arr_(arr) {
+			}
+			bool operator()(uint32_t a, uint32_t b) {
+				while (a > 0 && b > 0) {
+					if (arr_[a] != arr_[b]) {
+						return arr_[a] < arr_[b];
+					}
+					--a;
+					--b;
+				}
+				return a < b;
+			}
+		private:
+			const uint8_t* const arr_;
+		};
+		void addChar(uint8_t c) {
+			// Add to current word.
+			if (isWordChar(c)) {
+				if (word_pos_ < kMaxWordLen) {
+					word_[word_pos_++] = c;
+				}
+			} else {
+				if (word_pos_ >= kMinWordLen) {
+					bool first_cap = isUpperCase(word_[0]);
+					size_t cap_count = first_cap;
+					for (size_t i = 1; i < word_pos_; ++i) {
+						cap_count += isUpperCase(word_[i]);
+					}
+					if (cap_count == word_pos_) {
+						for (size_t i = 0; i < word_pos_; ++i) {
+							word_[i] = makeLowerCase(word_[i]);
+						}
+					} else if (first_cap && cap_count == 1) {
+						word_[0] = makeLowerCase(word_[0]);
+					}
+					words_.addWord(word_, word_ + word_pos_);
+				}
+				for (size_t i = 0; i < word_pos_; ++i) {
+					if (buffer_pos_ < buffer_.size()) buffer_[buffer_pos_++] = word_[i];
+				}
+				word_pos_ = 0;
+			}
+		}
+		void init() {
+			buffer_pos_ = 0;
+			buffer_.resize(kSuffixSize);
+			word_pos_ = 0;
+		}
+		Builder() {
+			init();
+		}
+		const WordCollectionMap& getWords() const {
+			return words_;
+		}
+		WordCollectionMap& getWords() {
+			return words_;
+		}
+	};
+
+	class CodeWordGenerator {
+	public:
+		virtual void generate(Builder& builder, CodeWordSet& code_words) = 0;
+	};
+
+	class CodeWordGeneratorHigh {
+		static const bool kDumpSuffixes = false;
+	public:
+		void generateCodeWords(Builder& builder, bool clear) {
+			auto& bwords = builder.getWords();
+			std::cout << bwords.size() << std::endl;
+			std::vector<WCPair> words; 
+			bwords.getWords(words, 10);
+			if (clear) {
+				bwords.clear();
+			}
+			std::sort(words.rbegin(), words.rend(), CompareWCPair());
+			std::unordered_set<std::string> is_word;
+			// One byte codewords are not interesting.
+			for (size_t i = 32; i < words.size(); ++i) is_word.insert(words[i].second);
+			// Generate suffix array???
+			std::vector<uint32_t> suffix_array;
+			/*
+			word_pos_ = 0;
+			size_t word_start = 0;
+			for (size_t i = 0; i < buffer_pos_; ++i) {
+				auto c = buffer_[i];
+				if (isWordChar(c)) {
+					if (word_pos_ < kMaxWordLen) {
+						word_[word_pos_++] = c;
+						if (word_pos_ == 1) word_start = i;
+					}
+				} else {
+					if (word_pos_ >= kMinWordLen) {
+						std::string s(word_, word_ + word_pos_);
+						if (is_word.find(s) != is_word.end()) {
+							if (word_start != 0) {
+								suffix_array.push_back(word_start - 1);
+							}
+						}
+					}
+					word_pos_ = 0;
+				}
+			}
+			auto* arr = &buffer_[0];
+			auto* limit = &buffer_[buffer_pos_];
+			SuffixSortComparator cmp(arr);
+			// std::sort(suffix_array.begin(), suffix_array.end(), cmp);
+
+			if (kDumpSuffixes) {
+				// Whether or not do dump suffixes.
+				std::ofstream fout("suffixes.txt");
+				for (auto idx : suffix_array) {
+					auto end = idx + 1;
+					while (isWordChar(arr[end])) ++end;
+					std::string s(std::max(arr, arr + idx - 12), std::min(arr + end, limit));
+					for (auto& c : s) {
+						if (c == '\n') c = '_';
+						if (c == '\t') c = '_';
+					}
+					fout << s << std::endl;
+				}
+			}*/
+		}
+	};
+
+	class CodeWordGeneratorFast {
+		static const bool kVerbose = true;
+	public:
+		void generateCodeWords(Builder& builder, CodeWordSet* words) {
+			auto* cw = words->getCodeWords();
+			cw->clear();
+
+			auto& word_map = builder.getWords();
+			std::vector<WCPair> word_pairs;
+			const size_t min_occurences = 3u;
+			word_map.getWords(word_pairs, min_occurences);
+			std::sort(word_pairs.rbegin(), word_pairs.rend(), CompareWCPair(1));
+
+			// Calculate number of 1 byte codewords in case its more than the original max.
+			words->num1_ = std::min(static_cast<size_t>(32u), word_pairs.size());
+			while (words->num1_ + 1 < word_pairs.size()) {
+				// Remain.
+				size_t remain = 128 - words->num1_;
+				const size_t new_2 = (remain - 1) * (remain - 1);
+				if (remain == 0 || new_2 < word_pairs.size() - words->num1_) {
+					break;
+				}
+				++words->num1_;
+			}
+
+			size_t save1 = 0, save2 = 0, save3 = 0; // Number of bytes saved.
+			size_t num1 = words->num1_, num2 = 0, num3 = 0; // Number of first byte which are 1b/2b/3b.
+			size_t count1 = 0, count2 = 0, count3 = 0; /// Number of words.
+			for (size_t i = 0; i < words->num1_; ++i) {
+				const auto& p = word_pairs[i];
+				++count1;
+				save1 += (p.first - 1) * (p.second.length() - 1);
+				cw->push_back(p.second);
+			}
+			std::sort(cw->begin(), cw->end());
+			word_pairs.erase(word_pairs.begin(), word_pairs.begin() + count1);
+			std::sort(word_pairs.rbegin(), word_pairs.rend(), CompareWCPair(2));
+
+			// 2 byte codes.
+			words->num3_ = 4;
+			const size_t end2 = 256 - words->num3_;
+			words->num2_ = end2 - std::min(static_cast<size_t>(128 + num1), end2);
+			for (size_t b1 = 128u + num1; b1 < end2; ++b1) {
+				for (size_t b2 = 128u; b2 < 256; ++b2) {
+					if (count2 < word_pairs.size()) {
+						const auto& p = word_pairs[count2++];
+						cw->push_back(p.second);
+						save2 += (p.first - 1) * (p.second.length() - 2);
+					}
+				}
+			}
+			std::sort(cw->begin() + count1, cw->end());
+			word_pairs.erase(word_pairs.begin(), word_pairs.begin() + count2);
+			std::sort(word_pairs.rbegin(), word_pairs.rend(), CompareWCPair(3));
+
+			// 3 byte codes.
+			for (size_t b1 = end2; b1 < 256; ++b1) {
+				for (size_t b2 = 128u; b2 < 256; ++b2) {
+					for (size_t b3 = 128u; b3 < 256; ++b3) {
+						if (count3 < word_pairs.size()) {
+							const auto& p = word_pairs[count3++];
+							cw->push_back(p.second);
+							save3 += (p.first - 1) * (p.second.length() - 3);
+						}
+					}
+				}
+			}
+			word_pairs.erase(word_pairs.begin(), word_pairs.begin() + count3);
+			std::sort(cw->begin() + count1 + count2, cw->end());
+
+			// Remaining chars.
+			size_t remain = 0;
+			for (const auto& p : word_pairs) remain += (p.first - 1) * (p.second.length() - 3);
+
+			if (kVerbose) {
+				std::cout << "words >= " << min_occurences << " occurences=" << word_pairs.size()
+					<< " 1b(" << count1 << ")=" << save1
+					<< "+2b(" << count2 << ")=" << save2
+					<< "+3b(" << count3 << ")b=" << save3
+					<< ")=" << save1 + save2 + save3
+					<< " extra=" << remain << std::endl;
+			}
+		}
+	};
+
+	// Encodes / decods words / code words.
+	class Filter : public ByteStreamFilter<16 * KB, 16 * KB> {
+		// Capital conersion.
+		size_t escape_char_;
+		size_t escape_cap_first_;
+		size_t escape_cap_word_;
+		// Currrent word
+		uint8_t word_[kMaxWordLen];
+		size_t word_pos_;
+		// Read / write dict buffer.
+		std::vector<uint8_t> dict_buffer_;
+		size_t dict_buffer_pos_;
+		size_t dict_buffer_size_;
+
+		// Encoding data structures.
+		std::unordered_map<std::string, CodeWord> encode_map_;
+
+	public:
+		// Serialize to and from.
+		// num words
+		// escape
+		// escape cap first
+		// escape cap word
+		// 1b count
+		// 2b count
+		// 3b count
+		void writeDict(std::vector<uint8_t>* dict) {
+			WriteVectorStream wvs(dict);
+		}
+		void readDict() {
+
+		}
+
+		// Creates an encodable dictionary array.
+		void addCodeWords(std::vector<std::string>* words, uint8_t num1, uint8_t num2, uint8_t num3) {
+			// Create the dict array.
+			WriteVectorStream wvs(&dict_buffer_);
+			// Save space for dict size.
+			dict_buffer_.push_back(0u);
+			dict_buffer_.push_back(0u);
+			dict_buffer_.push_back(0u);
+			dict_buffer_.push_back(0u);
+			// Encode escapes and such.
+			dict_buffer_.push_back(static_cast<uint8_t>(escape_char_));
+			dict_buffer_.push_back(static_cast<uint8_t>(escape_cap_first_));
+			dict_buffer_.push_back(static_cast<uint8_t>(escape_cap_word_));
+			dict_buffer_.push_back(num1);
+			dict_buffer_.push_back(num2);
+			dict_buffer_.push_back(num3);
+			// Encode words.
+			for (const auto& s : *words) {
+				wvs.writeString(&s[0]);
+			}
+			// Save size.
+			dict_buffer_pos_ = 0;
+			dict_buffer_size_ = dict_buffer_.size();
+			dict_buffer_[0] = static_cast<uint8_t>(dict_buffer_size_ >> 24);
+			dict_buffer_[1] = static_cast<uint8_t>(dict_buffer_size_ >> 16);
+			dict_buffer_[2] = static_cast<uint8_t>(dict_buffer_size_ >> 8);
+			dict_buffer_[3] = static_cast<uint8_t>(dict_buffer_size_ >> 0);
+			// Generate the actual encode map.
+			generate(*words, num1, num2, num3);
+			
+		}
+		void generate(std::vector<std::string>& words, size_t num1, size_t num2, size_t num3) {
+			static const size_t start = 128u;
+			size_t end1 = start + num1;
+			size_t end2 = end1 + num2;
+			size_t end3 = end2 + num3;
+			size_t idx = 0;
+			for (size_t b1 = start; b1 < end1; ++b1) {
+				if (idx < words.size()) encode_map_.insert(std::make_pair(words[idx++],
+					CodeWord(1, static_cast<uint8_t>(b1))));
+			}
+			for (size_t b1 = end1; b1 < end2; ++b1) {
+				for (size_t b2 = start; b2 < 256; ++b2) {
+					if (idx < words.size()) encode_map_.insert(std::make_pair(words[idx++], CodeWord(2,
+						static_cast<uint8_t>(b1), static_cast<uint8_t>(b2))));
+				}
+			}
+			for (size_t b1 = end2; b1 < end3; ++b1) {
+				for (size_t b2 = start; b2 < 256; ++b2) {
+					for (size_t b3 = start; b3 < 256; ++b3) {
+						if (idx < words.size()) encode_map_.insert(std::make_pair(words[idx++], CodeWord(3,
+							static_cast<uint8_t>(b1), static_cast<uint8_t>(b2), static_cast<uint8_t>(b3))));
+					}
+				}
+			}
+		}
+		virtual void forwardFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
+			// TODO: Write the dictionary if required.
+			uint8_t* in_ptr = in;
+			uint8_t* out_ptr = out;
+			const uint8_t* const in_limit = in + *in_count;
+			const uint8_t* const out_limit = out + *out_count;
+			while (in_ptr < in_limit) {
+				if (out_ptr + 4 >= out_limit) break;
+				if (*in_ptr == escape_char_ || *in_ptr == escape_cap_first_ || *in_ptr == escape_cap_word_ || *in_ptr >= 128) {
+					*(out_ptr++) = escape_char_;
+					*(out_ptr++) = *(in_ptr++);
+				} else if (isWordChar(*in_ptr)) {
+					size_t word_len = 0;
+					while (in_ptr + word_len < in_limit && isWordChar(in_ptr[word_len])) {
+						++word_len;
+					}
+					if (in_ptr + word_len >= in_limit && word_len != in_limit - in) {
+						// If the word is all the remaining chars and not the whole string, then it may have a suffix.
+						break;
+					}
+					std::string word(in_ptr, in_ptr + word_len);
+					const size_t max_out = static_cast<size_t>(out_limit - out_ptr);
+					if (word_len + 1 > max_out) break; // Maybe too long to encode.
+					if (word_len >= 3 && word_len <= kMaxWordLen) {
+						size_t upper_count = 0;
+						for (size_t i = 0; i < word_len; ++i) {
+							upper_count += isUpperCase(in_ptr[i]);
+						}
+						if (upper_count == word_len) {
+							for (auto& c : word) c = makeLowerCase(c);
+						} else if (upper_count == 1 && isUpperCase(in_ptr[0])) {
+							word[0] = makeLowerCase(word[0]);
+						}
+						auto it = encode_map_.find(word);
+						if (it != encode_map_.end()) {
+							if (upper_count == word_len) {
+								*(out_ptr++) = escape_cap_word_;
+							} else if (upper_count == 1 && isUpperCase(in_ptr[0])) {
+								*(out_ptr++) = escape_cap_first_;
+							}
+							auto& code_word = it->second;
+							const auto num_bytes = code_word.numBytes();
+							dcheck(num_bytes >= 1 && num_bytes <= 3);
+							*(out_ptr++) = code_word.byte1();
+							if (num_bytes > 1) *(out_ptr++) = code_word.byte2();
+							if (num_bytes > 2) *(out_ptr++) = code_word.byte3();
+							in_ptr += word_len;
+							continue;
+						}
+					}
+					std::copy(in_ptr, in_ptr + word_len, out_ptr);
+					in_ptr += word_len;
+					out_ptr += word_len;
+				} else {
+					*(out_ptr++) = *(in_ptr++);
+				}
+			}
+			dcheck(in_ptr <= in_limit);
+			dcheck(out_ptr <= out_limit);
+			*in_count = in_ptr - in;
+			*out_count = out_ptr - out;
+		}
+		virtual void reverseFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
+			// process<false>(out, out_count, in, in_count);
+		}
+		Filter(Stream* stream, size_t escape_char, size_t escape_cap_first = kInvalidChar,
+			size_t escape_cap_word = kInvalidChar)
+			: ByteStreamFilter(stream)
+			, escape_char_(escape_char)
+			, escape_cap_first_(escape_cap_first)
+			, escape_cap_word_(escape_cap_word) {
+		}
+	};
+	
+	Dict() {
+
+	}
 };
 
+#if 0
 class SimpleDict : public ByteStreamFilter<16 * KB, 16 * KB> {
 	static const size_t kMaxWordLen = 255;
 public:
@@ -363,5 +856,6 @@ private:
 	static const size_t kDictFraction = 2048;
 	std::vector<Entry> entires;
 };
+#endif
 
 #endif

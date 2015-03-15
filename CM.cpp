@@ -135,14 +135,14 @@ void CM<kCMType>::init() {
 		}
 	}
 
-	setDataProfile(kProfileBinary);
+	setDataProfile(profile_);
 	owhash = 0;
 
 	// Statistics
 	if (kStatistics) {
 		for (auto& c : mixer_skip) c = 0;
 		other_count_ = match_count_ = non_match_count_ = 0;
-		std::cout << "Setup took: " << clock() - start << std::endl << std::endl;
+		std::cout << "Setup took: " << clock() - start << std::endl;
 		lzp_bit_match_bytes_ = lzp_bit_miss_bytes_ = lzp_miss_bytes_ = normal_bytes_ = 0;
 		for (auto& len : match_hits_) len = 0;
 		for (auto& len : match_miss_) len = 0;
@@ -152,6 +152,7 @@ void CM<kCMType>::init() {
 template <CMType kCMType>
 void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 	BufferedStreamWriter<4 * KB> sout(out_stream);
+	BufferedStreamReader<4 * KB> sin(in_stream);
 	assert(in_stream != nullptr);
 	assert(out_stream != nullptr);
 	Detector detector(in_stream);
@@ -189,7 +190,8 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 				setDataProfile(cm_profile);
 			}
 		} else {
-			c = in_stream->get();
+			c = sin.get();
+			if (c == EOF) break;
 		}
 		dcheck(c != EOF);
 		processByte<false>(sout, c);
@@ -261,17 +263,21 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 			}
 			std::cout << "zero=" << z << " nonzero=" << nz << std::endl;
 		}
-		detector.dumpInfo();
+		if (!force_profile_) {
+			detector.dumpInfo();
+		}
 		std::cout << "CMed bytes=" << formatNumber((mixer_skip[0] + mixer_skip[1]) / 8)
 			<< " mix skip=" << formatNumber(mixer_skip[0])
 			<< " mix nonskip=" << formatNumber(mixer_skip[1]) << std::endl;
 		std::cout << "match=" << formatNumber(match_count_)
 			<< " matchfail=" << formatNumber(non_match_count_)
 			<< " nonmatch=" << formatNumber(other_count_) << std::endl;
-		for (size_t i = 0; i < kMaxMatch; ++i) {
-			const size_t t = match_hits_[i] + match_miss_[i];
-			if (t != 0) {
-				std::cout << i << ":" << match_hits_[i] << "/" << match_miss_[i] << " = " << static_cast<double>(match_hits_[i]) / t << std::endl;
+		if (!kFastStats) {
+			for (size_t i = 0; i < kMaxMatch; ++i) {
+				const size_t t = match_hits_[i] + match_miss_[i];
+				if (t != 0) {
+					std::cout << i << ":" << match_hits_[i] << "/" << match_miss_[i] << " = " << static_cast<double>(match_hits_[i]) / t << std::endl;
+				}
 			}
 		}
 		if (lzp_enabled_) {

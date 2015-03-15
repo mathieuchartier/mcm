@@ -23,6 +23,8 @@
 
 #include "Archive.hpp"
 
+#include "X86Binary.hpp"
+
 #include <cstring>
 
 Archive::Header::Header() : major_version_(kCurMajorVersion), minor_version_(kCurMinorVersion) {
@@ -45,341 +47,194 @@ bool Archive::Header::isArchive() const {
 	return memcmp(magic_, getMagic(), kMagicStringLength) == 0;
 }
 
-bool Archive::Header::isSameVersion() {
+bool Archive::Header::isSameVersion() const {
 	return major_version_ == kCurMajorVersion && minor_version_ == kCurMinorVersion;
 }
 
-Archive::Algorithm::Algorithm(uint8_t mem_usage, uint8_t algorithm, bool lzp_enabled)
-	: mem_usage_(mem_usage), algorithm_(algorithm), lzp_enabled_(lzp_enabled) {
+Archive::Algorithm::Algorithm(const CompressionOptions& options, Detector::Profile profile) : profile_(profile) {
+	mem_usage_ = options.mem_usage_;
+	algorithm_ = Compressor::kTypeStore;
+	switch (options.comp_level_) {
+	case kCompLevelStore:
+		algorithm_ = Compressor::kTypeStore;
+		break;
+	case kCompLevelTurbo:
+		algorithm_ = Compressor::kTypeCMTurbo;
+		break;
+	case kCompLevelFast:
+		algorithm_ = Compressor::kTypeCMFast;
+		break;
+	case kCompLevelMid:
+		algorithm_ = Compressor::kTypeCMMid;
+		break;
+	case kCompLevelHigh:
+		algorithm_ = Compressor::kTypeCMHigh;
+		break;
+	case kCompLevelMax:
+		algorithm_ = Compressor::kTypeCMMax;
+		break;
+	}
+	switch (profile) {
+	case Detector::kProfileBinary:
+		lzp_enabled_ = true;
+		filter_ = kFilterTypeX86;
+		break;
+	case Detector::kProfileText:
+		lzp_enabled_ = false;
+		filter_ = kFilterTypeDict;
+		break;
+	}
+	// OVerrrides.
+	if (options.lzp_type_ == kLZPTypeEnable) lzp_enabled_ = true;
+	else if (options.lzp_type_ == kLZPTypeDisable) lzp_enabled_ = false;
+	// Force filter.
+	if (options.filter_type_ != kFilterTypeAuto) {
+		filter_ = options.filter_type_;
+	}
+}
+
+Archive::Algorithm::Algorithm(Stream* stream) {
+	read(stream);
+}
+
+void Archive::init() {
+	opt_var_ = 0;
+}
+
+Archive::Archive(Stream* stream, const CompressionOptions& options) : stream_(stream), options_(options) {
+	init();
+	header_.write(stream_);
+}
+
+Archive::Archive(Stream* stream) : stream_(stream), opt_var_(0) {
+	init();
+	header_.read(stream_);
 }
 
 Compressor* Archive::Algorithm::createCompressor() {
-	switch (static_cast<Compressor::Type>(algorithm_)) {
-	case Compressor::kTypeCMTurbo:
-		return new CM<kCMTypeTurbo>(mem_usage_, lzp_enabled_);
-		//return new TurboCM<6>(mem_usage);
-		//return new CMRolz;
-	case Compressor::kTypeCMFast:
-		return new CM<kCMTypeFast>(mem_usage_, lzp_enabled_);
-	case Compressor::kTypeCMMid:
-		return new CM<kCMTypeMid>(mem_usage_, lzp_enabled_);
-	case Compressor::kTypeCMHigh:
-		return new CM<kCMTypeHigh>(mem_usage_, lzp_enabled_);
-	case Compressor::kTypeCMMax:
-		return new CM<kCMTypeMax>(mem_usage_, lzp_enabled_);
-	default:
+	switch (algorithm_) {
+	case Compressor::kTypeStore:
 		return new Store;
+	case Compressor::kTypeCMTurbo:
+		return new CM<kCMTypeTurbo>(mem_usage_, lzp_enabled_, profile_);
+	case Compressor::kTypeCMFast:
+		return new CM<kCMTypeFast>(mem_usage_, lzp_enabled_, profile_);
+	case Compressor::kTypeCMMid:
+		return new CM<kCMTypeMid>(mem_usage_, lzp_enabled_, profile_);
+	case Compressor::kTypeCMHigh:
+		return new CM<kCMTypeHigh>(mem_usage_, lzp_enabled_, profile_);
+	case Compressor::kTypeCMMax:
+		return new CM<kCMTypeMax>(mem_usage_, lzp_enabled_, profile_);
 	}
 	return nullptr;
 }
 
 void Archive::Algorithm::read(Stream* stream) {
 	mem_usage_ = static_cast<uint8_t>(stream->get());
-	algorithm_ = static_cast<uint8_t>(stream->get());
+	algorithm_ = static_cast<Compressor::Type>(stream->get());
 	lzp_enabled_ = stream->get() != 0 ? true : false;
+	filter_ = static_cast<FilterType>(stream->get());
+	profile_ = static_cast<Detector::Profile>(stream->get());
 }
 
 void Archive::Algorithm::write(Stream* stream) {
 	stream->put(mem_usage_);
 	stream->put(algorithm_);
 	stream->put(lzp_enabled_);
+	stream->put(filter_);
+	stream->put(profile_);
 }
 
-Archive::FBlockHeader::Type Archive::FBlockHeader::getType() const {
-	return static_cast<Type>(data_ & kTypeMask);
-}
-
-void Archive::FBlockHeader::setType(Type type) {
-	setData(type, getLength());
-}
-
-uint64_t Archive::FBlockHeader::getLength() const {
-	return data_ >> kTypeBits;
-}
-
-void Archive::FBlockHeader::setLength(uint64_t length) {
-	setData(getType(), length);
-}
-
-void Archive::FBlockHeader::setData(Type type, uint64_t next_block) {
-	assert((next_block << kTypeBits) >= next_block);
-	data_ = static_cast<uint64_t>(type) | (next_block << kTypeBits);
-}
-
-Archive::ScopedBlockHeader::ScopedBlockHeader(FBlockHeader::Type type, Archive* archive) {
-	header_ = archive->newBlockHeader(type);
-	// Make sure we are at the end of the header.
-	header_->write();
-	// Let the caller write their data.
-	data_start_ = archive->getFile().tell();
-}
-
-Archive::ScopedBlockHeader::~ScopedBlockHeader() {
-	const uint64_t data_end_ = header_->getArchive()->getFile().tell();
-	header_->getHeader().setLength(data_end_ - data_start_);
-	header_->update();
-}
-
-Archive::BlockHeader* Archive::ScopedBlockHeader::getHeader() {
-	return header_;
-}
-
-Archive::BlockHeader::BlockHeader(Archive* archive) : archive_(archive), data_offset_(0) {	
-}
-
-Archive* Archive::BlockHeader::getArchive() {
-	return archive_;
-}
-
-Archive::BlockHeader::~BlockHeader() {
-}
-
-Archive::FBlockHeader& Archive::BlockHeader::getHeader() {
-	setDirty(true);
-	return header_;
-}
-
-const Archive::FBlockHeader& Archive::BlockHeader::getHeader() const {
-	return header_;
-}
-
-void Archive::BlockHeader::write() {
-
-}
-
-void Archive::BlockHeader::read() {
-
-}
-
-void Archive::BlockHeader::setDataOffset(uint64_t offset) {
-	data_offset_ = offset;
-}
-
-uint64_t Archive::BlockHeader::getDataOffset() const {
-	return data_offset_;
-}
-
-Archive::FFileHeader::FFileHeader() : attributes_(0) {
-}
-
-Archive::FFileHeader::FFileHeader(const FilePath& file_path)
-	: name_(file_path.getName())
-	, attributes_(0) {
-}
-
-const std::string& Archive::FFileHeader::getName() const {
-	return name_;
-}
-
-int Archive::FFileHeader::getAttributes() {
-	return attributes_;
-}
-
-Archive::FSegment::FSegment() : id_(0), offset_(0), length_(0) {
-}
-
-uint64_t Archive::FSegment::getOffset() const {
-	return offset_;
-}
-
-void Archive::FSegment::setOffset(uint64_t offset) {
-	offset_ = offset;
-}
-
-uint64_t Archive::FSegment::getLength() const {
-	return length_;
-}
-
-void Archive::FSegment::setLength(uint64_t length) {
-	length_ = length;
-}
-
-uint32_t Archive::FSegment::getId() const {
-	return id_;
-}
-
-void Archive::FSegment::setId(uint32_t id) {
-	id_ = id;
-}
-
-void Archive::FSegment::write(uint64_t pos, File* file) {
-	// file->awrite(pos, this, sizeof(*this));
-}
-
-void Archive::FSegment::read(uint64_t pos, File* file) {
-	// file->aread(pos, this, sizeof(*this));
-}
-
-Archive::FSegment& Archive::FileSegment::getFSegment() {
-	return fsegment_;
-}
-
-void Archive::FileSegment::setName(const std::string& name) {
-	name_ = name;
-}
-
-const std::string& Archive::FileSegment::getName() const {
-	return name_;
-}
-
-Archive::Archive() {
-}
-
-Archive::~Archive() {
-}
-
-File& Archive::getFile() {
-	return file_;
-}
-
-void Archive::addNewFileBlock(const std::vector<FilePath>& files) {
-	ScopedLock mu(lock_);
-	ScopedBlockHeader block(FBlockHeader::kTypeFileList, this);
-	// File list.
-	auto* file_list = new FileListBlock(block.getHeader());
-	// Write the file headers.
-	for (const auto& file : files) {
-		file_list->addFilePath(file);
-		std::string name = file.getName();
-		// +1 for null char.
-		// getFile().write(&name[0], name.length() + 1);
+std::ostream& operator<<(std::ostream& os, CompLevel comp_level) {
+	switch (comp_level) {
+	case kCompLevelStore: return os << "store";
+	case kCompLevelTurbo: return os << "turbo";
+	case kCompLevelFast: return os << "fast";
+	case kCompLevelMid: return os << "mid";
+	case kCompLevelHigh: return os << "high";
+	case kCompLevelMax: return os << "max";
 	}
+	return os << "unknown";
 }
 
-FileManager& Archive::getFileManager() {
-	return file_manager_;
-}
-
-void Archive::open(const FilePath& file_path, bool overwrite, std::ios_base::open_mode mode) {
-	file_.open(file_path.getName(), std::ios_base::binary | mode);
-	if (!file_.length() || overwrite) {
-		// If the file is empty we need to write out the archive headder before we do anything.
-		// file_.write(reinterpret_cast<void*>(&header_), sizeof(header_));
+Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer) {
+	switch (filter_) {
+	case kFilterTypeDict:
+		if (analyzer) {
+			auto& builder = analyzer->getDictBuilder();
+			Dict::CodeWordGeneratorFast generator;
+			Dict::CodeWordSet code_words;
+			generator.generateCodeWords(builder, &code_words);
+			auto dict_filter = new Dict::Filter(stream, 0x3, 0x4, 0x6);
+			dict_filter->addCodeWords(code_words.getCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_);
+			return dict_filter;
+		}
+		return nullptr;
+	case kFilterTypeX86:
+		return new X86AdvancedFilter(stream);
 	}
-}
-
-Archive::Job* Archive::startCompressionJob() {
 	return nullptr;
 }
 
-/*
-void Archive::compressBlock(OffsetFileWriteStream* out_stream, uint32_t method, ReadStream* stream, uint32_t) {
-	assert(out_stream != nullptr);
-	Compressor* compressor = CompressorFactories::makeCompressor(method);
-	assert(compressor != nullptr);
-	compressor->compress(stream, out_stream);
-#if 0
-	FBlock::Header header;
-	header.algorithm = method;
-	header.csize = 0;
-	header.mem = mem;
-	header.pad1 = header.pad2 = 0;
-	uint64_t pos = out_stream->tell();
-	out_stream->write(reinterpret_cast<byte*>(&header), sizeof(header));
-	uint64_t start_pos = out_stream->tell();
-	compressor->compress(stream, out_stream);
-	// Update csize to how many bytes we wrote.
-	header.csize = out_stream->tell() - start_pos;
-	// Update the block header and rewrite.
-	out_stream->seek(pos);
-	out_stream->write(reinterpret_cast<byte*>(&header), sizeof(header));
-#endif
-}
-*/
-
-	/*
-void Archive::compressFiles(OffsetFileWriteStream* out_stream, uint32_t method, FileSegment::Vector* block, uint32_t mem) {
-	// Start by writing out the header.
-	FListHeader header(FListHeader::kBlockTypeSegment, static_cast<uint64_t>(block->size()));
-	out_stream->write(reinterpret_cast<byte*>(&header), sizeof(header));
-	// Write the segments.
-	for (auto& file_segment : *block) {
-		auto& fseg = file_segment.getFSegment();
-		fseg.setId(resolveFilename(file_segment.getName()));
-		out_stream->write(reinterpret_cast<byte*>(&fseg), sizeof(fseg));
+// Analyze and compress.
+void Archive::compress(Stream* in) {
+	Analyzer analyzer;
+	auto start_a = clock();
+	std::cout << "Analyzing" << std::endl;
+	{
+		ProgressThread thr(in, stream_);
+		analyzer.analyze(in);
 	}
-	// Compress the actual file block.
-	FileSegmentReadStream in_stream(this, block);
-	compressBlock(out_stream, method, &in_stream, mem);
-}
+	std::cout << std::endl;
+	analyzer.dump();
+	std::cout << "Analyzing took " << clockToSeconds(clock() - start_a) << "s" << std::endl << std::endl;
 
-void Archive::compressFiles(uint32_t method, FileSegment::Vector* block, uint32_t mem) {
-	ScopedLock mu(lock_);
-	OffsetFileWriteStream stream(&getFile());
-	compressFiles(&stream, 0, block, 4);
-}
-
-std::vector<Archive::FileSegment::Vector> Archive::splitFiles(const std::vector<FilePath>& files, uint32_t blocks, uint64_t min_block_size) {
-	assert(blocks > 0);
-	std::vector<Archive::FileSegment::Vector> ret;
-	uint64_t total_length = 0;
-	// File lengths;
-	std::vector<uint64_t> lengths;
-	// Calculate offsets.
-	for (auto& file_path : files) {
-		const std::string name = file_path.getName();
-		uint64_t length = getFileLength(name);
-		lengths.push_back(length);
-		total_length += length;
-	}
-	uint32_t min_total_blocks = static_cast<uint32_t>(total_length / min_block_size + 1);
-	blocks = std::min(blocks, min_total_blocks);
-	// Split the files into blocks.
-	ret.resize(blocks);
-	uint32_t file_index = 0;
-	uint64_t file_offset = 0;
-	uint64_t avg_block_size = (total_length + blocks - 1) / blocks;
-	for (Archive::FileSegment::Vector& seg_vec : ret) {
-		uint64_t block_size = std::min(avg_block_size, total_length);
-		while (block_size > 0) {
-			uint64_t file_length = lengths[file_index];
-			Archive::FileSegment fseg;
-			fseg.setName(files[file_index].getName());
-			const uint64_t file_remain = file_length - file_offset;
-			uint64_t bytes = std::min(block_size, file_remain);
-			fseg.getFSegment().setOffset(file_offset);
-			fseg.getFSegment().setLength(bytes);
-			file_offset += bytes;
-			if (file_offset >= file_length) {
-				++file_index;
-				file_offset = 0;
+	// Compress blocks.
+	uint64_t total_in = 0;
+	for (size_t p_idx = 0; p_idx < static_cast<size_t>(Detector::kProfileCount); ++p_idx) {
+		auto profile = static_cast<Detector::Profile>(p_idx);
+		// Compress each stream type.
+		std::vector<FileSegmentStream::FileSegments> segments;
+		uint64_t pos = 0;
+		FileSegmentStream::FileSegments seg;
+		seg.base_offset_ = 0;
+		seg.stream_ = in;
+		for (const auto& b : analyzer.getBlocks()) {
+			const auto len =  b.length();
+			if (b.profile() == profile) {
+				FileSegmentStream::SegmentRange range;
+				range.offset_ = pos;
+				range.length_ = len;
+				seg.ranges_.push_back(range);
 			}
-			block_size -= bytes;
-			seg_vec.push_back(fseg);
+			pos += len;
+		}
+		seg.calculateTotalSize();
+		segments.push_back(seg);
+		if (seg.total_size_ > 0) {
+			auto start = clock();
+			auto out_start = stream_->tell();
+			Algorithm algo(options_, profile);
+			algo.write(stream_);
+			FileSegmentStream segstream(&segments, 0u);	
+			std::cout << "Compressing " << Detector::profileToString(profile)
+				<< " stream size=" << formatNumber(seg.total_size_) << "\t" << std::endl;
+			std::unique_ptr<Filter> filter(algo.createFilter(&segstream, &analyzer));
+			Stream* in_stream = &segstream;
+			if (filter.get() != nullptr) in_stream = filter.get();
+			std::unique_ptr<Compressor> comp(algo.createCompressor());
+			{
+				ProgressThread thr(&segstream, stream_, true, out_start);
+				comp->compress(in_stream, stream_);
+			}
+			total_in += segstream.tell();
+			std::cout << std::endl << "Compressed " << formatNumber(seg.total_size_) << " -> " << formatNumber(stream_->tell() - out_start)
+				<< " in " << clockToSeconds(clock() - start) << "s" << std::endl << std::endl;
 		}
 	}
-	return ret;
-}
-*/
-
-Archive::FListHeader::FListHeader(BlockType type, uint64_t count)
-	: type_(type), count_(count), next_block_(0) {
 }
 
-void Archive::FListHeader::setNextBlock(uint64_t next_block) {
-	next_block_ = next_block;
-}
+// Decompress.
+void Archive::decompress(Stream* out) {
 
-uint32_t Archive::resolveFilename(const std::string& file_name) {
-	return 0; // This needs to get fixed.
-}
-
-Archive::BlockHeader* Archive::newBlockHeader(FBlockHeader::Type type) {
-	BlockHeader* new_header = new BlockHeader(this);
-	new_header->getHeader().setType(type);
-	new_header->getHeader().setLength(0);
-	// Try to add it at the end.
-	file_.seek(0, SEEK_END);
-	uint64_t offset = file_.tell();
-	// Set offset.
-	new_header->setOffset(offset);
-	new_header->write();
-	new_header->setDataOffset(file_.tell());
-	return new_header;
-}
-
-void Archive::Dump(std::ostream& os) {
-	for (const auto* block : block_headers_) {
-		// TODO: Dump.
-	}
 }

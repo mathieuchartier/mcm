@@ -93,17 +93,17 @@ forceinline void prefetch(const void* ptr) {
 #endif
 }
 
-forceinline static bool is_upper(char c) {
+forceinline static bool isUpperCase(int c) {
 	return c >= 'A' && c <= 'Z';
 }
-
-forceinline static bool is_lower(char c) {
+forceinline static bool isLowerCase(int c) {
 	return c >= 'a' && c <= 'z';
 }
-
-forceinline static char lower_case(char c) {
-	if (is_upper(c)) c = c - 'A' + 'a';
-	return c;
+forceinline static bool isWordChar(int c) {
+	return isLowerCase(c) || isUpperCase(c);
+}
+forceinline static int makeLowerCase(int c) {
+	return c - 'A' + 'a';
 }
 
 // Trust in the compiler

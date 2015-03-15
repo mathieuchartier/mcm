@@ -246,6 +246,24 @@ private:
 	size_t block_pos_;
 };
 
+
+class IdentityBlockFilter : public ByteBufferFilter<0x10000> {
+public:
+	IdentityBlockFilter(Stream* stream) : ByteBufferFilter(stream) {
+	}
+	virtual void forwardFilter(byte* ptr, size_t count) {
+	}
+	virtual void reverseFilter(byte* ptr, size_t count) {
+	}
+	static uint32_t getMaxExpansion() {
+		return 1;
+	}
+	void dumpInfo() const {
+	}
+	void setOpt(uint32_t s) {
+	}
+};
+
 template <typename Compressor, typename Filter>
 class FilterCompressor : public Compressor {
 public:

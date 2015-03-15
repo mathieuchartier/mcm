@@ -299,8 +299,14 @@ public:
 		mem_usage = usage;
 	}
 
-	CM(uint32_t mem = 8, bool lzp_enabled = kUseLZP)
-		: mem_usage(mem), opt_var(0), lzp_enabled_(lzp_enabled), profile_(kProfileBinary), force_profile_(false) {
+	CM(uint32_t mem = 8, bool lzp_enabled = kUseLZP, Detector::Profile profile = Detector::kProfileDetect)
+		: mem_usage(mem), opt_var(0), lzp_enabled_(lzp_enabled) {
+		force_profile_ = profile != Detector::kProfileDetect;
+		if (force_profile_) {
+			profile_  = profileForDetectorProfile(profile);
+		} else {
+			profile_ = kProfileBinary;
+		}
 		remain_bytes_ = std::numeric_limits<uint64_t>::max();
 	}
 
@@ -509,11 +515,11 @@ public:
 					p += p == 0;
 				} else if (false) {
 					// This SSE is disabled for speed.
-					p = (p + sse.p(stp, mixer_sse_ctx & 0xFF)) / 2;
+					p = (p + sse.p(stp + kMaxValue / 2, (owhash & 0xFF) * 256 + mixer_ctx)) / 2;
 					p += p == 0;
 				}
 			} else if (false) {
-				p = (p + sse.p(stp + kMaxValue / 2, (mixer_sse_ctx & 0xFF) * 256 + mixer_ctx)) / 2;
+				p = (p + sse.p(stp + kMaxValue / 2, (owhash & 0xFF) * 256 + mixer_ctx)) / 2;
 				p += p == 0;
 			}
 		}
@@ -553,9 +559,12 @@ public:
 					sse2.update(bit);
 				} else if (!kUseSSEOnlyLZP || sse_ctx != 0) {
 					sse.update(bit);
+				} else {
+					// sse.update(bit);
 				}
 			} else {
-				mixer_sse_ctx = mixer_sse_ctx * 2 + ret;
+				// mixer_sse_ctx = mixer_sse_ctx * 2 + ret;
+				// sse.update(bit);
 			}
 		}
 		if (kBitType != kBitTypeLZP) {

@@ -163,19 +163,21 @@ public:
 	}
 
 	void seek(uint64_t pos) {
-		seek(static_cast<uint64_t>(pos), SEEK_SET);
+		auto res = seek(static_cast<uint64_t>(pos), SEEK_SET);
+		dcheck(res == 0);
 	}
 	int seek(int64_t pos, int origin) {
 		if (origin == SEEK_SET && pos == offset) {
 			return 0; // No need to do anything.
 		}
 		int ret = _fseeki64(handle, pos, origin);
-		if (!ret) { // 0 = success
+		if (ret == 0) {
 			if (origin != SEEK_SET) {
 				// Don't necessarily know where the end is.
 				offset = _ftelli64(handle);
 			} else {
 				offset = pos;
+				assert(_ftelli64(handle) == offset);
 			}
 		}
 		return ret;
@@ -187,31 +189,31 @@ public:
 
 	// Atomic read.
 	// TODO: fread already acquires a lock.
-	forceinline size_t aread(uint64_t pos, uint8_t* buffer, size_t bytes) {
+	forceinline size_t readat(uint64_t pos, uint8_t* buffer, size_t bytes) {
 		std::unique_lock<std::mutex> mu(lock);
-		seek(pos); // Only seeks if necessary.
+		seek(pos);
 		return read(buffer, bytes);
 	}
 
 	// Atomic write.
 	// TODO: fwrite already acquires a lock.
-	forceinline void awrite(uint64_t pos, const uint8_t* buffer, size_t bytes) {
+	forceinline void writeat(uint64_t pos, const uint8_t* buffer, size_t bytes) {
 		std::unique_lock<std::mutex> mu(lock);
-		seek(pos); // Only seeks if necessary.
+		seek(pos);
 		write(buffer, bytes);
 	}
 
 	// Atomic get (slow).
 	forceinline int aget(uint64_t pos) {
 		std::unique_lock<std::mutex> mu(lock);
-		seek(pos); // Only seeks if necessary.
+		seek(pos);
 		return get();
 	}
 
 	// Atomic write (slow).
 	forceinline void aput(uint64_t pos, byte c) {
 		std::unique_lock<std::mutex> mu(lock);
-		seek(pos); // Only seeks if necessary.
+		seek(pos);
 		put(c);
 	}
 
@@ -352,6 +354,7 @@ public:
 
 // FileSegmentStream is an advanced stream which reads / writes from arbitrary sections from multiple files.
 class FileSegmentStream : public Stream {
+public:
 	struct SegmentRange {
 		// 32 bits for reducing memory usage.
 		uint32_t offset_;
@@ -359,7 +362,7 @@ class FileSegmentStream : public Stream {
 	};
 	class FileSegments {
 	public:
-		File* file_;
+		Stream* stream_;
 		uint64_t base_offset_;
 		uint64_t total_size_;  // Used to optimized seek.
 		std::vector<SegmentRange> ranges_;
@@ -370,9 +373,9 @@ class FileSegmentStream : public Stream {
 		}
 	};
 
-	FileSegmentStream(std::vector<FileSegments>* segments)
-		: segments_(segments), file_idx_(-1), cur_file_(nullptr)
-		, range_idx_(0), num_ranges_(0), cur_pos_(0), cur_end_(0) {
+	FileSegmentStream(std::vector<FileSegments>* segments, uint64_t count)
+		: segments_(segments), file_idx_(-1), cur_stream_(nullptr)
+		, range_idx_(0), num_ranges_(0), cur_pos_(0), cur_end_(0), count_(count) {
 	}
 	virtual void put(int c) {
 		const uint8_t b = c;
@@ -383,59 +386,66 @@ class FileSegmentStream : public Stream {
 	}
 	virtual int get() {
 		uint8_t c;
-		if (!read(&c, 1)) return EOF;
+		if (read(&c, 1) == 0) return EOF;
 		return c;
 	}
 	virtual size_t read(uint8_t* buf, size_t n) {
 		return process<false>(buf, n);
 	}
+	virtual uint64_t tell() const {
+		return count_;
+	}
 
 private:
 	std::vector<FileSegments>* const segments_;
 	int file_idx_;
-	File* cur_file_;
+	Stream* cur_stream_;
 	size_t range_idx_;
 	size_t num_ranges_;
 	uint64_t cur_pos_;
 	uint64_t cur_end_;
+	uint64_t count_;
 
 	template <bool w>
 	size_t process(uint8_t* buf, size_t n) {
-		const size_t start = n;
-		while (n != 0) {
+		const uint8_t* start = buf;
+		const uint8_t* limit = buf + n;
+		while (buf < limit) {
 			if (cur_pos_ >= cur_end_) {
 				nextRange();
 				if (cur_pos_ >= cur_end_) break;
 			}
-			const size_t max_c = std::min(n, cur_end_ - cur_pos_);
+			const size_t max_c = std::min(
+				static_cast<size_t>(limit - buf), cur_end_ - cur_pos_);
 			size_t count;
 			if (w) {
-				cur_file_->awrite(cur_pos_, buf, max_c);
+				cur_stream_->writeat(cur_pos_, buf, max_c);
+				count = max_c;	
 			} else {
-				count = cur_file_->aread(cur_pos_, buf, max_c);
+				count = cur_stream_->readat(cur_pos_, buf, max_c);
 			}
 			cur_pos_ += count;
-			n -= count;
+			buf += count;
 		}
-		return start - n;
+		count_ += buf - start;
+		return buf - start;
 	}
 	void nextRange() {
 		while (cur_pos_ >= cur_end_) {
-			while (range_idx_ >= num_ranges_) {
-				// Out of ranges in current file, go to next file.
-				++file_idx_;
-				if (file_idx_ >= segments_->size()) return;
-				auto* segs = &segments_->operator[](file_idx_);
-				num_ranges_ = segs->ranges_.size();
-				cur_file_ = segs->file_;
-				range_idx_ = 0;
-			}
 			if (range_idx_ < num_ranges_) {
 				auto* segs = &segments_->operator[](file_idx_);
 				auto* range = &segs->ranges_[range_idx_];
 				cur_pos_ = segs->base_offset_ + range->offset_;
 				cur_end_ = cur_pos_ + range->length_;
 				++range_idx_;
+			} else {
+				// Out of ranges in current file, go to next file.
+				++file_idx_;
+				if (file_idx_ >= segments_->size()) return;
+				auto* segs = &segments_->operator[](file_idx_);
+				num_ranges_ = segs->ranges_.size();
+				cur_stream_ = segs->stream_;
+				range_idx_ = 0;
 			}
 		}
 	}
@@ -547,19 +557,6 @@ inline WriteStream& operator << (WriteStream& stream, float c) {
 
 inline WriteStream& operator << (WriteStream& stream, double c) {
 	return stream << *reinterpret_cast<uint64_t*>(&c);
-}
-
-inline uint64_t getFileLength(const std::string& name) {
-	FILE* file = nullptr;
-#ifdef WIN32
-	fopen_s(&file, name.c_str(), "rb");
-#else
-	file = fopen(name.c_str(), "rb");
-#endif
-	fseek(file, 0, SEEK_END);
-	auto ret = _ftelli64(file);
-	fclose(file);
-	return static_cast<uint64_t>(ret);
 }
 
 #endif
