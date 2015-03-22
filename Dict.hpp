@@ -420,6 +420,7 @@ public:
 			dict_buffer_[3] = static_cast<uint8_t>(dict_buffer_size_ >> 0);
 			// Generate the actual encode map.
 			generate(*words, num1, num2, num3);
+			std::cout << "Dictionary size " << dict_buffer_.size() << std::endl;
 			
 		}
 		void generate(std::vector<std::string>& words, size_t num1, size_t num2, size_t num3) {
@@ -453,6 +454,13 @@ public:
 			uint8_t* out_ptr = out;
 			const uint8_t* const in_limit = in + *in_count;
 			const uint8_t* const out_limit = out + *out_count;
+			const size_t remain_dict = dict_buffer_size_ - dict_buffer_pos_;
+			if (remain_dict > 0) {
+				const size_t max_write = std::min(remain_dict, *out_count);
+				std::copy(&dict_buffer_[0] + dict_buffer_pos_, &dict_buffer_[0] + dict_buffer_pos_ + max_write, out_ptr);
+				out_ptr += max_write;
+				dict_buffer_pos_ += max_write;
+			}
 			while (in_ptr < in_limit) {
 				if (out_ptr + 4 >= out_limit) break;
 				if (*in_ptr == escape_char_ || *in_ptr == escape_cap_first_ || *in_ptr == escape_cap_word_ || *in_ptr >= 128) {
