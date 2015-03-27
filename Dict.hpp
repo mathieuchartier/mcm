@@ -132,6 +132,22 @@ public:
 		}
 	};
 
+	class SuffixSortComparator {
+	public:
+		SuffixSortComparator(const uint8_t* arr) : arr_(arr) {
+		}
+		forceinline bool operator()(uint32_t a, uint32_t b) const {
+			while (a > 0 && b > 0) {
+				if (arr_[--a] != arr_[--b]) {
+					return arr_[a] < arr_[b];
+				}
+			}
+			return a < b;
+		}
+	private:
+		const uint8_t* const arr_;
+	};
+
 	class Builder {
 		static const size_t kSuffixSize = 100 * MB;
 		// Suffix array buffer.
@@ -146,23 +162,6 @@ public:
 		// CC: first char EOR whole word.
 		WordCollectionMap words_;
 	public:
-		class SuffixSortComparator {
-		public:
-			SuffixSortComparator(const uint8_t* arr) : arr_(arr) {
-			}
-			bool operator()(uint32_t a, uint32_t b) {
-				while (a > 0 && b > 0) {
-					if (arr_[a] != arr_[b]) {
-						return arr_[a] < arr_[b];
-					}
-					--a;
-					--b;
-				}
-				return a < b;
-			}
-		private:
-			const uint8_t* const arr_;
-		};
 		void addChar(uint8_t c) {
 			// Add to current word.
 			if (isWordChar(c)) {
@@ -188,6 +187,7 @@ public:
 				for (size_t i = 0; i < word_pos_; ++i) {
 					if (buffer_pos_ < buffer_.size()) buffer_[buffer_pos_++] = word_[i];
 				}
+				if (buffer_pos_ < buffer_.size()) buffer_[buffer_pos_++] = c;
 				word_pos_ = 0;
 			}
 		}
@@ -205,72 +205,14 @@ public:
 		WordCollectionMap& getWords() {
 			return words_;
 		}
+		const std::vector<uint8_t>* getBuffer() const {
+			return &buffer_;
+		}
 	};
 
 	class CodeWordGenerator {
 	public:
 		virtual void generate(Builder& builder, CodeWordSet& code_words) = 0;
-	};
-
-	class CodeWordGeneratorHigh {
-		static const bool kDumpSuffixes = false;
-	public:
-		void generateCodeWords(Builder& builder, bool clear) {
-			auto& bwords = builder.getWords();
-			std::cout << bwords.size() << std::endl;
-			std::vector<WCPair> words; 
-			bwords.getWords(words, 10);
-			if (clear) {
-				bwords.clear();
-			}
-			std::sort(words.rbegin(), words.rend(), CompareWCPair());
-			std::unordered_set<std::string> is_word;
-			// One byte codewords are not interesting.
-			for (size_t i = 32; i < words.size(); ++i) is_word.insert(words[i].second);
-			// Generate suffix array???
-			std::vector<uint32_t> suffix_array;
-			/*
-			word_pos_ = 0;
-			size_t word_start = 0;
-			for (size_t i = 0; i < buffer_pos_; ++i) {
-				auto c = buffer_[i];
-				if (isWordChar(c)) {
-					if (word_pos_ < kMaxWordLen) {
-						word_[word_pos_++] = c;
-						if (word_pos_ == 1) word_start = i;
-					}
-				} else {
-					if (word_pos_ >= kMinWordLen) {
-						std::string s(word_, word_ + word_pos_);
-						if (is_word.find(s) != is_word.end()) {
-							if (word_start != 0) {
-								suffix_array.push_back(word_start - 1);
-							}
-						}
-					}
-					word_pos_ = 0;
-				}
-			}
-			auto* arr = &buffer_[0];
-			auto* limit = &buffer_[buffer_pos_];
-			SuffixSortComparator cmp(arr);
-			// std::sort(suffix_array.begin(), suffix_array.end(), cmp);
-
-			if (kDumpSuffixes) {
-				// Whether or not do dump suffixes.
-				std::ofstream fout("suffixes.txt");
-				for (auto idx : suffix_array) {
-					auto end = idx + 1;
-					while (isWordChar(arr[end])) ++end;
-					std::string s(std::max(arr, arr + idx - 12), std::min(arr + end, limit));
-					for (auto& c : s) {
-						if (c == '\n') c = '_';
-						if (c == '\t') c = '_';
-					}
-					fout << s << std::endl;
-				}
-			}*/
-		}
 	};
 
 	class CodeWordGeneratorFast {
@@ -282,8 +224,9 @@ public:
 
 			auto& word_map = builder.getWords();
 			std::vector<WCPair> word_pairs;
-			const size_t min_occurences = 3u;
-			word_map.getWords(word_pairs, min_occurences);
+			const size_t kMinOccurences = 9u;
+			word_map.getWords(word_pairs, kMinOccurences);
+			const auto occurences = word_pairs.size();
 			std::sort(word_pairs.rbegin(), word_pairs.rend(), CompareWCPair(1));
 
 			// Calculate number of 1 byte codewords in case its more than the original max.
@@ -312,7 +255,12 @@ public:
 			std::sort(word_pairs.rbegin(), word_pairs.rend(), CompareWCPair(2));
 
 			// 2 byte codes.
-			words->num3_ = 4;
+			for (num3 = 0; num3 < 32 && num3 + num1 < 128; ++num3) {
+				const size_t count3 = num3 * 128 * 128;
+				const size_t count2 = (128u - num3 - num1) * 128;
+				if (count2 + count3 >= word_pairs.size()) break;
+			}
+			words->num3_ = num3;
 			const size_t end2 = 256 - words->num3_;
 			words->num2_ = end2 - std::min(static_cast<size_t>(128 + num1), end2);
 			for (size_t b1 = 128u + num1; b1 < end2; ++b1) {
@@ -324,7 +272,6 @@ public:
 					}
 				}
 			}
-			std::sort(cw->begin() + count1, cw->end());
 			word_pairs.erase(word_pairs.begin(), word_pairs.begin() + count2);
 			std::sort(word_pairs.rbegin(), word_pairs.rend(), CompareWCPair(3));
 
@@ -341,14 +288,112 @@ public:
 				}
 			}
 			word_pairs.erase(word_pairs.begin(), word_pairs.begin() + count3);
-			std::sort(cw->begin() + count1 + count2, cw->end());
+			
+			if (false) {
+				// High mode, incomplete.
+				// Total / count.
+				typedef std::pair<uint64_t, uint64_t> MeanPair;
+				std::unordered_map<std::string, MeanPair> words2b;
+				std::unordered_map<std::string, MeanPair> words3b;
+				auto it = cw->begin() + count1;
+				for (; it != cw->begin() + count1 + count2; ++it) {
+					words2b.insert(std::make_pair(*it, MeanPair(0, 0)));
+				}
+				for (; it != cw->end(); ++it) {
+					words3b.insert(std::make_pair(*it, MeanPair(0, 0)));
+				}
+				
+				// Expensive suffix sort approach.
+				auto* buffer = builder.getBuffer();
+				// Find interesting indexes.
+				std::vector<uint32_t> indexes;
+				size_t num_words = 0;
+				static const size_t kSuffixOffset = 0;
+				const uint8_t* arr = &buffer->operator[](0);
+				for (size_t pos = 0; pos < buffer->size(); ) {
+					if (isWordChar(arr[pos])) {
+						size_t len = 0;
+						for (;pos + len < buffer->size() && isWordChar(arr[pos + len]); ++len) {
+						}
+						std::string s(arr + pos, arr + pos + len);
+						if (words2b.find(s) != words2b.end() || words3b.find(s) != words3b.end()) {
+							indexes.push_back(pos + kSuffixOffset);
+						}
+						++num_words;
+						pos += len;
+					} else {
+						++pos;
+					}
+				}
 
+				SuffixSortComparator cmp(arr);
+				auto start = clock();
+				std::cout << "sorting " << indexes.size() << "/" << num_words << std::endl;
+				std::sort(indexes.begin(), indexes.end(), cmp);
+				std::cout << "sorting took " << clockToSeconds(clock() - start) << std::endl;
+
+				// Use suffix to build avg indexes.
+				// Whether or not do dump suffixes.
+				// std::ofstream fout("suffixes.txt");
+				for (size_t i = 0; i < indexes.size(); ++i) {
+					size_t pos = indexes[i] - kSuffixOffset;
+					check(isWordChar(arr[pos]));
+					size_t len = 0;
+					for (;pos + len < buffer->size() && isWordChar(arr[pos + len]); ++len) {
+					}
+					std::string s(arr + pos, arr + pos + len);
+
+#if 0
+					auto end = pos + len;
+					std::string str(std::max(arr, arr + pos - 12), std::min(arr + end, arr + buffer->size()));
+					for (auto& c : str) {
+						if (c == '\n') c = '_';
+						if (c == '\t') c = '_';
+					}
+					fout << str << std::endl;
+#endif
+
+					auto it = words2b.find(s);
+					if (it == words2b.end()) {
+						it = words3b.find(s);
+						check(it != words3b.end());
+					}
+					it->second.first += i;
+					++it->second.second;
+				}
+
+				// Re-sort based on averages.
+				std::vector<std::pair<uint32_t, std::string>> sort_arr;
+				// 2b first
+				for (auto& p : words2b) {
+					sort_arr.push_back(std::make_pair(static_cast<uint32_t>(p.second.first / p.second.second), p.first));
+				}
+				std::sort(sort_arr.begin(), sort_arr.end());
+				it = cw->begin() + count1;
+				for (auto& p : sort_arr) {
+					*(it++) = p.second;
+				}
+
+				// 3b first
+				sort_arr.clear();
+				for (auto& p : words3b) {
+					sort_arr.push_back(std::make_pair(static_cast<uint32_t>(p.second.first / p.second.second), p.first));
+				}
+				std::sort(sort_arr.begin(), sort_arr.end());
+				for (auto& p : sort_arr) {
+					*(it++) = p.second;
+				}
+
+			} else {
+				std::sort(cw->begin() + count1, cw->begin() + count1 + count2);
+				std::sort(cw->begin() + count1 + count2, cw->end());
+			}
 			// Remaining chars.
 			size_t remain = 0;
 			for (const auto& p : word_pairs) remain += (p.first - 1) * (p.second.length() - 3);
 
 			if (kVerbose) {
-				std::cout << "words >= " << min_occurences << " occurences=" << word_pairs.size()
+				std::cout << "distinct words >= " << kMinOccurences << " occurences=" << occurences
 					<< " 1b(" << count1 << ")=" << save1
 					<< "+2b(" << count2 << ")=" << save2
 					<< "+3b(" << count3 << ")b=" << save3
@@ -375,6 +420,8 @@ public:
 		// Encoding data structures.
 		std::unordered_map<std::string, CodeWord> encode_map_;
 
+		// State
+		uint8_t last_char_;
 	public:
 		// Serialize to and from.
 		// num words
@@ -420,8 +467,7 @@ public:
 			dict_buffer_[3] = static_cast<uint8_t>(dict_buffer_size_ >> 0);
 			// Generate the actual encode map.
 			generate(*words, num1, num2, num3);
-			std::cout << "Dictionary size " << dict_buffer_.size() << std::endl;
-			
+			std::cout << "Dictionary words=" << words->size() << " size=" << prettySize(dict_buffer_.size()) << std::endl;
 		}
 		void generate(std::vector<std::string>& words, size_t num1, size_t num2, size_t num3) {
 			static const size_t start = 128u;
@@ -463,54 +509,53 @@ public:
 			}
 			while (in_ptr < in_limit) {
 				if (out_ptr + 4 >= out_limit) break;
-				if (*in_ptr == escape_char_ || *in_ptr == escape_cap_first_ || *in_ptr == escape_cap_word_ || *in_ptr >= 128) {
-					*(out_ptr++) = escape_char_;
-					*(out_ptr++) = *(in_ptr++);
-				} else if (isWordChar(*in_ptr)) {
-					size_t word_len = 0;
-					while (in_ptr + word_len < in_limit && isWordChar(in_ptr[word_len])) {
-						++word_len;
-					}
-					if (in_ptr + word_len >= in_limit && word_len != in_limit - in) {
-						// If the word is all the remaining chars and not the whole string, then it may have a suffix.
-						break;
-					}
-					std::string word(in_ptr, in_ptr + word_len);
-					const size_t max_out = static_cast<size_t>(out_limit - out_ptr);
-					if (word_len + 1 > max_out) break; // Maybe too long to encode.
-					if (word_len >= 3 && word_len <= kMaxWordLen) {
-						size_t upper_count = 0;
-						for (size_t i = 0; i < word_len; ++i) {
-							upper_count += isUpperCase(in_ptr[i]);
+				if (!isWordChar(last_char_)) {
+					if (isWordChar(*in_ptr)) {
+						size_t word_len = 0;
+						while (in_ptr + word_len < in_limit && isWordChar(in_ptr[word_len])) {
+							++word_len;
 						}
-						if (upper_count == word_len) {
-							for (auto& c : word) c = makeLowerCase(c);
-						} else if (upper_count == 1 && isUpperCase(in_ptr[0])) {
-							word[0] = makeLowerCase(word[0]);
+						if (in_ptr + word_len >= in_limit && word_len != in_limit - in) {
+							// If the word is all the remaining chars and not the whole string, then it may have a suffix.
+							break;
 						}
-						auto it = encode_map_.find(word);
-						if (it != encode_map_.end()) {
-							if (upper_count == word_len) {
-								*(out_ptr++) = escape_cap_word_;
-							} else if (upper_count == 1 && isUpperCase(in_ptr[0])) {
-								*(out_ptr++) = escape_cap_first_;
+						std::string word(in_ptr, in_ptr + word_len);
+						const size_t max_out = static_cast<size_t>(out_limit - out_ptr);
+						if (word_len + 1 > max_out) break; // Maybe too long to encode.
+						if (word_len >= 3 && word_len <= kMaxWordLen) {
+							size_t upper_count = 0;
+							for (size_t i = 0; i < word_len; ++i) {
+								upper_count += isUpperCase(in_ptr[i]);
 							}
-							auto& code_word = it->second;
-							const auto num_bytes = code_word.numBytes();
-							dcheck(num_bytes >= 1 && num_bytes <= 3);
-							*(out_ptr++) = code_word.byte1();
-							if (num_bytes > 1) *(out_ptr++) = code_word.byte2();
-							if (num_bytes > 2) *(out_ptr++) = code_word.byte3();
-							in_ptr += word_len;
-							continue;
+							if (upper_count == word_len) {
+								for (auto& c : word) c = makeLowerCase(c);
+							} else if (upper_count == 1 && isUpperCase(in_ptr[0])) {
+								word[0] = makeLowerCase(word[0]);
+							}
+							auto it = encode_map_.find(word);
+							if (it != encode_map_.end()) {
+								if (upper_count == word_len) {
+									*(out_ptr++) = escape_cap_word_;
+								} else if (upper_count == 1 && isUpperCase(in_ptr[0])) {
+									*(out_ptr++) = escape_cap_first_;
+								}
+								auto& code_word = it->second;
+								const auto num_bytes = code_word.numBytes();
+								dcheck(num_bytes >= 1 && num_bytes <= 3);
+								*(out_ptr++) = code_word.byte1();
+								if (num_bytes > 1) *(out_ptr++) = code_word.byte2();
+								if (num_bytes > 2) *(out_ptr++) = code_word.byte3();
+								in_ptr += word_len;
+								last_char_ = 'a';
+								continue;
+							}
 						}
 					}
-					std::copy(in_ptr, in_ptr + word_len, out_ptr);
-					in_ptr += word_len;
-					out_ptr += word_len;
-				} else {
-					*(out_ptr++) = *(in_ptr++);
+					if (*in_ptr == escape_char_ || *in_ptr == escape_cap_first_ || *in_ptr == escape_cap_word_ || *in_ptr >= 128) {
+						*(out_ptr++) = escape_char_;
+					}
 				}
+				*(out_ptr++) = last_char_ = *(in_ptr++);
 			}
 			dcheck(in_ptr <= in_limit);
 			dcheck(out_ptr <= out_limit);
@@ -525,7 +570,8 @@ public:
 			: ByteStreamFilter(stream)
 			, escape_char_(escape_char)
 			, escape_cap_first_(escape_cap_first)
-			, escape_cap_word_(escape_cap_word) {
+			, escape_cap_word_(escape_cap_word)
+			, last_char_(0) {
 		}
 	};
 	

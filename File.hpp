@@ -371,6 +371,17 @@ public:
 			total_size_ = 0;
 			for (const auto& seg : ranges_) total_size_ += seg.length_;
 		}
+		void write(Stream* stream) {
+			stream->leb128Encode(base_offset_);
+			stream->leb128Encode(ranges_.size());
+			uint64_t prev = 0;
+			for (const auto& r : ranges_) {
+				uint64_t delta = r.offset_ - prev;
+				stream->leb128Encode(delta);
+				stream->leb128Encode(static_cast<uint64_t>(r.length_));
+				prev = r.offset_;
+			}
+		}
 	};
 
 	FileSegmentStream(std::vector<FileSegments>* segments, uint64_t count)

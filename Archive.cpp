@@ -80,7 +80,7 @@ Archive::Algorithm::Algorithm(const CompressionOptions& options, Detector::Profi
 		filter_ = kFilterTypeX86;
 		break;
 	case Detector::kProfileText:
-		lzp_enabled_ = false;
+		lzp_enabled_ = true;
 		filter_ = kFilterTypeDict;
 		break;
 	}
@@ -200,7 +200,7 @@ void Archive::compress(Stream* in) {
 		seg.base_offset_ = 0;
 		seg.stream_ = in;
 		for (const auto& b : analyzer.getBlocks()) {
-			const auto len =  b.length();
+			const auto len = b.length();
 			if (b.profile() == profile) {
 				FileSegmentStream::SegmentRange range;
 				range.offset_ = pos;
@@ -212,6 +212,9 @@ void Archive::compress(Stream* in) {
 		seg.calculateTotalSize();
 		segments.push_back(seg);
 		if (seg.total_size_ > 0) {
+			auto start_pos = stream_->tell();
+			seg.write(stream_);
+			std::cout << "Overhead size " << stream_->tell() - start_pos << std::endl;
 			auto start = clock();
 			auto out_start = stream_->tell();
 			Algorithm algo(options_, profile);

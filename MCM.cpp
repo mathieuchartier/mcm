@@ -466,9 +466,10 @@ int main(int argc, char* argv[]) {
 				archive.compress(&fin);
 			}
 			clock_t time = clock() - start;
-			std::cout << "Compressing " << formatNumber(fin.tell()) << "->" << formatNumber(fout.tell())
-				<< " took " << std::setprecision(3) << clockToSeconds(time) << "s"
-				<< " bpc " << double(fout.tell()) * 8.0 / double(fin.tell()) << " bpc" << std::endl;
+			fin.seek(0, SEEK_END);
+			std::cout << "Compressed " << formatNumber(fin.tell()) << "->" << formatNumber(fout.tell())
+				<< " in " << std::setprecision(3) << clockToSeconds(time) << "s"
+				<< " bpc=" << double(fout.tell()) * 8.0 / double(fin.tell()) << std::endl;
 			std::cout << "Avg rate: " << std::setprecision(3) << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fin.tell()) << " ns/B" << std::endl;
 
 			fout.close();
