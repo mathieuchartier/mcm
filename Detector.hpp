@@ -400,16 +400,11 @@ public:
 			if (block.profile() == Detector::kProfileEOF) {
 				break;
 			}
-			std::string s;
 			for (size_t i = 0; i < block.length(); ++i) {
 				auto c = detector.popChar();
 				if (block.profile() == Detector::kProfileText) {
 					dict_builder_.addChar(c);
-					s.push_back(c);
 				}
-			}
-			if (block.profile() == Detector::kProfileText) {
-				int x = 2;
 			}
 			const size_t size = blocks_.size();
 			if (size > 0 && blocks_.back().profile() == block.profile()) {

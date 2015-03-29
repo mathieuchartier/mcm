@@ -176,6 +176,163 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer) {
 	return nullptr;
 }
 
+Archive::SolidBlock::SolidBlock() {
+
+}
+
+void Archive::constructBlocks(Stream* in, Analyzer* analyzer) {
+	// Compress blocks.
+	uint64_t total_in = 0;
+	for (size_t p_idx = 0; p_idx < static_cast<size_t>(Detector::kProfileCount); ++p_idx) {
+		auto profile = static_cast<Detector::Profile>(p_idx);
+		// Compress each stream type.
+		uint64_t pos = 0;
+		FileSegmentStream::FileSegments seg;
+		seg.base_offset_ = 0;
+		seg.stream_ = in;
+		for (const auto& b : analyzer->getBlocks()) {
+			const auto len = b.length();
+			if (b.profile() == profile) {
+				FileSegmentStream::SegmentRange range;
+				range.offset_ = pos;
+				range.length_ = len;
+				seg.ranges_.push_back(range);
+			}
+			pos += len;
+		}
+		seg.calculateTotalSize();
+		if (seg.total_size_ > 0) {
+			auto* solid_block = new Archive::SolidBlock();
+			solid_block->algorithm_ = Algorithm(options_, profile);
+			solid_block->segments_.push_back(seg);
+			solid_block->total_size_ = seg.total_size_;
+			blocks_.blocks_.push_back(solid_block);
+		}
+	}
+}
+
+void Archive::writeBlocks() {
+	std::vector<uint8_t> temp;
+	WriteVectorStream wvs(&temp);
+	// Write out the blocks into temp.
+	blocks_.write(&wvs);
+	// Compress overhead.
+	std::unique_ptr<Compressor> c(new CM<kCMTypeFast>(6, true, Detector::kProfileText));
+	ReadMemoryStream rms(&temp[0], &temp[0] + temp.size());
+	auto start_pos = stream_->tell();
+	c->compress(&rms, stream_);
+	std::cout << "Compressed metadata " << temp.size() << " -> " << stream_->tell() - start_pos << std::endl << std::endl;
+
+}
+
+void Archive::Blocks::write(Stream* stream) { 
+	stream->leb128Encode(blocks_.size());
+	for (auto* block : blocks_) {
+		block->write(stream);
+	}
+}
+
+void Archive::SolidBlock::write(Stream* stream) { 
+	algorithm_.write(stream);
+	stream->leb128Encode(segments_.size());
+	for (auto& seg : segments_) {
+		seg.write(stream);
+	}
+}
+
+class VerifyStream : public WriteStream {
+public:
+	Stream* const stream_;
+	uint64_t differences, total;
+
+	VerifyStream(Stream* stream) : stream_(stream) {
+		init();
+	}
+
+	void init() {
+		differences = total = 0;
+	}
+
+	void put(int c) {
+		auto ref = stream_->get();
+		if (c != ref) {
+			difference(ref, c);
+		}
+		++total;
+	}
+	void write(const uint8_t* buf, size_t n) {
+		uint8_t buffer[4 * KB];
+		while (n != 0) {
+			size_t count = stream_->read(buffer, std::min(4 * KB, n));
+			for (size_t i = 0; i < count; ++i) {
+				auto ref = buffer[i];
+				if (buf[i] != buffer[i]) {
+					difference(buffer[i], buf[i]);
+				}
+			}
+			buf += count;
+			n -= count;
+			total += count;
+		}
+	}
+
+	void difference(int ref, int c) {
+		if (differences == 0) {
+			std::cerr << "Difference found at byte! " << total << " b1: " << "ref: "
+				<< static_cast<int>(ref) << " new: " << static_cast<int>(c) << std::endl;
+		}
+		++differences;
+	}
+
+	virtual uint64_t tell() const {
+		return total;
+	}
+
+	void summary() {
+		if (stream_->get() != EOF) {
+			std::cerr << "ERROR: Output truncated at byte " << stream_->tell() << " differences=" << differences << std::endl;
+		} else {
+			if (differences) {
+				std::cerr << "ERROR: differences=" << differences << std::endl;
+			} else {
+				std::cout << "No differences found!" << std::endl;
+			}
+		}
+	}
+};
+
+void testFilter(Stream* stream, Analyzer* analyzer) {
+	std::vector<uint8_t> comp;
+	stream->seek(0);
+	auto start = clock();
+	{
+		auto& builder = analyzer->getDictBuilder();
+		Dict::CodeWordGeneratorFast generator;
+		Dict::CodeWordSet code_words;
+		generator.generateCodeWords(builder, &code_words);
+		auto dict_filter = new Dict::Filter(stream, 0x3, 0x4, 0x6);
+		dict_filter->addCodeWords(code_words.getCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_);
+		WriteVectorStream wvs(&comp);
+		Store store;
+		store.compress(dict_filter, &wvs);
+	}
+	uint64_t size = stream->tell();
+	std::cout << "Filter comp " << size << " -> " << comp.size() << " in " << clockToSeconds(clock() - start) << "s" << std::endl;
+	// Test reverse.
+	start = clock();
+	stream->seek(0);
+	VerifyStream vs(stream);
+	{
+		ReadMemoryStream rms(&comp);
+		Store store;
+		Dict::Filter filter_out(&vs);
+		store.decompress(&rms, &filter_out);
+		filter_out.flush();
+		vs.summary();
+	}
+	std::cout << "Filter decomp " << vs.tell() << " <- " << comp.size() << " in "  << clockToSeconds(clock() - start) << "s" << std::endl << std::endl;
+}
+
 // Analyze and compress.
 void Archive::compress(Stream* in) {
 	Analyzer analyzer;
@@ -189,51 +346,33 @@ void Archive::compress(Stream* in) {
 	analyzer.dump();
 	std::cout << "Analyzing took " << clockToSeconds(clock() - start_a) << "s" << std::endl << std::endl;
 
-	// Compress blocks.
-	uint64_t total_in = 0;
-	for (size_t p_idx = 0; p_idx < static_cast<size_t>(Detector::kProfileCount); ++p_idx) {
-		auto profile = static_cast<Detector::Profile>(p_idx);
-		// Compress each stream type.
-		std::vector<FileSegmentStream::FileSegments> segments;
-		uint64_t pos = 0;
-		FileSegmentStream::FileSegments seg;
-		seg.base_offset_ = 0;
-		seg.stream_ = in;
-		for (const auto& b : analyzer.getBlocks()) {
-			const auto len = b.length();
-			if (b.profile() == profile) {
-				FileSegmentStream::SegmentRange range;
-				range.offset_ = pos;
-				range.length_ = len;
-				seg.ranges_.push_back(range);
-			}
-			pos += len;
+	if (true) {
+		auto* dict = new Dict;
+		testFilter(in, &analyzer);
+	}
+
+	constructBlocks(in, &analyzer);
+	writeBlocks();
+
+	for (auto* block : blocks_.blocks_) {
+		auto start_pos = stream_->tell();
+		
+		auto start = clock();
+		auto out_start = stream_->tell();
+		FileSegmentStream segstream(&block->segments_, 0u);	
+		Algorithm* algo = &block->algorithm_;
+		std::cout << "Compressing " << Detector::profileToString(algo->profile())
+			<< " stream size=" << formatNumber(block->total_size_) << "\t" << std::endl;
+		std::unique_ptr<Filter> filter(algo->createFilter(&segstream, &analyzer));
+		Stream* in_stream = &segstream;
+		if (filter.get() != nullptr) in_stream = filter.get();
+		std::unique_ptr<Compressor> comp(algo->createCompressor());
+		{
+			ProgressThread thr(&segstream, stream_, true, out_start);
+			comp->compress(in_stream, stream_);
 		}
-		seg.calculateTotalSize();
-		segments.push_back(seg);
-		if (seg.total_size_ > 0) {
-			auto start_pos = stream_->tell();
-			seg.write(stream_);
-			std::cout << "Overhead size " << stream_->tell() - start_pos << std::endl;
-			auto start = clock();
-			auto out_start = stream_->tell();
-			Algorithm algo(options_, profile);
-			algo.write(stream_);
-			FileSegmentStream segstream(&segments, 0u);	
-			std::cout << "Compressing " << Detector::profileToString(profile)
-				<< " stream size=" << formatNumber(seg.total_size_) << "\t" << std::endl;
-			std::unique_ptr<Filter> filter(algo.createFilter(&segstream, &analyzer));
-			Stream* in_stream = &segstream;
-			if (filter.get() != nullptr) in_stream = filter.get();
-			std::unique_ptr<Compressor> comp(algo.createCompressor());
-			{
-				ProgressThread thr(&segstream, stream_, true, out_start);
-				comp->compress(in_stream, stream_);
-			}
-			total_in += segstream.tell();
-			std::cout << std::endl << "Compressed " << formatNumber(seg.total_size_) << " -> " << formatNumber(stream_->tell() - out_start)
-				<< " in " << clockToSeconds(clock() - start) << "s" << std::endl << std::endl;
-		}
+		std::cout << std::endl << "Compressed " << formatNumber(block->total_size_) << " -> " << formatNumber(stream_->tell() - out_start)
+			<< " in " << clockToSeconds(clock() - start) << "s" << std::endl << std::endl;
 	}
 }
 

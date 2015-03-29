@@ -219,6 +219,7 @@ public:
 		static const bool kVerbose = true;
 	public:
 		void generateCodeWords(Builder& builder, CodeWordSet* words) {
+			auto start_time = clock();
 			auto* cw = words->getCodeWords();
 			cw->clear();
 
@@ -388,17 +389,16 @@ public:
 				std::sort(cw->begin() + count1, cw->begin() + count1 + count2);
 				std::sort(cw->begin() + count1 + count2, cw->end());
 			}
-			// Remaining chars.
-			size_t remain = 0;
-			for (const auto& p : word_pairs) remain += (p.first - 1) * (p.second.length() - 3);
-
 			if (kVerbose) {
-				std::cout << "distinct words >= " << kMinOccurences << " occurences=" << occurences
-					<< " 1b(" << count1 << ")=" << save1
-					<< "+2b(" << count2 << ")=" << save2
-					<< "+3b(" << count3 << ")b=" << save3
-					<< ")=" << save1 + save2 + save3
-					<< " extra=" << remain << std::endl;
+				// Remaining chars.
+				size_t remain = 0;
+				for (const auto& p : word_pairs) remain += (p.first - 1) * (p.second.length() - 3);
+				std::cout << "Constructed dict words=" << count1 << "+" << count2 << "+" << count3 << "=" << occurences
+					<< " save=" << save1 << "+" << save2 << "+" << save3 << "=" << save1 + save2 + save3
+					<< " extra=" << remain
+					<< " time=" << clockToSeconds(clock() - start_time) << "s"
+					<< std::endl;
+
 			}
 		}
 	};
@@ -422,6 +422,14 @@ public:
 
 		// State
 		uint8_t last_char_;
+
+		// Decode data structures
+		std::vector<std::string> words1b;
+		size_t word1bstart;
+		std::vector<std::string> words2b;
+		size_t word2bstart;
+		std::vector<std::string> words3b;
+		size_t word3bstart;
 	public:
 		// Serialize to and from.
 		// num words
@@ -466,36 +474,77 @@ public:
 			dict_buffer_[2] = static_cast<uint8_t>(dict_buffer_size_ >> 8);
 			dict_buffer_[3] = static_cast<uint8_t>(dict_buffer_size_ >> 0);
 			// Generate the actual encode map.
-			generate(*words, num1, num2, num3);
+			generate(*words, num1, num2, num3, true);
 			std::cout << "Dictionary words=" << words->size() << " size=" << prettySize(dict_buffer_.size()) << std::endl;
 		}
-		void generate(std::vector<std::string>& words, size_t num1, size_t num2, size_t num3) {
+		void createFromBuffer() {
+			ReadMemoryStream rms(&dict_buffer_);
+			size_t pos = 0;
+			// Save space for dict size.
+			for (size_t i = 0; i < 4; ++i) {
+				rms.get();
+			}
+			// Encode escapes and such.
+			escape_char_ = rms.get();
+			escape_cap_first_ = rms.get();
+			escape_cap_word_ = rms.get();
+			size_t num1 = rms.get();
+			size_t num2 = rms.get();
+			size_t num3 = rms.get();
+			word1bstart = 128;
+			word2bstart = word1bstart + num1;
+			word3bstart = word2bstart + num2;
+			// Encode words.
+			std::vector<std::string> words;	
+			while (rms.tell() != dict_buffer_.size()) {
+				words.push_back(rms.readString());
+			}
+			// Generate the actual encode map.
+			generate(words, num1, num2, num3, false);
+			std::cout << "Dictionary words=" << words.size() << " size=" << prettySize(dict_buffer_.size()) << std::endl;
+		}
+		void generate(std::vector<std::string>& words, size_t num1, size_t num2, size_t num3, bool encode) {
 			static const size_t start = 128u;
 			size_t end1 = start + num1;
 			size_t end2 = end1 + num2;
 			size_t end3 = end2 + num3;
 			size_t idx = 0;
 			for (size_t b1 = start; b1 < end1; ++b1) {
-				if (idx < words.size()) encode_map_.insert(std::make_pair(words[idx++],
-					CodeWord(1, static_cast<uint8_t>(b1))));
+				if (idx < words.size()) {
+					if (encode) {
+						encode_map_.insert(std::make_pair(words[idx++], CodeWord(1, static_cast<uint8_t>(b1))));
+					} else {
+						words1b.push_back(words[idx++]);
+					}
+				}
 			}
 			for (size_t b1 = end1; b1 < end2; ++b1) {
 				for (size_t b2 = start; b2 < 256; ++b2) {
-					if (idx < words.size()) encode_map_.insert(std::make_pair(words[idx++], CodeWord(2,
-						static_cast<uint8_t>(b1), static_cast<uint8_t>(b2))));
+					if (idx < words.size()) {
+						if (encode) {
+							encode_map_.insert(std::make_pair(words[idx++], CodeWord(2, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2))));
+						} else {
+							words2b.push_back(words[idx++]);
+						}
+					}
 				}
 			}
 			for (size_t b1 = end2; b1 < end3; ++b1) {
 				for (size_t b2 = start; b2 < 256; ++b2) {
 					for (size_t b3 = start; b3 < 256; ++b3) {
-						if (idx < words.size()) encode_map_.insert(std::make_pair(words[idx++], CodeWord(3,
-							static_cast<uint8_t>(b1), static_cast<uint8_t>(b2), static_cast<uint8_t>(b3))));
+						if (idx < words.size()) {
+							if (encode) {
+								encode_map_.insert(std::make_pair(
+									words[idx++], CodeWord(3, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2), static_cast<uint8_t>(b3))));
+							} else {
+								words3b.push_back(words[idx++]);
+							}
+						}
 					}
 				}
 			}
 		}
 		virtual void forwardFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
-			// TODO: Write the dictionary if required.
 			uint8_t* in_ptr = in;
 			uint8_t* out_ptr = out;
 			const uint8_t* const in_limit = in + *in_count;
@@ -507,22 +556,20 @@ public:
 				out_ptr += max_write;
 				dict_buffer_pos_ += max_write;
 			}
-			while (in_ptr < in_limit) {
-				if (out_ptr + 4 >= out_limit) break;
+			while (in_ptr < in_limit && out_ptr + 4 < out_limit) {
 				if (!isWordChar(last_char_)) {
 					if (isWordChar(*in_ptr)) {
 						size_t word_len = 0;
-						while (in_ptr + word_len < in_limit && isWordChar(in_ptr[word_len])) {
+						while (word_len < kMaxWordLen && in_ptr + word_len < in_limit && isWordChar(in_ptr[word_len])) {
 							++word_len;
 						}
 						if (in_ptr + word_len >= in_limit && word_len != in_limit - in) {
-							// If the word is all the remaining chars and not the whole string, then it may have a suffix.
+							// If the word is all the remaining chars and not the whole string, then it may be a prefix.
 							break;
 						}
-						std::string word(in_ptr, in_ptr + word_len);
 						const size_t max_out = static_cast<size_t>(out_limit - out_ptr);
-						if (word_len + 1 > max_out) break; // Maybe too long to encode.
 						if (word_len >= 3 && word_len <= kMaxWordLen) {
+							std::string word(in_ptr, in_ptr + word_len);
 							size_t upper_count = 0;
 							for (size_t i = 0; i < word_len; ++i) {
 								upper_count += isUpperCase(in_ptr[i]);
@@ -563,7 +610,70 @@ public:
 			*out_count = out_ptr - out;
 		}
 		virtual void reverseFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
-			// process<false>(out, out_count, in, in_count);
+			const uint8_t* in_ptr = in;
+			uint8_t* out_ptr = out;
+			const uint8_t* const in_limit = in + *in_count;
+			const uint8_t* const out_limit = out + *out_count;
+			while (dict_buffer_.size() < dict_buffer_size_ && in_ptr < in_limit) {
+				dict_buffer_.push_back(*(in_ptr++));
+				if (dict_buffer_.size() == 4) {
+					dict_buffer_size_ = static_cast<uint32_t>(dict_buffer_[0]) << 24;
+					dict_buffer_size_ |= static_cast<uint32_t>(dict_buffer_[1]) << 16;
+					dict_buffer_size_ |= static_cast<uint32_t>(dict_buffer_[2]) << 8;
+					dict_buffer_size_ |= static_cast<uint32_t>(dict_buffer_[3]) << 0;
+				} else if (dict_buffer_.size() == dict_buffer_size_) {
+					createFromBuffer();
+				}
+			}
+			const auto* max = in_ptr + 4 < in_limit ? in_limit - 4 : in_limit;
+			const size_t start_byte = 128;
+			while (in_ptr < max && out_ptr + kMaxWordLen < out_limit) {
+				int c = *(in_ptr++);
+				if (!isWordChar(last_char_)) {
+					const bool first_cap = c == escape_cap_first_;
+					const bool all_cap = c == escape_cap_word_;
+					if (c >= 128 || first_cap || all_cap) {
+						if (first_cap || all_cap) c = *(in_ptr++);
+						std::string* word;
+						assert(c >= 128);
+						if (c >= word3bstart) {
+							int c2 = *(in_ptr++);
+							int c3 = *(in_ptr++);
+							assert(c2 >= start_byte);
+							assert(c3 >= start_byte);
+							word = &words3b[(c - word3bstart) * 128 * 128 + (c2 - start_byte) * 128 + c3 - start_byte];
+						} else if (c >= word2bstart) {
+							int c2 = *(in_ptr++);
+							assert(c2 >= 128);
+							word = &words2b[(c - word2bstart) * 128 + c2 - start_byte];
+						} else {
+							assert(c >= word1bstart);
+							word = &words1b[c - word1bstart];
+						}
+						std::copy(word->begin(), word->end(), out_ptr);
+						size_t capital_c = 0;
+						if (first_cap) capital_c = 1;
+						else if (all_cap) capital_c = word->length();
+						for (size_t i = 0; i < capital_c; ++i) {
+							out_ptr[i] = makeUpperCase(out_ptr[i]);
+						}
+						out_ptr += word->length();
+						last_char_ = out_ptr[-1];
+						continue;
+					}
+					if (c == escape_char_) {
+						c = *(in_ptr++);
+					}
+				}
+				*(out_ptr++) = last_char_ = c;
+			}
+			dcheck(in_ptr <= in_limit);
+			dcheck(out_ptr <= out_limit);
+			*in_count = in_ptr - in;
+			*out_count = out_ptr - out;
+		}
+		Filter(Stream* stream) : ByteStreamFilter(stream), dict_buffer_pos_(0), dict_buffer_size_(4), last_char_(0) {
+
 		}
 		Filter(Stream* stream, size_t escape_char, size_t escape_cap_first = kInvalidChar,
 			size_t escape_cap_word = kInvalidChar)

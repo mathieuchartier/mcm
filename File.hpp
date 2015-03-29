@@ -357,8 +357,8 @@ class FileSegmentStream : public Stream {
 public:
 	struct SegmentRange {
 		// 32 bits for reducing memory usage.
-		uint32_t offset_;
-		uint32_t length_;
+		uint64_t offset_;
+		uint64_t length_;
 	};
 	class FileSegments {
 	public:
@@ -378,15 +378,24 @@ public:
 			for (const auto& r : ranges_) {
 				uint64_t delta = r.offset_ - prev;
 				stream->leb128Encode(delta);
+				prev = r.offset_ + r.length_;
+			}
+			for (const auto& r : ranges_) {
 				stream->leb128Encode(static_cast<uint64_t>(r.length_));
-				prev = r.offset_;
 			}
 		}
 	};
 
 	FileSegmentStream(std::vector<FileSegments>* segments, uint64_t count)
-		: segments_(segments), file_idx_(-1), cur_stream_(nullptr)
-		, range_idx_(0), num_ranges_(0), cur_pos_(0), cur_end_(0), count_(count) {
+		: segments_(segments), count_(count) {
+		seekStart();
+	}
+	void seekStart() {
+		file_idx_ = -1;
+		range_idx_ = 0;
+		num_ranges_ = 0;
+		cur_pos_ = 0;
+		cur_end_ = 0;
 	}
 	virtual void put(int c) {
 		const uint8_t b = c;

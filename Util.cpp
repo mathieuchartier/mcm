@@ -96,17 +96,3 @@ std::string trimExt(const std::string& str) {
 	}
 	return str.substr(static_cast<uint32_t>(start));
 }
-
-#ifdef WIN32
-#include <windows.h>
-#else
-#include <unistd.h>
-#endif
-
-void sleep(size_t ms) {
-#ifdef WIN32
-Sleep(ms);
-#else
-usleep(ms * 1000);
-#endif
-}

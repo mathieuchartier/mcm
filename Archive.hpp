@@ -104,12 +104,16 @@ public:
 
 	class Algorithm {
 	public:
+		Algorithm() {}
 		Algorithm(const CompressionOptions& options, Detector::Profile profile);
 		Algorithm(Stream* stream);
 		Compressor* createCompressor();
 		void read(Stream* stream);
 		void write(Stream* stream);
 		Filter* createFilter(Stream* stream, Analyzer* analyzer);
+		Detector::Profile profile() const {
+			return profile_;
+		}
 
 	private:
 		uint8_t mem_usage_;
@@ -119,17 +123,33 @@ public:
 		Detector::Profile profile_;
 	};
 
-	class BlockHeader {
+	class SolidBlock {
 	public:
+		SolidBlock();
+		void write(Stream* stream);
 
-	private:
 		Algorithm algorithm_;
+		std::vector<FileSegmentStream::FileSegments> segments_;
+		// Not stored, obtianed from segments.
+		uint64_t total_size_;
+	};
+
+	class Blocks {
+	public:
+		std::vector<SolidBlock*> blocks_;
+
+		// Write uncompressed.
+		void write(Stream* stream);
 	};
 
 	// Compression.
 	Archive(Stream* stream, const CompressionOptions& options);
+
 	// Decompression.
 	Archive(Stream* stream);
+
+	// Construct blocks from analyzer.
+	void constructBlocks(Stream* in, Analyzer* analyzer);
 
 	const Header& getHeader() const {
 		return header_;
@@ -140,8 +160,12 @@ public:
 		return true;
 	}
 
+	// Write blocks.
+	void writeBlocks();
+
 	// Analyze and compress.
 	void compress(Stream* in);
+
 	// Decompress.
 	void decompress(Stream* out);
 
@@ -150,6 +174,7 @@ private:
 	Header header_;
 	CompressionOptions options_;
 	size_t opt_var_;
+	Blocks blocks_;
 
 	void init();
 };
