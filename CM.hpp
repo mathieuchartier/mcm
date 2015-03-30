@@ -830,7 +830,8 @@ public:
 			if (inputs > idx++) enableModel(kModelOrder3);
 			if (inputs > idx++) enableModel(kModelOrder8);
 			if (inputs > idx++) enableModel(kModelOrder0);
-			if (inputs > idx++) enableModel(kModelWord12);
+			if (inputs > idx++) enableModel(kModelOrder5);
+			// if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
 			setMatchModelOrder(10);
 #else
 			if (inputs > idx++) enableModel(kModelOrder0);

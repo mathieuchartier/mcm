@@ -346,7 +346,7 @@ void Archive::compress(Stream* in) {
 	analyzer.dump();
 	std::cout << "Analyzing took " << clockToSeconds(clock() - start_a) << "s" << std::endl << std::endl;
 
-	if (true) {
+	if (false) {
 		auto* dict = new Dict;
 		testFilter(in, &analyzer);
 	}
@@ -367,6 +367,7 @@ void Archive::compress(Stream* in) {
 		Stream* in_stream = &segstream;
 		if (filter.get() != nullptr) in_stream = filter.get();
 		std::unique_ptr<Compressor> comp(algo->createCompressor());
+    comp->setOpt(opt_var_);
 		{
 			ProgressThread thr(&segstream, stream_, true, out_start);
 			comp->compress(in_stream, stream_);
