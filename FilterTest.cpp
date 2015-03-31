@@ -237,11 +237,11 @@ void testFilter() {
 		data.push_back(rand() % 256);
 	}
 	std::vector<byte> out_data;
-	store_comp.compress(&FilterType(&ReadMemoryStream(&data)), &WriteVectorStream(&out_data));
+	store_comp.compress(&FilterType(&ReadMemoryStream(&data)), &WriteVectorStream(&out_data), std::numeric_limits<uint64_t>::max());
 	std::vector<byte> result;
 	WriteVectorStream wvs(&result);
 	FilterType reverse_filter(&wvs); 
-	store_comp.decompress(&ReadMemoryStream(&out_data), &reverse_filter);
+	store_comp.decompress(&ReadMemoryStream(&out_data), &reverse_filter, std::numeric_limits<uint64_t>::max());
 	reverse_filter.flush();
 	// Check tht the shit matches.
 	check(result.size() == data.size());
@@ -272,7 +272,7 @@ void benchFilter(const std::vector<byte>& data) {
 		// f.setSpecific(100 + i);
 		comp.setOpt(i);
 		clock_t start = clock();
-		comp.compress(&f, &wms);
+		comp.compress(&f, &wms, std::numeric_limits<uint64_t>::max());
 		write_count = wms.tell();
 		f.dumpInfo();
 		if (write_count < best_size) {
@@ -296,7 +296,7 @@ void benchFilter(const std::vector<byte>& data) {
 	for (uint32_t i = 0; i < kIterations; ++i) {
 		WriteMemoryStream wvs(&result[0]);
 		FilterType reverse_filter(&wvs); 
-		comp.decompress(&ReadMemoryStream(&out_data[0], &out_data[0] + write_count), &reverse_filter);
+		comp.decompress(&ReadMemoryStream(&out_data[0], &out_data[0] + write_count), &reverse_filter, std::numeric_limits<uint64_t>::max());
 		reverse_filter.flush();
 	}
 	uint64_t rate = computeRate(data.size() * kIterations, clock() - start);

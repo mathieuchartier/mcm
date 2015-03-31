@@ -374,14 +374,30 @@ public:
 		void write(Stream* stream) {
 			stream->leb128Encode(base_offset_);
 			stream->leb128Encode(ranges_.size());
+			check(ranges_.size());
 			uint64_t prev = 0;
+			for (const auto& r : ranges_) {
+				stream->leb128Encode(static_cast<uint64_t>(r.length_));
+			}
 			for (const auto& r : ranges_) {
 				uint64_t delta = r.offset_ - prev;
 				stream->leb128Encode(delta);
 				prev = r.offset_ + r.length_;
 			}
-			for (const auto& r : ranges_) {
-				stream->leb128Encode(static_cast<uint64_t>(r.length_));
+		}
+		void read(Stream* stream) {
+			base_offset_ = stream->leb128Decode();
+			const auto num_ranges = stream->leb128Decode();
+			check(num_ranges < 10000000);
+			uint64_t prev = 0;
+			ranges_.resize(num_ranges);
+			for (auto& r : ranges_) {
+				r.length_ = stream->leb128Decode();
+			}
+			for (auto& r : ranges_) {
+				uint64_t delta = stream->leb128Decode();
+				r.offset_ = prev + delta;
+				prev = r.offset_ + r.length_;
 			}
 		}
 	};

@@ -125,21 +125,22 @@ public:
 
 	class SolidBlock {
 	public:
-		SolidBlock();
-		void write(Stream* stream);
-
 		Algorithm algorithm_;
 		std::vector<FileSegmentStream::FileSegments> segments_;
 		// Not stored, obtianed from segments.
 		uint64_t total_size_;
+
+		SolidBlock();
+		void write(Stream* stream);
+		void read(Stream* stream);
 	};
 
 	class Blocks {
 	public:
 		std::vector<SolidBlock*> blocks_;
 
-		// Write uncompressed.
 		void write(Stream* stream);
+		void read(Stream* stream);
 	};
 
 	// Compression.
@@ -160,8 +161,8 @@ public:
 		return true;
 	}
 
-	// Write blocks.
 	void writeBlocks();
+	void readBlocks();
 
 	// Analyze and compress.
 	void compress(Stream* in);
@@ -177,6 +178,7 @@ private:
 	Blocks blocks_;
 
 	void init();
+	Compressor* createMetaDataCompressor();
 };
 
 #endif

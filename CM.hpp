@@ -211,9 +211,7 @@ public:
 	bool force_profile_;
 	// Current profile.
 	CMProfile profile_;
-	// Bytes to process.
-	uint64_t remain_bytes_;
-
+	
 	// Mask model.
 	uint32_t mask_model_;
 
@@ -307,7 +305,6 @@ public:
 		} else {
 			profile_ = kProfileBinary;
 		}
-		remain_bytes_ = std::numeric_limits<uint64_t>::max();
 	}
 
 	bool setOpt(uint32_t var) {
@@ -830,7 +827,7 @@ public:
 			if (inputs > idx++) enableModel(kModelOrder3);
 			if (inputs > idx++) enableModel(kModelOrder8);
 			if (inputs > idx++) enableModel(kModelOrder0);
-			if (inputs > idx++) enableModel(kModelOrder5);
+			if (inputs > idx++) enableModel(kModelWord12);
 			// if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
 			setMatchModelOrder(10);
 #else
@@ -916,8 +913,8 @@ public:
 		owhash = (owhash << 8) | static_cast<byte>(c);
 	}
 
-	virtual void compress(Stream* in_stream, Stream* out_stream);
-	virtual void decompress(Stream* in_stream, Stream* out_stream);
+	virtual void compress(Stream* in_stream, Stream* out_stream, uint64_t max_count);
+	virtual void decompress(Stream* in_stream, Stream* out_stream, uint64_t max_count);
 };
 
 #endif

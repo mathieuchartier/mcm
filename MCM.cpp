@@ -44,51 +44,6 @@
 
 CompressorFactories* CompressorFactories::instance = nullptr;
 
-class VerifyStream : public WriteStream {
-public:
-	std::ifstream fin;
-	uint64_t differences, total;
-
-	VerifyStream(const std::string& file_name) {
-		fin.open(file_name, std::ios_base::in | std::ios_base::binary);
-		assert(fin.good());
-		init();
-	}
-
-	void init() {
-		differences = total = 0;
-	}
-
-	void put(int c) {
-		auto ref = fin.eof() ? 256 : fin.get();
-		bool diff = ref != c;
-		if (diff) {
-			if (differences == 0) {
-				std::cerr << "Difference found at byte! " << total << " b1: " << "ref: " << (int)ref << " new: " << (int)c << std::endl;
-			}
-			++differences;
-		}
-		++total;
-	}
-
-	virtual uint64_t tell() const {
-		return total;
-	}
-
-	void summary() {
-		fin.get();
-		if (!fin.eof()) {
-			std::cerr << "ERROR: Output truncated at byte " << fin.tellg() << " differences=" << differences << std::endl;
-		} else {
-			if (differences) {
-				std::cerr << "ERROR: differences=" << differences << std::endl;
-			} else {
-				std::cout << "No differences found!" << std::endl;
-			}
-		}
-	}
-};
-
 static void printHeader() {
 	std::cout
 		<< "======================================================================" << std::endl
@@ -467,26 +422,27 @@ int main(int argc, char* argv[]) {
 			}
 			clock_t time = clock() - start;
 			fin.seek(0, SEEK_END);
+			const uint64_t file_size = fin.tell();
 			std::cout << "Compressed " << formatNumber(fin.tell()) << "->" << formatNumber(fout.tell())
 				<< " in " << std::setprecision(3) << clockToSeconds(time) << "s"
 				<< " bpc=" << double(fout.tell()) * 8.0 / double(fin.tell()) << std::endl;
 			std::cout << "Avg rate: " << std::setprecision(3) << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fin.tell()) << " ns/B" << std::endl;
 
 			fout.close();
-			fin.close();
-
+			
 			if (options.mode == Options::kModeSingleTest) {
-				if (err = fin.open(out_file, std::ios_base::in | std::ios_base::binary)) {
+				if (err = fout.open(out_file, std::ios_base::in | std::ios_base::binary)) {
 					std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
 					return 1;
 				}
-				Archive archive(&fin);
+				Archive archive(&fout);
 				std::cout << "Decompresing & verifying file" << std::endl;		
-				VerifyStream verifyStream(in_file);
+				fin.seek(0);
+				VerifyStream verifyStream(&fin, file_size);
 				archive.decompress(&verifyStream);
 				verifyStream.summary();
-				fin.close();
 			}
+			fin.close();
 		}
 		break;
 #if 0

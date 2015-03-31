@@ -65,17 +65,20 @@ public:
 	}
 	inline void leb128Encode(uint64_t n) {
 		while (n >= 0x80) {
-			put(static_cast<uint8_t>(0x80 | (n & 0x7F)));
+			auto c = static_cast<uint8_t>(0x80 | (n & 0x7F));
+			put(c);
 			n >>= 7;
 		}
 		put(static_cast<uint8_t>(n));
 	}
 	uint64_t leb128Decode() {
 		uint64_t ret = 0;
+		uint64_t shift = 0;
 		while (true) {
 			const uint8_t c = get();
-			ret = (ret << 7) | (c & 0x7F);
-			if ((c & 0x80) != 0) break;
+			ret |= static_cast<uint64_t>(c & 0x7F) << shift;
+			shift += 7;
+			if ((c & 0x80) == 0) break;
 		}
 		return ret;
 	}
@@ -229,8 +232,11 @@ public:
 		buffer_pos = 0;
 		buffer_count = 0;
 	}
+	forceinline size_t remain() const {
+		return buffer_count - buffer_pos;
+	}
 	forceinline int get() {
-		if (UNLIKELY(buffer_pos >= buffer_count)) {
+		if (UNLIKELY(remain() == 0)) {
 			buffer_pos = 0;
 			buffer_count = stream->read(buffer, buffer_size);
 			if (UNLIKELY(!buffer_count)) {
@@ -350,6 +356,73 @@ public:
 		buffer_  = (buffer_ << bits) | data;
 		while (bits_ >= kBitsPerByte) {
 			flushByte();
+		}
+	}
+};
+
+class VerifyStream : public WriteStream {
+public:
+	Stream* const stream_;
+	uint64_t differences_;
+	uint64_t count_, ref_count_;
+
+	VerifyStream(Stream* stream, size_t ref_count) : stream_(stream), count_(0), ref_count_(ref_count) {
+		init();
+	}
+
+	void init() {
+		differences_ = 0;
+	}
+
+	void put(int c) {
+		auto ref = stream_->get();
+		if (c != ref) {
+			difference(ref, c);
+		}
+		++count_;
+	}
+
+	void seek(uint64_t pos) {
+		stream_->seek(pos);
+	}
+
+	void write(const uint8_t* buf, size_t n) {
+		uint8_t buffer[4 * KB];
+		while (n != 0) {
+			size_t count = stream_->read(buffer, std::min(4 * KB, n));
+			for (size_t i = 0; i < count; ++i) {
+				auto ref = buffer[i];
+				if (buf[i] != buffer[i]) {
+					difference(buffer[i], buf[i]);
+				}
+			}
+			buf += count;
+			n -= count;
+			count_ += count;
+		}
+	}
+
+	void difference(int ref, int c) {
+		if (differences_ == 0) {
+			std::cerr << "Difference found at byte! " << stream_->tell() << " b1: " << "ref: "
+				<< static_cast<int>(ref) << " new: " << static_cast<int>(c) << std::endl;
+		}
+		++differences_;
+	}
+
+	virtual uint64_t tell() const {
+		return count_;
+	}
+
+	void summary() {
+		if (count_ != ref_count_) {
+			std::cerr << "ERROR: Missing bytes " << count_ << "/" << ref_count_ << " differences=" << differences_ << std::endl;
+		} else {
+			if (differences_) {
+				std::cerr << "ERROR: differences=" << differences_ << std::endl;
+			} else {
+				std::cout << "No differences found!" << std::endl;
+			}
 		}
 	}
 };

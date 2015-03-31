@@ -100,7 +100,7 @@ forceinline static bool isLowerCase(int c) {
 	return c >= 'a' && c <= 'z';
 }
 forceinline static bool isWordChar(int c) {
-	return isLowerCase(c) || isUpperCase(c) || (c >= 128);
+	return isLowerCase(c) || isUpperCase(c) || c >= 128;
 }
 forceinline static int makeLowerCase(int c) {
 	assert(isUpperCase(c));

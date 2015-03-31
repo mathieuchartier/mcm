@@ -124,9 +124,9 @@ public:
 		return false;
 	}
 	// Compress n bytes.
-	virtual void compress(Stream* in, Stream* out) = 0;
+	virtual void compress(Stream* in, Stream* out, uint64_t max_count = 0xFFFFFFFFFFFFFFFF) = 0;
 	// Decompress n bytes, the calls must line up. You can't do C(20)C(30)D(50)
-	virtual void decompress(Stream* in, Stream* out) = 0;
+	virtual void decompress(Stream* in, Stream* out, uint64_t max_count = 0xFFFFFFFFFFFFFFFF) = 0;
 	virtual ~Compressor() {
 	}
 };
@@ -188,19 +188,11 @@ private:
 	static CompressorFactories* instance;
 };
 
-// Simple uncompressed compressor.
-class StoreSingleByte : public Compressor {
-public:
-	virtual void compress(Stream* in, Stream* out);
-	virtual void decompress(Stream* in, Stream* out);
-};
-
 class Store : public Compressor {
 public:
-	virtual void compress(Stream* in, Stream* out);
-	virtual void decompress(Stream* in, Stream* out);
+	virtual void compress(Stream* in, Stream* out, uint64_t count);
+	virtual void decompress(Stream* in, Stream* out, uint64_t count);
 };
-
 
 class MemCopyCompressor : public MemoryCompressor {
 public:

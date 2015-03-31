@@ -94,10 +94,10 @@ void CM<kCMType>::init() {
 		//text_mask_map_[i] = (i < 91) + (i < 123) + (i < 47) + (i < 62) + (i < 46) + (i < 33) + (i < 28);
 		//text_mask_map_[i] += (i < 58) + (i < 210) + (i < 92) + (i < 40) + (i < 97) + (i < 42) + (i < 59) + (i < 48);
 		text_mask_map_[i] =
-				(i < 41) + (i < 92) + (i < 124) + (i < 58) +
-        (i < 11) + (i < 46) + (i < 36) + (i < 47) +
-        (i < 64) + (i < 4) + (i < 61) + (i < 97) +
-        (i < 125) + (i < 45) + (i < 48);
+			(i < 41) + (i < 92) + (i < 124) + (i < 58) +
+			(i < 11) + (i < 46) + (i < 36) + (i < 47) +
+			(i < 64) + (i < 4) + (i < 61) + (i < 97) +
+			(i < 125) + (i < 45) + (i < 48);
 	}
 	current_mask_map_ = binary_mask_map_;
 
@@ -155,7 +155,7 @@ void CM<kCMType>::init() {
 }
 
 template <CMType kCMType>
-void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
+void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream, uint64_t max_count) {
 	BufferedStreamWriter<4 * KB> sout(out_stream);
 	BufferedStreamReader<4 * KB> sin(in_stream);
 	assert(in_stream != nullptr);
@@ -184,7 +184,7 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 		huff.build(tree);	
 		std::cout << "Building huffman tree took: " << clock() - start << " MS" << std::endl;
 	}
-	while (remain_bytes_ > 0) {
+	for (;max_count > 0; --max_count) {
 		uint32_t c;
 		if (!force_profile_) {
 			Detector::Profile new_profile;
@@ -201,7 +201,6 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 		dcheck(c != EOF);
 		processByte<false>(sout, c);
 		update(c);
-		--remain_bytes_;
 	}
 	ent.flush(sout);
 
@@ -295,7 +294,7 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream) {
 }
 
 template <CMType kCMType>
-void CM<kCMType>::decompress(Stream* in_stream, Stream* out_stream) {
+void CM<kCMType>::decompress(Stream* in_stream, Stream* out_stream, uint64_t max_count) {
 	BufferedStreamReader<4 * KB> sin(in_stream);
 	Detector detector(out_stream);
 	if (!force_profile_) {
@@ -305,11 +304,11 @@ void CM<kCMType>::decompress(Stream* in_stream, Stream* out_stream) {
 	init();
 	ent.initDecoder(sin);
 	if (use_huffman) {
-		auto* tree = Huffman::readTree(ent, sin, 256, huffman_len_limit);
-		huff.build(tree);
-		delete tree;
+		// auto* tree = Huffman::readTree(ent, sin, 256, huffman_len_limit);
+		// huff.build(tree);
+		// delete tree;
 	}
-	while (remain_bytes_ > 0) {
+	for (; max_count > 0; --max_count) {
 		if (!force_profile_) {
 			auto new_profile = detector.detect();
 			if (new_profile == Detector::kProfileEOF) {
@@ -327,10 +326,14 @@ void CM<kCMType>::decompress(Stream* in_stream, Stream* out_stream) {
 		} else {
 			detector.put(c);
 		}
-		--remain_bytes_;
 	}
 	if (!force_profile_) {
 		detector.flush();
+	}
+	size_t remain = sin.remain();
+	if (remain > 0) {
+		// Go back all the characters we didn't actually read.
+		in_stream->seek(in_stream->tell() - remain);
 	}
 }	
 

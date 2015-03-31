@@ -44,6 +44,8 @@ compres(&f, in_stream);
 
 class Filter : public Stream {
 public:
+	virtual void flush() {
+	}
 };
 
 // Byte filter is complicated since filters are not necessarily a 1:1 mapping.
@@ -55,7 +57,8 @@ public:
 			refillWriteAndProcess();
 		}
 	}
-	explicit ByteStreamFilter(Stream* stream) : stream_(stream) { }
+	explicit ByteStreamFilter(Stream* stream) : stream_(stream), count_(0) {
+	}
 	virtual int get() {
 		if (UNLIKELY(out_buffer_.remain() == 0)) { 
 			if (refillReadAndProcess() == 0) {
@@ -103,6 +106,9 @@ public:
 	}
 	virtual void forwardFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) = 0;
 	virtual void reverseFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) = 0;
+	uint64_t tell() const {
+		return count_;
+	}
 
 private:
 	size_t refillWriteAndProcess() {
@@ -122,7 +128,8 @@ private:
 		size_t out_limit = out_buffer_.reamainCapacity();
 		size_t in_limit = in_buffer_.pos();
 		forwardFilter(out_buffer_.end(), &out_limit, in_buffer_.begin(), &in_limit);
-		out_buffer_.addSize(out_limit);  // Add the characters we prossesed to out.
+		out_buffer_.addSize(out_limit);  // Add the characters we processed to out.
+		count_ += out_limit;
 		in_buffer_.erase(in_limit);  // Erase the caracters we processed in in.
 		return out_buffer_.size();
 	}
@@ -141,6 +148,7 @@ private:
 protected:
 	// Proxy stream.
 	Stream* const stream_;
+	uint64_t count_;
 };
 
 class IdentityFilter : public ByteStreamFilter<4 * KB, 4 * KB> {

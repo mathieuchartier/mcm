@@ -430,6 +430,9 @@ public:
 		size_t word2bstart;
 		std::vector<std::string> words3b;
 		size_t word3bstart;
+
+		// Optimizations
+		uint8_t is_word_char_[256];
 	public:
 		// Serialize to and from.
 		// num words
@@ -557,10 +560,10 @@ public:
 				dict_buffer_pos_ += max_write;
 			}
 			while (in_ptr < in_limit && out_ptr + 4 < out_limit) {
-				if (!isWordChar(last_char_)) {
-					if (isWordChar(*in_ptr)) {
+				if (!is_word_char_[last_char_]) {
+					if (is_word_char_[*in_ptr]) {
 						size_t word_len = 0;
-						while (word_len < kMaxWordLen && in_ptr + word_len < in_limit && isWordChar(in_ptr[word_len])) {
+						while (word_len < kMaxWordLen && in_ptr + word_len < in_limit && is_word_char_[in_ptr[word_len]]) {
 							++word_len;
 						}
 						if (in_ptr + word_len >= in_limit && word_len != in_limit - in) {
@@ -629,35 +632,35 @@ public:
 			const size_t start_byte = 128;
 			while (in_ptr < max && out_ptr + kMaxWordLen < out_limit) {
 				int c = *(in_ptr++);
-				if (!isWordChar(last_char_)) {
+				if (!is_word_char_[last_char_]) {
 					const bool first_cap = c == escape_cap_first_;
 					const bool all_cap = c == escape_cap_word_;
 					if (c >= 128 || first_cap || all_cap) {
 						if (first_cap || all_cap) c = *(in_ptr++);
 						std::string* word;
 						assert(c >= 128);
-						if (c >= word3bstart) {
+						if (c < word2bstart) {
+							word = &words1b[c - word1bstart];
+						} else if (c < word3bstart) {
+							int c2 = *(in_ptr++);
+							assert(c2 >= 128);
+							word = &words2b[(c - word2bstart) * 128 + c2 - start_byte];
+						} else {
+							assert(c >= word3bstart);
 							int c2 = *(in_ptr++);
 							int c3 = *(in_ptr++);
 							assert(c2 >= start_byte);
 							assert(c3 >= start_byte);
 							word = &words3b[(c - word3bstart) * 128 * 128 + (c2 - start_byte) * 128 + c3 - start_byte];
-						} else if (c >= word2bstart) {
-							int c2 = *(in_ptr++);
-							assert(c2 >= 128);
-							word = &words2b[(c - word2bstart) * 128 + c2 - start_byte];
-						} else {
-							assert(c >= word1bstart);
-							word = &words1b[c - word1bstart];
 						}
-						std::copy(word->begin(), word->end(), out_ptr);
-						size_t capital_c = 0;
-						if (first_cap) capital_c = 1;
-						else if (all_cap) capital_c = word->length();
+						const size_t word_len = word->length();
+						auto* word_start = &word->operator[](0);
+						std::copy(word_start, word_start + word_len, out_ptr);
+						const size_t capital_c = all_cap ? word_len : static_cast<size_t>(first_cap);
 						for (size_t i = 0; i < capital_c; ++i) {
 							out_ptr[i] = makeUpperCase(out_ptr[i]);
 						}
-						out_ptr += word->length();
+						out_ptr += word_len;
 						last_char_ = out_ptr[-1];
 						continue;
 					}
@@ -673,7 +676,7 @@ public:
 			*out_count = out_ptr - out;
 		}
 		Filter(Stream* stream) : ByteStreamFilter(stream), dict_buffer_pos_(0), dict_buffer_size_(4), last_char_(0) {
-
+			init();
 		}
 		Filter(Stream* stream, size_t escape_char, size_t escape_cap_first = kInvalidChar,
 			size_t escape_cap_word = kInvalidChar)
@@ -682,6 +685,12 @@ public:
 			, escape_cap_first_(escape_cap_first)
 			, escape_cap_word_(escape_cap_word)
 			, last_char_(0) {
+			init();
+		}
+		void init() {
+			for (size_t i = 0; i < 256; ++i) {
+				is_word_char_[i] = isWordChar(i);
+			}
 		}
 	};
 	

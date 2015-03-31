@@ -63,51 +63,29 @@ void BitStreamCompressor::decompressBytes(byte* in, byte* out, size_t count) {
 	}
 }
 
-void Store::compress(Stream* in, Stream* out) {
+void Store::compress(Stream* in, Stream* out, uint64_t count) {
 	static const size_t kBufferSize = 8 * KB;
 	byte buffer[kBufferSize];
-	for (;;) {
-		const size_t count = in->read(buffer, kBufferSize);
-		if (count == 0) {
+	while (count > 0) {
+		const size_t read = in->read(buffer, std::min(count, kBufferSize));
+		if (read == 0) {
 			break;
 		}
-		out->write(buffer, count);
+		out->write(buffer, read);
+		count -= read;
 	}
 }
 
-void Store::decompress(Stream* in, Stream* out) {
+void Store::decompress(Stream* in, Stream* out, uint64_t count) {
 	static const size_t kBufferSize = 8 * KB;
 	byte buffer[kBufferSize];
-	for (;;) {
-		const size_t count = in->read(buffer, kBufferSize);
-		if (count == 0) {
+	while (count > 0) {
+		const size_t read = in->read(buffer, std::min(count, kBufferSize));
+		if (read == 0) {
 			break;
 		}
-		out->write(buffer, count);
-	}
-}
-
-void StoreSingleByte::compress(Stream* in, Stream* out) {
-	BufferedStreamReader<16 * KB> sin(in);
-	BufferedStreamWriter<16 * KB> sout(out);
-	for (;;) {
-		int c = sin.get();
-		if (c == EOF) {
-			break;
-		}
-		sout.put(c);
-	}
-}
-
-void StoreSingleByte::decompress(Stream* in, Stream* out) {
-	BufferedStreamReader<16 * KB> sin(in);
-	BufferedStreamWriter<16 * KB> sout(out);
-	for (;;) {
-		int c = sin.get();
-		if (c == EOF) {
-			break;
-		}
-		sout.put(c);
+		out->write(buffer, read);
+		count -= read;
 	}
 }
 
