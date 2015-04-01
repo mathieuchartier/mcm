@@ -149,7 +149,7 @@ public:
 			code -= range & (t - 1);
 			result = (result << 1) | (1 - t); 
 			if (range < TopValue) {
-				code = (code << 8) | (In.read() & 0xFF);
+				code = (code << 8) | (In.get() & 0xFF);
 				range <<= 8;
 			}
 		}

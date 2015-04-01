@@ -220,6 +220,7 @@ public:
 	bool lzp_enabled_;
 	static const size_t kMaxMatch = 100;
 	StationaryModel lzp_mdl_[kMaxMatch];
+	size_t min_match_lzp_;
 
 	// SM
 	typedef StationaryModel PredModel;
@@ -237,6 +238,10 @@ public:
 
 	// Memory usage
 	size_t mem_usage;
+
+	// Fast mode. TODO split this in another compressor?
+	// Quickly create a probability from a 2d array.
+	HPStationaryModel fast_mix_[256][256];
 
 	// Flags for which models are enabled.
 	enum Model {
@@ -280,6 +285,12 @@ public:
 	uint64_t match_count_, non_match_count_, other_count_;
 	uint64_t lzp_bit_match_bytes_, lzp_bit_miss_bytes_, lzp_miss_bytes_, normal_bytes_;
 	uint64_t match_hits_[kMaxMatch], match_miss_[kMaxMatch];
+
+	static const uint64_t kMaxMiss = 512;
+	uint64_t miss_len_;
+	uint64_t miss_count_[kMaxMiss];
+	uint64_t fast_bytes_;
+	uint64_t miss_fast_path_;
 
 	// TODO: Get rid of this.
 	static const uint32_t eof_char = 126;
@@ -728,10 +739,13 @@ public:
 
 		calcMixerBase();
 		if (mm_len > 0) {
-			if (kStatistics && !decode) {
-				++(expected_char == c ? match_count_ : non_match_count_);
+			if (kStatistics) {
+				if (!decode) {
+					++(expected_char == c ? match_count_ : non_match_count_);
+				}
+				miss_len_ = 0;
 			}
-			if (lzp_enabled_) {
+			if (mm_len > min_match_lzp_) {
 				size_t extra_len = mm_len - match_model.getMinMatch();
 				cur_preds = &preds[kPredArrays - 1];
 				dcheck(mm_len >= match_model.getMinMatch());
@@ -763,7 +777,22 @@ public:
 				}
 			} 
 			calcProbBase();
-		} else if (kStatistics) ++other_count_;
+		} else {
+			++miss_len_;
+			if (kStatistics) {
+				++other_count_;
+				++miss_count_[std::min(kMaxMiss - 1, miss_len_ / 32)];
+			}
+			if (miss_len_ > miss_fast_path_) {
+				if (kStatistics) ++fast_bytes_;
+				if (decode) {
+					c = ent.DecodeDirectBits(stream, 8);
+				} else {
+					ent.EncodeBits(stream, c, 8);
+				}
+				return c;
+			}
+		}
 		if (false) {
 			match_model.resetMatch();
 			return c;
@@ -829,7 +858,7 @@ public:
 			if (inputs > idx++) enableModel(kModelOrder0);
 			if (inputs > idx++) enableModel(kModelWord12);
 			// if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
-			setMatchModelOrder(10);
+			setMatchModelOrder(8);
 #else
 			if (inputs > idx++) enableModel(kModelOrder0);
 			if (inputs > idx++) enableModel(kModelOrder1);
@@ -843,6 +872,8 @@ public:
 #endif
 			// if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
 			current_mask_map_ = text_mask_map_;
+			min_match_lzp_ = lzp_enabled_ ? 9 : kMaxMatch;
+			miss_fast_path_ = 100000;
 			break;
 		default: // Binary
 			assert(profile_ == kProfileBinary);
@@ -892,6 +923,8 @@ public:
 #endif
 			setMatchModelOrder(7);
 			current_mask_map_ = binary_mask_map_;
+			min_match_lzp_ = lzp_enabled_ ? 0 : kMaxMatch;
+			miss_fast_path_ = 1500;
 			break;
 		}
 		calcProbBase();

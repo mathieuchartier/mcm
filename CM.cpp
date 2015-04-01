@@ -151,6 +151,9 @@ void CM<kCMType>::init() {
 		lzp_bit_match_bytes_ = lzp_bit_miss_bytes_ = lzp_miss_bytes_ = normal_bytes_ = 0;
 		for (auto& len : match_hits_) len = 0;
 		for (auto& len : match_miss_) len = 0;
+		miss_len_ = 0;
+		for (auto& c : miss_count_) c = 0;
+		fast_bytes_ = 0;
 	}
 }
 
@@ -277,13 +280,20 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream, uint64_t max_c
 			<< " matchfail=" << formatNumber(non_match_count_)
 			<< " nonmatch=" << formatNumber(other_count_) << std::endl;
 		if (!kFastStats) {
+			if (false)
 			for (size_t i = 0; i < kMaxMatch; ++i) {
 				const size_t t = match_hits_[i] + match_miss_[i];
 				if (t != 0) {
 					std::cout << i << ":" << match_hits_[i] << "/" << match_miss_[i] << " = " << static_cast<double>(match_hits_[i]) / t << std::endl;
 				}
 			}
+			uint64_t miss_tot;
+			for (size_t i = 0; i < kMaxMiss;++i) {
+				if (miss_count_[i] != 0) std::cout << "Misses " << i << " " << miss_count_[i] + miss_tot << std::endl;
+				miss_tot += miss_count_[i];
+			}
 		}
+		std::cout << "Fast bytes " << fast_bytes_ << std::endl;
 		if (lzp_enabled_) {
 			std::cout << "lzp_bit_size=" << formatNumber(lzp_bit_match_bytes_)
 				<< " lzp_bit_miss_bytes=" << formatNumber(lzp_bit_miss_bytes_)
