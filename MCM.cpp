@@ -99,7 +99,7 @@ public:
 		std::cout
 			<< "Caution: Experimental, use only for testing!" << std::endl
 			<< "Usage: " << name << " [command] [options] <infile> <outfile>" << std::endl
-			<< "Options: -c for compress, -d for decompress" << std::endl
+			<< "Options: d for decompress" << std::endl
 			<< "-{t|f|m|h|x}{1 .. 11} compression option" << std::endl
 			<< "t is turbo, f is fast, m is mid, h is high, x is max (default " << CompressionOptions::kDefaultLevel << ")" << std::endl
 			<< "0 .. 11 specifies memory with 32mb .. 5gb per thread (default " << CompressionOptions::kDefaultMemUsage << ")" << std::endl
@@ -109,7 +109,7 @@ public:
 			// << "-t <threads> the number of threads to use (decompression requires the same number of threads" << std::endl
 			<< "Examples:" << std::endl
 			<< "Compress: " << name << " -m9 enwik8 enwik8.mcm" << std::endl
-			<< "Decompress: " << name << " -d enwik8.mcm enwik8.ref" << std::endl;
+			<< "Decompress: " << name << " d enwik8.mcm enwik8.ref" << std::endl;
 		return 0;
 	}
 

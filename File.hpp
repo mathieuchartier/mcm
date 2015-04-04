@@ -371,6 +371,7 @@ public:
 			total_size_ = 0;
 			for (const auto& seg : ranges_) total_size_ += seg.length_;
 		}
+
 		void write(Stream* stream) {
 			stream->leb128Encode(base_offset_);
 			stream->leb128Encode(ranges_.size());
@@ -385,6 +386,7 @@ public:
 				prev = r.offset_ + r.length_;
 			}
 		}
+
 		void read(Stream* stream) {
 			base_offset_ = stream->leb128Decode();
 			const auto num_ranges = stream->leb128Decode();
@@ -452,7 +454,7 @@ private:
 				if (cur_pos_ >= cur_end_) break;
 			}
 			const size_t max_c = std::min(
-				static_cast<size_t>(limit - buf), cur_end_ - cur_pos_);
+				static_cast<size_t>(limit - buf), static_cast<size_t>(cur_end_ - cur_pos_));
 			size_t count;
 			if (w) {
 				cur_stream_->writeat(cur_pos_, buf, max_c);

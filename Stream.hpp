@@ -58,11 +58,13 @@ public:
 		ret = (ret << 8) | static_cast<uint16_t>(get());
 		return ret;
 	}
+#if 0
 	inline void leb128Encode(int64_t n) {
 		bool neg = n < 0;
 		if (neg) n = -n;
 		leb128Encode(static_cast<uint64_t>((n << 1) | (neg ? 1u : 0)));
 	}
+#endif
 	inline void leb128Encode(uint64_t n) {
 		while (n >= 0x80) {
 			auto c = static_cast<uint8_t>(0x80 | (n & 0x7F));
@@ -239,7 +241,7 @@ public:
 		if (UNLIKELY(remain() == 0)) {
 			buffer_pos = 0;
 			buffer_count = stream->read(buffer, buffer_size);
-			if (UNLIKELY(!buffer_count)) {
+			if (UNLIKELY(buffer_count == 0)) {
 				return EOF;
 			}
 		}
@@ -389,7 +391,7 @@ public:
 	void write(const uint8_t* buf, size_t n) {
 		uint8_t buffer[4 * KB];
 		while (n != 0) {
-			size_t count = stream_->read(buffer, std::min(4 * KB, n));
+			size_t count = stream_->read(buffer, std::min(static_cast<size_t>(4 * KB), n));
 			for (size_t i = 0; i < count; ++i) {
 				auto ref = buffer[i];
 				if (buf[i] != buffer[i]) {

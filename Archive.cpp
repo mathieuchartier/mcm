@@ -28,6 +28,7 @@
 
 #include "LZ.hpp"
 #include "X86Binary.hpp"
+#include "Wav16.hpp"
 
 static const bool kTestFilter = false;
 static const size_t kSizePad = 10;
@@ -59,25 +60,32 @@ bool Archive::Header::isSameVersion() const {
 Archive::Algorithm::Algorithm(const CompressionOptions& options, Detector::Profile profile) : profile_(profile) {
 	mem_usage_ = options.mem_usage_;
 	algorithm_ = Compressor::kTypeStore;
-	switch (options.comp_level_) {
-	case kCompLevelStore:
-		algorithm_ = Compressor::kTypeStore;
-		break;
-	case kCompLevelTurbo:
-		algorithm_ = Compressor::kTypeCMTurbo;
-		break;
-	case kCompLevelFast:
-		algorithm_ = Compressor::kTypeCMFast;
-		break;
-	case kCompLevelMid:
-		algorithm_ = Compressor::kTypeCMMid;
-		break;
-	case kCompLevelHigh:
-		algorithm_ = Compressor::kTypeCMHigh;
-		break;
-	case kCompLevelMax:
-		algorithm_ = Compressor::kTypeCMMax;
-		break;
+	filter_ = FilterType::kFilterTypeNone;
+
+	if (profile == Detector::kProfileWave16) {
+		algorithm_ = Compressor::kTypeWav16;
+		// algorithm_ = Compressor::kTypeStore;
+	} else {
+		switch (options.comp_level_) {
+		case kCompLevelStore:
+			algorithm_ = Compressor::kTypeStore;
+			break;
+		case kCompLevelTurbo:
+			algorithm_ = Compressor::kTypeCMTurbo;
+			break;
+		case kCompLevelFast:
+			algorithm_ = Compressor::kTypeCMFast;
+			break;
+		case kCompLevelMid:
+			algorithm_ = Compressor::kTypeCMMid;
+			break;
+		case kCompLevelHigh:
+			algorithm_ = Compressor::kTypeCMHigh;
+			break;
+		case kCompLevelMax:
+			algorithm_ = Compressor::kTypeCMMax;
+			break;
+		}
 	}
 	switch (profile) {
 	case Detector::kProfileBinary:
@@ -118,6 +126,8 @@ Archive::Archive(Stream* stream) : stream_(stream), opt_var_(0) {
 
 Compressor* Archive::Algorithm::createCompressor() {
 	switch (algorithm_) {
+	case Compressor::kTypeWav16:
+		return new Wav16;
 	case Compressor::kTypeStore:
 		return new Store;
 	case Compressor::kTypeCMTurbo:
@@ -186,6 +196,13 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer) {
 Archive::SolidBlock::SolidBlock() {
 }
 
+class BlockSizeComparator {
+public:
+	bool operator()(const Archive::SolidBlock* a, const Archive::SolidBlock* b) const {
+		return a->total_size_ < b->total_size_;
+	}
+};
+
 void Archive::constructBlocks(Stream* in, Analyzer* analyzer) {
 	// Compress blocks.
 	uint64_t total_in = 0;
@@ -215,6 +232,7 @@ void Archive::constructBlocks(Stream* in, Analyzer* analyzer) {
 			blocks_.blocks_.push_back(solid_block);
 		}
 	}
+	std::sort(blocks_.blocks_.rbegin(), blocks_.blocks_.rend(), BlockSizeComparator());
 }
 
 Compressor* Archive::createMetaDataCompressor() {

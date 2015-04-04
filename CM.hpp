@@ -117,7 +117,7 @@ public:
 		0;
 	
 	// Flags
-	static const bool kStatistics = true;
+	static const bool kStatistics = false;
 	static const bool kFastStats = true;
 	static const bool kFixedProbs = false;
 	// Currently, LZP isn't as great as it coul be.
@@ -128,7 +128,7 @@ public:
 	static const bool kUsePrefetch = false;
 	static const bool kPrefetchMatchModel = true;
 	static const bool kPrefetchWordModel = true;
-	static const bool kFixedMatchProbs = true;
+	static const bool kFixedMatchProbs = false;
 
 	// SS table
 	static const uint32_t kShift = 12;
@@ -739,11 +739,11 @@ public:
 
 		calcMixerBase();
 		if (mm_len > 0) {
+			miss_len_ = 0;
 			if (kStatistics) {
 				if (!decode) {
 					++(expected_char == c ? match_count_ : non_match_count_);
 				}
-				miss_len_ = 0;
 			}
 			if (mm_len > min_match_lzp_) {
 				size_t extra_len = mm_len - match_model.getMinMatch();
@@ -785,10 +785,41 @@ public:
 			}
 			if (miss_len_ > miss_fast_path_) {
 				if (kStatistics) ++fast_bytes_;
-				if (decode) {
-					c = ent.DecodeDirectBits(stream, 8);
+
+				if (false) {
+					if (decode) {
+						c = ent.DecodeDirectBits(stream, 8);
+					} else {
+						ent.EncodeBits(stream, c, 8);
+					}
 				} else {
-					ent.EncodeBits(stream, c, 8);
+					auto* s0 = &hash_table[o1pos + p0 * o0size];
+					auto* s1 = &hash_table[o2pos + (owhash & 0xFFFF) * o0size];
+					size_t ctx = 1;
+					uint32_t ch = c << 24;
+					while (ctx < 256) {
+						auto* st0 = s0 + ctx;
+						auto* st1 = s1 + ctx;
+						auto* pr = &fast_mix_[*st0][*st1];
+						auto p = pr->getP();
+						p += p == 0;
+						size_t bit;
+						if (decode) {
+							bit = ent.getDecodedBit(p, kShift);
+							ent.Normalize(stream);
+						} else {
+							bit = ch >> 31;
+							ent.encode(stream, bit, p, kShift);
+							ch <<= 1;
+						}
+						pr->update(bit);
+						*st0 = state_trans[*st0][bit];
+						*st1 = state_trans[*st1][bit];
+						ctx += ctx + bit;
+					}
+					if (decode) {
+						c = ctx & 0xFF;
+					}
 				}
 				return c;
 			}
@@ -873,7 +904,7 @@ public:
 			// if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
 			current_mask_map_ = text_mask_map_;
 			min_match_lzp_ = lzp_enabled_ ? 9 : kMaxMatch;
-			miss_fast_path_ = 100000;
+			miss_fast_path_ = 1000000;
 			break;
 		default: // Binary
 			assert(profile_ == kProfileBinary);
@@ -921,10 +952,11 @@ public:
 			if (inputs > idx++) enableModel(kModelSparse3);
 			if (inputs > idx++) enableModel(kModelOrder0);
 #endif
-			setMatchModelOrder(7);
+			setMatchModelOrder(6);
 			current_mask_map_ = binary_mask_map_;
 			min_match_lzp_ = lzp_enabled_ ? 0 : kMaxMatch;
-			miss_fast_path_ = 1500;
+			// miss_fast_path_ = 1500;
+			miss_fast_path_ = 100000;
 			break;
 		}
 		calcProbBase();

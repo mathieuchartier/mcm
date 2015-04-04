@@ -184,10 +184,12 @@ public:
 					}
 					words_.addWord(word_, word_ + word_pos_);
 				}
+				/*
 				for (size_t i = 0; i < word_pos_; ++i) {
 					if (buffer_pos_ < buffer_.size()) buffer_[buffer_pos_++] = word_[i];
 				}
 				if (buffer_pos_ < buffer_.size()) buffer_[buffer_pos_++] = c;
+				*/
 				word_pos_ = 0;
 			}
 		}
@@ -227,6 +229,7 @@ public:
 			std::vector<WCPair> word_pairs;
 			const size_t kMinOccurences = 9u;
 			word_map.getWords(word_pairs, kMinOccurences);
+			word_map.clear();
 			const auto occurences = word_pairs.size();
 			std::sort(word_pairs.rbegin(), word_pairs.rend(), CompareWCPair(1));
 

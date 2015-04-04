@@ -58,6 +58,7 @@ public:
 	enum Profile {
 		kProfileText,
 		kProfileBinary,
+		kProfileWave16,
 		kProfileEOF,
 		kProfileCount,
 		// Not a real profile, tells CM to use streaming detection.
@@ -115,14 +116,17 @@ public:
 		Profile profile() const {
 			return profile_;
 		}
-		uint32_t length() const {
+		uint64_t length() const {
 			return length_;
 		}
-		void extend(uint32_t len) {
+		void setLength(uint64_t length) {
+			length_ = length;
+		}
+		void extend(uint64_t len) {
 			length_ += len;
 		}
 		// Remove one character from length.
-		void pop(uint32_t count = 1) {
+		void pop(uint64_t count = 1) {
 			assert(length_ >= count);
 			length_ -= count;
 		}
@@ -131,13 +135,14 @@ public:
 		static const size_t kLengthBytesShift = 6;
 		static const size_t kDataProfileMask = (1u << kLengthBytesShift) - 1;
 		Profile profile_;
-		uint32_t length_;
+		uint64_t length_;
 	};
 
 	static std::string profileToString(Profile profile) {
 		switch (profile) {
 		case kProfileBinary: return "binary";
 		case kProfileText: return "text";
+		case kProfileWave16: return "wav16";
 		}
 		return "unknown";
 	}
@@ -148,14 +153,20 @@ public:
 	// Detected but not already read.
 	DetectedBlock detected_block_;
 
+	// Saved detected blocks.
+	std::deque<DetectedBlock> saved_blocks_;
+
 	// Statistics
 	uint64_t num_blocks_[kProfileCount];
 	uint64_t num_bytes_[kProfileCount];
 	uint64_t overhead_bytes_;
 	uint64_t small_len_;
+
+	// Last things.
+	uint32_t last_word_;
 public:
 
-	Detector(Stream* stream) : stream_(stream), opt_var_(0) {
+	Detector(Stream* stream) : stream_(stream), opt_var_(0), last_word_(0) {
 	}
 
 	void setOptVar(size_t var) {
@@ -292,7 +303,13 @@ public:
 		current_block_.pop();
 		return popChar();
 	}
-	uint8_t popChar() {
+	int popChar() {
+		if (buffer_.empty()) {
+			refillRead();
+			if (buffer_.empty()) {
+				return EOF;
+			}
+		}
 		auto ret = buffer_.front();
 		buffer_.pop_front();
 		return ret;
@@ -316,6 +333,11 @@ public:
 	}
 
 	DetectedBlock detectBlock() {
+		if (!saved_blocks_.empty()) {
+			auto ret = saved_blocks_.front();
+			saved_blocks_.pop_front();
+			return ret;
+		}
 		refillRead();
 		const size_t buffer_size = buffer_.size();
 		if (buffer_size == 0) {
@@ -324,12 +346,56 @@ public:
 		if (false) {
 			return DetectedBlock(kProfileBinary, static_cast<uint32_t>(buffer_.size()));
 		}
+
 		size_t binary_len = 0;
 		while (binary_len < buffer_size) {
 			UTF8Decoder<true> decoder;
 			size_t text_len = 0;
 			while (binary_len + text_len < buffer_size) {
-				auto c = buffer_[binary_len + text_len];
+				size_t pos = binary_len + text_len;
+				if (true && last_word_ == 0x52494646) {
+					refillRead();
+					// This is pretty bad, need a clean way to do it.
+					uint32_t fpos = pos;
+					uint32_t chunk_size = readBytes(fpos, 4, false); fpos += 4;
+					uint32_t format = readBytes(fpos); fpos += 4;
+					// Format subchunk.
+					uint32_t subchunk_id = readBytes(fpos); fpos += 4;
+					if (format == 0x57415645 && subchunk_id == 0x666d7420) {
+						uint32_t subchunk_size = readBytes(fpos, 4, false); fpos += 4;
+						if (subchunk_size == 16 || subchunk_size == 18) {
+							uint32_t audio_format = readBytes(fpos, 2, false); fpos += 2;
+							uint32_t num_channels = readBytes(fpos, 2, false); fpos += 2;
+							if (audio_format == 1 && num_channels == 2) {
+								fpos += subchunk_size - 6;
+								// fpos += 4; // Skip: Sample rate
+								// fpos += 4; // Skip: Byte rate
+								// fpos += 2; // Skip: Block align
+								uint32_t bits_per_sample = readBytes(fpos, 2, false); fpos += 2;
+								for (size_t i = 0; i < 5; ++i) {
+									uint32_t subchunk2_id = readBytes(fpos, 4); fpos += 4;
+									uint32_t subchunk2_size = readBytes(fpos, 4, false); fpos += 4;
+									if (subchunk2_id == 0x64617461) {
+										if (subchunk2_size >= chunk_size) {
+											break;
+										}
+										saved_blocks_.push_back(DetectedBlock(kProfileWave16, chunk_size));
+										return DetectedBlock(kProfileBinary, fpos);
+										// Read wave header, TODO binary block as big as fpos?? Need to be able to queue subblocks then.
+										// profile_length = fpos + subchunk2_size;
+										// profile = kWave;
+										// return profile;
+									} else {
+										fpos += subchunk2_size;
+										if (fpos >= buffer_.size()) break;
+									}
+									}
+							}
+						} 
+					}
+				}
+				auto c = buffer_[pos];
+				last_word_ = (last_word_ << 8) | c;
 				decoder.update(c);
 				if (decoder.err() || is_forbidden[static_cast<uint8_t>(c)]) {
 					break; // Error state?
@@ -353,38 +419,23 @@ public:
 		return DetectedBlock(kProfileBinary, static_cast<uint32_t>(binary_len));
 	}
 
-	/*
-	// This is pretty bad, need a clean way to do it.
-	uint32_t fpos = 0;
-	uint32_t w0 = readBytes(fpos); fpos += 4;
-	if (false && w0 == 0x52494646) {
-		uint32_t chunk_size = readBytes(fpos); fpos += 4;
-		uint32_t format = readBytes(fpos); fpos += 4;
-		// Format subchunk.
-		uint32_t subchunk_id = readBytes(fpos); fpos += 4;
-		if (format == 0x57415645 && subchunk_id == 0x666d7420) {
-			uint32_t subchunk_size = readBytes(fpos, 4, false); fpos += 4;
-			if (subchunk_size == 16) {
-				uint32_t audio_format = readBytes(fpos, 2, false); fpos += 2;
-				uint32_t num_channels = readBytes(fpos, 2, false); fpos += 2;
-				if (audio_format == 1 && (num_channels == 1 || num_channels == 2)) {
-					fpos += 4; // Skip: Sample rate
-					fpos += 4; // Skip: Byte rate
-					fpos += 2; // Skip: Block align
-					uint32_t bits_per_sample = readBytes(fpos, 2, false); fpos += 2;
-					uint32_t subchunk2_id = readBytes(fpos, 4); fpos += 4;
-					if (subchunk2_id == 0x64617461) {
-						uint32_t subchunk2_size = readBytes(fpos, 4, false); fpos += 4;
-						// Read wave header, TODO binary block as big as fpos?? Need to be able to queue subblocks then.
-						profile_length = fpos + subchunk2_size;
-						profile = kWave;
-						return profile;
-					}
-				}
+	forceinline size_t readBytes(size_t pos, size_t bytes = 4, bool big_endian = true) {
+		if (pos + bytes > buffer_.size()) {
+			return 0;
+		}
+		uint32_t w = 0;
+		// Past the end of buffer :(
+		if(big_endian) {
+			for (size_t i = 0; i < bytes; ++i) {
+				w = (w << 8) | buffer_[pos + i];
 			}
-		} 
+		} else {
+			for (size_t shift = 0, i = 0; i < bytes; ++i, shift += 8) {
+				w |= static_cast<uint32_t>(buffer_[pos + i]) << shift;
+			}
+		}
+		return w;
 	}
-	*/
 };
 
 // Detector analyzer, analyze a whole stream.
@@ -402,6 +453,10 @@ public:
 			}
 			for (size_t i = 0; i < block.length(); ++i) {
 				auto c = detector.popChar();
+				if (c == EOF) {
+					block.setLength(i);
+					break;
+				}
 				if (block.profile() == Detector::kProfileText) {
 					dict_builder_.addChar(c);
 				}

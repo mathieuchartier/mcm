@@ -140,6 +140,12 @@ void CM<kCMType>::init() {
 		}
 	}
 
+	for (size_t i = 0; i < 256; ++i) {
+		for (size_t j = 0; j < 256; ++j) {
+			fast_mix_[i][j].setP(table.sq((table.st(initial_probs[0][i]) + table.st(initial_probs[1][i])) / 2));
+		}
+	}
+
 	setDataProfile(profile_);
 	owhash = 0;
 
@@ -306,6 +312,7 @@ void CM<kCMType>::compress(Stream* in_stream, Stream* out_stream, uint64_t max_c
 template <CMType kCMType>
 void CM<kCMType>::decompress(Stream* in_stream, Stream* out_stream, uint64_t max_count) {
 	BufferedStreamReader<4 * KB> sin(in_stream);
+	BufferedStreamWriter<4 * KB> sout(out_stream);
 	Detector detector(out_stream);
 	if (!force_profile_) {
 		detector.setOptVar(opt_var);
@@ -332,7 +339,7 @@ void CM<kCMType>::decompress(Stream* in_stream, Stream* out_stream, uint64_t max
 		size_t c = processByte<true>(sin);
 		update(c);
 		if (force_profile_) {
-			out_stream->put(c);
+			sout.put(c);
 		} else {
 			detector.put(c);
 		}
@@ -340,6 +347,7 @@ void CM<kCMType>::decompress(Stream* in_stream, Stream* out_stream, uint64_t max
 	if (!force_profile_) {
 		detector.flush();
 	}
+	sout.flush();
 	size_t remain = sin.remain();
 	if (remain > 0) {
 		// Go back all the characters we didn't actually read.

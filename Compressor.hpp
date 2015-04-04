@@ -93,6 +93,7 @@ class Compressor {
 public:
 	enum Type {
 		kTypeStore,
+		kTypeWav16,
 		kTypeCMTurbo,
 		kTypeCMFast,
 		kTypeCMMid,
