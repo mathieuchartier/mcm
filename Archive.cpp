@@ -193,7 +193,7 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer) {
 	return nullptr;
 }
 
-Archive::SolidBlock::SolidBlock() {
+Archive::SolidBlock::SolidBlock() : total_size_(0) {
 }
 
 class BlockSizeComparator {
@@ -203,36 +203,8 @@ public:
 	}
 };
 
-void Archive::constructBlocks(Stream* in, Analyzer* analyzer) {
-	// Compress blocks.
-	uint64_t total_in = 0;
-	for (size_t p_idx = 0; p_idx < static_cast<size_t>(Detector::kProfileCount); ++p_idx) {
-		auto profile = static_cast<Detector::Profile>(p_idx);
-		// Compress each stream type.
-		uint64_t pos = 0;
-		FileSegmentStream::FileSegments seg;
-		seg.base_offset_ = 0;
-		seg.stream_ = in;
-		for (const auto& b : analyzer->getBlocks()) {
-			const auto len = b.length();
-			if (b.profile() == profile) {
-				FileSegmentStream::SegmentRange range;
-				range.offset_ = pos;
-				range.length_ = len;
-				seg.ranges_.push_back(range);
-			}
-			pos += len;
-		}
-		seg.calculateTotalSize();
-		if (seg.total_size_ > 0) {
-			auto* solid_block = new Archive::SolidBlock();
-			solid_block->algorithm_ = Algorithm(options_, profile);
-			solid_block->segments_.push_back(seg);
-			solid_block->total_size_ = seg.total_size_;
-			blocks_.blocks_.push_back(solid_block);
-		}
-	}
-	std::sort(blocks_.blocks_.rbegin(), blocks_.blocks_.rend(), BlockSizeComparator());
+void Archive::constructBlocks(Analyzer::Blocks* blocks_for_file) {
+	
 }
 
 Compressor* Archive::createMetaDataCompressor() {
@@ -244,6 +216,9 @@ void Archive::writeBlocks() {
 	WriteVectorStream wvs(&temp);
 	// Write out the blocks into temp.
 	blocks_.write(&wvs);
+	size_t blocks_size = wvs.tell();
+	files_.write(&wvs);
+	size_t files_size = wvs.tell() - blocks_size;
 	// Compress overhead.
 	std::unique_ptr<Compressor> c(createMetaDataCompressor());
 	ReadMemoryStream rms(&temp[0], &temp[0] + temp.size());
@@ -251,10 +226,14 @@ void Archive::writeBlocks() {
 	stream_->leb128Encode(temp.size());
 	c->compress(&rms, stream_);
 	stream_->leb128Encode(static_cast<uint64_t>(1234u));
-	std::cout << "Compressed metadata " << temp.size() << " -> " << stream_->tell() - start_pos << std::endl << std::endl;
+	std::cout << "(flist=" << files_size << "+" << "blocks=" << blocks_size << ")=" << temp.size() << " -> " << stream_->tell() - start_pos << std::endl << std::endl;
 }
 
 void Archive::readBlocks() {
+	if (!files_.empty()) {
+		// Already read.
+		return;
+	}
 	auto metadata_size = stream_->leb128Decode();
 	std::cout << "Metadata size=" << metadata_size << std::endl;
 	// Decompress overhead.
@@ -267,11 +246,12 @@ void Archive::readBlocks() {
 	check(cmp == 1234u);
 	ReadMemoryStream rms(&metadata);
 	blocks_.read(&rms);
+	files_.read(&rms);
 }
 
 void Archive::Blocks::write(Stream* stream) { 
-	stream->leb128Encode(blocks_.size());
-	for (auto* block : blocks_) {
+	stream->leb128Encode(size());
+	for (auto* block : *this) {
 		block->write(stream);
 	}
 }
@@ -279,11 +259,11 @@ void Archive::Blocks::write(Stream* stream) {
 void Archive::Blocks::read(Stream* stream) { 
 	size_t num_blocks = stream->leb128Decode();
 	check(num_blocks < 1000000);  // Sanity check.
-	blocks_.clear();
+	clear();
 	for (size_t i = 0; i < num_blocks; ++i) {
 		auto* block = new SolidBlock;
 		block->read(stream);
-		blocks_.push_back(block);
+		push_back(block);
 	}
 }
 
@@ -300,12 +280,93 @@ void Archive::SolidBlock::read(Stream* stream) {
 	size_t num_segments = stream->leb128Decode();
 	check(num_segments < 10000000);
 	segments_.resize(num_segments);
+	total_size_ = 0;
 	for (auto& seg : segments_) {
 		seg.read(stream);
 		seg.calculateTotalSize();
-		std::cout << Detector::profileToString(algorithm_.profile()) << " size " << seg.total_size_ << std::endl;
+		total_size_ += seg.total_size_;
 	}
 }
+
+class FileSegmentStreamFileList : public FileSegmentStream {
+public:
+	FileSegmentStreamFileList(std::vector<FileSegments>* segments, uint64_t count, FileList* file_list, bool extract)
+		: FileSegmentStream(segments, count), file_list_(file_list), extract_(extract) {
+	}
+	~FileSegmentStreamFileList() {
+		delete cur_stream_;
+	}
+	Stream* openNewStream(size_t index) OVERRIDE {
+		if (cur_stream_ != nullptr) {
+			delete cur_stream_;
+			cur_stream_ = nullptr;
+		}
+		// Open the new file.
+		auto* ret = new File;
+		auto& file_info = file_list_->at(index);
+		std::string full_name = file_info.getFullName();
+		int err;
+		if (extract_) {
+			std::ios_base::openmode open_mode = std::ios_base::out | std::ios_base::binary;
+			if (file_info.previouslyOpened()) {
+				open_mode |= std::ios_base::app;
+			}
+			file_info.addOpen();
+			err = ret->open(full_name.c_str(), open_mode);
+		} else {
+			err = ret->open(full_name.c_str(), std::ios_base::in | std::ios_base::binary);
+		}
+		if (err != 0) {
+			std::cerr << "Error opening: " << full_name.c_str() << " (" << errstr(err) << ")" << std::endl;
+		}
+		return ret;
+	}
+
+private:
+	FileList* const file_list_;
+	const bool extract_;
+};
+
+class VerifyFileSegmentStreamFileList : public FileSegmentStream {
+public:
+	VerifyFileSegmentStreamFileList(std::vector<FileSegments>* segments, FileList* file_list, std::vector<uint64_t>* remain_bytes)
+		: FileSegmentStream(segments, 0u), file_list_(file_list), verify_stream_(&file_, 0), remain_bytes_(remain_bytes), last_idx_(0) {
+	}
+	~VerifyFileSegmentStreamFileList() {
+		subBytes(last_idx_);
+	}
+	void subBytes(size_t idx) {
+		auto c = verify_stream_.getCount();
+		auto& r = remain_bytes_->at(idx);
+		if (c > r) {
+			std::cerr << "Wrote " << c - r << " extra bytes to " << file_list_->at(idx).getFullName() << std::endl;
+			r = 0;
+		} else {
+			r -= c;
+		}
+	}
+	Stream* openNewStream(size_t index) OVERRIDE {
+		subBytes(last_idx_);
+		verify_stream_.resetCount();
+		// Open the new file.
+		auto& file_info = file_list_->at(last_idx_ = index);
+		std::string full_name = file_info.getFullName();
+		if (int err = file_.open(full_name.c_str(), std::ios_base::in | std::ios_base::binary)) {
+			std::cerr << "Error opening: " << full_name.c_str() << " (" << errstr(err) << ")" << std::endl;
+		}
+		return &verify_stream_;
+	}
+	uint64_t totalDifferences() const {
+		return verify_stream_.differences_;
+	}
+
+private:
+	FileList* const file_list_;
+	File file_;
+	VerifyStream verify_stream_;
+	std::vector<uint64_t>* const remain_bytes_;
+	size_t last_idx_;
+};
 
 void testFilter(Stream* stream, Analyzer* analyzer) {
 	std::vector<uint8_t> comp;
@@ -351,44 +412,271 @@ void testFilter(Stream* stream, Analyzer* analyzer) {
 	std::cout << "Verify decomp " << vs.tell() << " <- " << comp.size() << " in "  << clockToSeconds(clock() - start) << "s" << std::endl << std::endl;
 }
 
-// Analyze and compress.
-void Archive::compress(Stream* in) {
-	Analyzer analyzer;
-	auto start_a = clock();
-	std::cout << "Analyzing" << std::endl;
+static inline std::string smartExt(const std::string& ext) {
+	if (ext == "h" || ext == "hpp" || ext == "inl" || ext == "cpp") return "c";
+	if (ext == "jpg" || ext == "zip" || ext == "7z" || ext == "apk" || ext == "mp3" || ext == "gif" || ext == "png") return "ÿ" + ext;
+	return ext;
+}
+
+class CompareFileInfoName {
+public:
+	bool operator()(const FileInfo& a, const FileInfo& b) const {
+		auto& name1 = a.getName();
+		auto& name2 = b.getName();
+		auto ext1 = getExt(name1);
+		auto ext2 = getExt(name2);
+		auto sext1 = smartExt(ext1);
+		auto sext2 = smartExt(ext2);
+		if (sext1 != sext2) return sext1 < sext2;
+		auto fname1 = getFileName(name1);
+		auto fname2 = getFileName(name2);
+		if (false) {
+			// Probably buggy.
+			if (!ext1.empty()) fname1 = fname1.substr(0, fname1.length() - ext1.length() - 1);
+			if (!ext2.empty()) fname2 = fname2.substr(0, fname2.length() - ext2.length() - 1);
+			if (isdigit(fname1.back()) && isdigit(fname2.back())) {
+				size_t d1 = fname1.length() - 1;
+				for (;d1 > 0 && isdigit(fname1[d1]);--d1);
+				size_t d2 = fname2.length() - 1;
+				for (;d2 > 0 && isdigit(fname2[d2]);--d2);
+				auto no_num1 = fname1.substr(0, d1 + 1);
+				auto no_num2 = fname2.substr(0, d2 + 1);
+				if (no_num1 != no_num2) return no_num1 < no_num2;
+				auto num1 = fname1.substr(d1 + 1);
+				auto num2 = fname2.substr(d2 + 1);
+				auto l1 = num1.length();
+				auto l2 = num2.length();
+				if (l1 > l2)
+					num2 = std::string(l1 - l2, '0') + num2;
+				else if (l1 < l2)
+					num1 = std::string(l2 - l1, '0') + num1;
+				if (num1 != num2) return num1 < num2;
+			}
+		}
+		if (fname1 != fname2) return fname1 < fname2;
+		return name1 < name2;
+	}
+};
+
+class AnalyzerProgressThread : public AutoUpdater {
+public:
+	AnalyzerProgressThread() : stream_(nullptr), start_(clock()), add_bytes_(0), add_files_(0) {
+	}
+
+	void setStream(Stream* stream) {
+		std::unique_lock<std::mutex> lock(mutex_);
+		stream_ = stream;
+	}
+
+	void doneFile(uint64_t file_bytes) {
+		std::unique_lock<std::mutex> lock(mutex_);
+		stream_ = 0;
+		add_bytes_ += file_bytes;
+		++add_files_;
+
+	}
+	virtual void print() {
+		auto cur_time = clock();
+		auto time_delta = cur_time - start_;
+		if (!time_delta) ++time_delta;
+		const uint64_t cur_bytes = (stream_ != nullptr ? stream_->tell() : 0u) + add_bytes_;
+		const uint32_t rate = uint32_t(double(cur_bytes / KB) / (double(time_delta) / double(CLOCKS_PER_SEC)));
+		std::cout << "Analyzed " << add_files_ << " size=" << prettySize(cur_bytes) << " " << rate << "KB/s   ";
+		std::cout << "\t\r" << std::flush;
+	}
+
+private:
+	Stream* stream_;
+	size_t start_;
+	uint64_t add_bytes_;
+	uint64_t add_files_;
+};
+
+struct DedupeFragment {
+	uint32_t src_file_;
+	uint64_t src_pos_;
+	uint32_t dest_file_;
+	uint64_t dest_pos_;
+	uint64_t len_;
+};
+
+class DedupeAnalyzer : public Analyzer {
+	static const size_t kBlockSize = 8 * KB;
+public:
+	DedupeAnalyzer(FileList* files) : files_(files) {
+	}
+	std::pair<uint64_t, uint64_t> confirmDedupe(Deduplicator::DedupEntry* e, Stream* stream, size_t file_idx, uint64_t* pos) {
+		uint8_t file_block[kBlockSize];
+		uint8_t compare_block[kBlockSize];
+		uint64_t file_pos = e->offset_;
+		uint64_t compare_pos = *pos;
+		Stream* file_stream;
+		File file;
+		auto orig_pos = stream->tell();
+		uint64_t max_read = std::numeric_limits<uint64_t>::max();
+		if (e->file_idx_ == file_idx) {
+			if (file_pos >= compare_pos) {
+				return std::pair<uint64_t, uint64_t>(0u, 0u);
+			}
+			max_read = compare_pos - file_pos;
+			file_stream = stream;
+		} else {
+			auto& file_info = files_->at(e->file_idx_);
+			int err;
+			std::string file_name = file_info.getFullName();
+			if (err = file.open(file_name.c_str(), std::ios_base::in | std::ios_base::binary)) {
+				std::cerr << "Error opening: " << file_name << " (" << errstr(err) << ")" << std::endl;
+			}
+			file_stream = &file;
+		}
+
+		// Extend the match.
+		uint64_t len = 0;
+		for (;;) {
+			size_t cur_max = static_cast<size_t>(std::min(kBlockSize, max_read - len));
+			auto c1 = stream->readat(compare_pos + len, compare_block, cur_max);
+			auto c2 = file_stream->readat(file_pos + len, file_block, cur_max);
+			if (c1 == 0 || c2 == 0) {
+				break;
+			}
+			size_t cur_len;
+			bool match = true;
+			for (cur_len = 0; match && cur_len < c1 && cur_len < c2; ++cur_len) {
+				match = compare_block[cur_len] == file_block[cur_len];
+			}
+			len += cur_len;
+			if (!match) break;
+		}
+		// Back to where we started.
+		stream->seek(orig_pos);
+		file.close();
+		if (len < kBlockSize) {
+			return std::pair<uint64_t, uint64_t>(0u, 0u);
+		}
+		// Write the dedupe fragment.
+		DedupeFragment frag;
+		frag.src_file_ = e->file_idx_;
+		frag.src_pos_ = file_pos;
+		frag.dest_file_ = file_idx;
+		frag.dest_pos_ = compare_pos;
+		frag.len_ = len;
+		dedupe_fragments_.push_back(frag);
+		return std::pair<uint64_t, uint64_t>(compare_pos, len);
+	}
+	void dump() {
+		for (auto& f : dedupe_fragments_) {
+			const auto& file1 = files_->at(f.src_file_);
+			const auto& file2 = files_->at(f.dest_file_);
+			std::cout << f.len_ << ":" << file1.getName() << "(" << f.src_pos_ << ")->" << file2.getName() << "(" << f.dest_pos_ << ")" << std::endl;
+		}
+	}
+
+private:
+	FileList* files_;
+	std::vector<DedupeFragment> dedupe_fragments_;
+};
+
+uint64_t Archive::compress(const std::vector<FileInfo>& in_files) {
+	// Enumerate files
+	auto start = clock();
+	std::cout << "Enumerating files" << std::endl;
+	for (auto& f : in_files) {
+		if (f.isDir()) {
+			files_.addDirectoryRec(f.getName());
+		}
+		files_.push_back(f);
+	}
+	std::sort(files_.begin(), files_.end(), CompareFileInfoName());
+	std::cout << "Enumerating took " << clockToSeconds(clock() - start) << "s" << std::endl;
+
+	blocks_.clear();
+	for (size_t i = 0; i < Detector::kProfileCount; ++i) {
+		blocks_.push_back(new SolidBlock);
+		blocks_.back()->algorithm_ = Algorithm(options_, static_cast<Detector::Profile>(i));
+	}
+	
+	DedupeAnalyzer analyzer(&files_);
 	{
-		ProgressThread thr(in, stream_);
-		analyzer.analyze(in);
+		// Analyze enumerated and construct blocks.
+		analyzer.setOpt(opt_var_);
+		start = clock();
+		std::cout << "Analyzing " << files_.size() << " files" << std::endl;
+		size_t file_idx = 0;
+		uint64_t total_size = 0;
+		AnalyzerProgressThread thr;
+		for (auto& f : files_) {
+			if (!f.isDir()) {
+				File fin;
+				int err;
+				if (err = fin.open(f.getName(), std::ios_base::in | std::ios_base::binary)) {
+					std::cerr << "Error opening: " << f.getName() << " (" << errstr(err) << ")" << std::endl;
+				}
+				thr.setStream(&fin);
+				analyzer.analyze(&fin, file_idx);
+				auto& blocks = analyzer.getBlocks();
+				uint64_t pos = 0;
+				for (size_t i = 0; i < Detector::kProfileCount; ++i) {
+					auto* block = blocks_[i];
+					// Compress each stream type.
+					pos = 0;
+					FileSegmentStream::FileSegments seg;
+					seg.base_offset_ = 0;
+					seg.stream_idx_ = file_idx;
+					for (const auto& b : blocks) {
+						const auto len = b.length();
+						if (b.profile() == block->algorithm_.profile()) {
+							FileSegmentStream::SegmentRange range;
+							range.offset_ = pos;
+							range.length_ = len;
+							seg.ranges_.push_back(range);
+						}
+						pos += len;
+					}
+					seg.calculateTotalSize();
+					if (seg.total_size_ > 0) {
+						block->segments_.push_back(seg);
+						block->total_size_ += seg.total_size_;
+					}
+				}
+				thr.doneFile(pos);
+				total_size += pos;
+				blocks.clear();
+			}
+			file_idx++;
+		}
+		std::cout << std::endl;
+		analyzer.dump();
+		std::cout << "Analyzing took " << clockToSeconds(clock() - start) << "s" << std::endl << std::endl;
 	}
-	std::cout << std::endl;
-	analyzer.dump();
-	std::cout << "Analyzing took " << clockToSeconds(clock() - start_a) << "s" << std::endl << std::endl;
 
-	if (kTestFilter) {
-		auto* dict = new Dict;
-		testFilter(in, &analyzer);
+	// Remove empty blocks.
+	for (auto it = blocks_.begin(); it != blocks_.end(); ) {
+		if ((*it)->total_size_ == 0) it = blocks_.erase(it);
+		else ++it;
 	}
 
-	constructBlocks(in, &analyzer);
+	// Biggest block first (decompression performance reasons).
+	std::sort(blocks_.rbegin(), blocks_.rend(), BlockSizeComparator());
+
 	writeBlocks();
-
-	for (auto* block : blocks_.blocks_) {
+	uint64_t total = 0;
+	for (auto* block : blocks_) {
 		auto start_pos = stream_->tell();
 		
 		auto start = clock();
 		auto out_start = stream_->tell();
 		for (size_t i = 0; i < kSizePad; ++i) stream_->put(0);
 
-		FileSegmentStream segstream(&block->segments_, 0u);	
+		FileSegmentStreamFileList segstream(&block->segments_, 0, &files_, false);
 		Algorithm* algo = &block->algorithm_;
 		std::cout << "Compressing " << Detector::profileToString(algo->profile())
-			<< " stream size=" << formatNumber(block->total_size_) << "\t" << std::endl;
+			<< " block size=" << formatNumber(block->total_size_) << "\t" << std::endl;
 		std::unique_ptr<Filter> filter(algo->createFilter(&segstream, &analyzer));
 		Stream* in_stream = &segstream;
 		if (filter.get() != nullptr) in_stream = filter.get();
 		auto in_start = in_stream->tell();
 		std::unique_ptr<Compressor> comp(algo->createCompressor());
-		comp->setOpt(opt_var_);
+		if (!comp->setOpt(opt_var_)) return 0;
 		{
 			ProgressThread thr(&segstream, stream_, true, out_start);
 			comp->compress(in_stream, stream_);
@@ -405,17 +693,32 @@ void Archive::compress(Stream* in) {
 		std::cout << std::endl;
 		std::cout << "Compressed " << formatNumber(segstream.tell()) << " -> " << formatNumber(after_pos - out_start)
 			<< " in " << clockToSeconds(clock() - start) << "s" << std::endl << std::endl;
+		check(segstream.tell() == block->total_size_);
+		total += block->total_size_;
 	}
+	return total;
 }
 
 // Decompress.
-void Archive::decompress(Stream* out) {
+void Archive::decompress(const std::string& out_dir, bool verify) {
 	readBlocks();
-	for (auto* block : blocks_.blocks_) {
+	for (auto& f : files_) {
+		f.setPrefix(&out_dir);
+	}
+	std::vector<uint64_t> remain_bytes;
+	if (verify) {
+		remain_bytes.resize(files_.size(), 0u);
+		for (auto* block : blocks_) {
+			for (const auto& seg : block->segments_) {
+				remain_bytes.at(seg.stream_idx_) += seg.total_size_;
+			}
+		}
+	}
+	uint64_t differences = 0;
+	for (auto* block : blocks_) {
 		block->total_size_ = 0;
 		auto start_pos = stream_->tell();
 		for (auto& seg : block->segments_) {
-			seg.stream_ = out;
 			block->total_size_ += seg.total_size_;
 		}
 
@@ -427,21 +730,55 @@ void Archive::decompress(Stream* out) {
 		}
 
 		auto start = clock();
-		FileSegmentStream segstream(&block->segments_, 0u);	
+		FileSegmentStreamFileList segstream(&block->segments_, 0u, &files_, true);	
+		VerifyFileSegmentStreamFileList verify_segstream(&block->segments_, &files_, &remain_bytes);	
+
 		Algorithm* algo = &block->algorithm_;
 		std::cout << "Decompressing " << Detector::profileToString(algo->profile())
 			<< " stream size=" << formatNumber(block->total_size_) << "\t" << std::endl;
-		std::unique_ptr<Filter> filter(algo->createFilter(&segstream, nullptr));
-		Stream* out_stream = &segstream;
-		if (filter.get() != nullptr) out_stream = filter.get();
+		Stream* out_stream = verify ? static_cast<Stream*>(&verify_segstream) : static_cast<Stream*>(&segstream);
+		Stream* filter_out_stream = out_stream;
+		std::unique_ptr<Filter> filter(algo->createFilter(filter_out_stream, nullptr));
+		if (filter.get() != nullptr) filter_out_stream = filter.get();
 		std::unique_ptr<Compressor> comp(algo->createCompressor());
 		comp->setOpt(opt_var_);
 		{
-			ProgressThread thr(&segstream, stream_, false, out_start);
-			comp->decompress(stream_, out_stream, block_size);
+			ProgressThread thr(out_stream, stream_, false, out_start);
+			comp->decompress(stream_, filter_out_stream, block_size);
 			if (filter.get() != nullptr) filter->flush();
 		}
-		std::cout << std::endl << "Decompressed " << formatNumber(segstream.tell()) << " <- " << formatNumber(stream_->tell() - out_start)
+		differences += verify_segstream.totalDifferences();
+		std::cout << std::endl << "Decompressed " << formatNumber(out_stream->tell()) << " <- " << formatNumber(stream_->tell() - out_start)
 			<< " in " << clockToSeconds(clock() - start) << "s" << std::endl << std::endl;
 	}
+	if (verify) {
+		for (size_t i = 0; i < files_.size(); ++i) {
+			if (remain_bytes[i] > 0) {
+				std::cerr << "Missed writing " << remain_bytes[i] << " bytes to " <<  files_[i].getFullName() << std::endl;
+			}
+		}
+		if (differences) {
+			std::cerr << "DECOMPRESSION FAILED, " << differences << " differences" << std::endl;
+		} else {
+			std::cout << "No differences found" << std::endl;
+		}
+	}
+}
+
+void Archive::list() {
+	readBlocks();
+	for (const auto& f : files_) {
+		std::cout << FileInfo::attrToStr(f.getAttributes()) << " " << f.getName() << std::endl;
+	}
+	uint64_t total_size = 0;
+	size_t idx = 0;
+	for (const auto* b : blocks_) {
+		if (b->total_size_ > 0) {
+			std::cout << "Solid block " << idx++ << " size " << formatNumber(b->total_size_) << " profile " << Detector::profileToString(b->algorithm_.profile()) << std::endl;
+			total_size += b->total_size_;
+		}
+	}
+	// Sum up blocks size
+	std::cout << "Files " << files_.size() << " uncompressed size " << formatNumber(total_size) << std::endl;
+	// Done listing files.
 }

@@ -117,7 +117,7 @@ public:
 		0;
 	
 	// Flags
-	static const bool kStatistics = false;
+	static const bool kStatistics = true;
 	static const bool kFastStats = true;
 	static const bool kFixedProbs = false;
 	// Currently, LZP isn't as great as it coul be.
@@ -319,7 +319,7 @@ public:
 	}
 
 	bool setOpt(uint32_t var) {
-		// if (var >= 7 && var < 13) return false;
+		if (var >= 6 && var < 13) return false;
 		opt_var = var;
 		word_model.setOpt(var);
 		match_model.setOpt(var);
@@ -824,7 +824,7 @@ public:
 				return c;
 			}
 		}
-		if (false) {
+		if (true) {
 			match_model.resetMatch();
 			return c;
 		}
@@ -888,7 +888,7 @@ public:
 			if (inputs > idx++) enableModel(kModelOrder8);
 			if (inputs > idx++) enableModel(kModelOrder0);
 			if (inputs > idx++) enableModel(kModelWord12);
-			// if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
+			if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
 			setMatchModelOrder(8);
 #else
 			if (inputs > idx++) enableModel(kModelOrder0);
@@ -896,10 +896,12 @@ public:
 			if (inputs > idx++) enableModel(kModelOrder2);
 			if (inputs > idx++) enableModel(kModelOrder3);
 			if (inputs > idx++) enableModel(kModelOrder4);
-			if (inputs > idx++) enableModel(kModelOrder5);
+			// if (inputs > idx++) enableModel(kModelOrder5);
 			if (inputs > idx++) enableModel(kModelOrder6);
 			if (inputs > idx++) enableModel(kModelOrder7);
-			setMatchModelOrder(0);
+			if (inputs > idx++) enableModel(kModelOrder8);
+			if (inputs > idx++) enableModel(kModelOrder9);
+			setMatchModelOrder(8);
 #endif
 			// if (inputs > idx++) enableModel(static_cast<Model>(opt_var));
 			current_mask_map_ = text_mask_map_;
@@ -911,8 +913,11 @@ public:
 #if 0
 			if (inputs > idx++) enableModel(kModelOrder0);
 			if (inputs > idx++) enableModel(kModelOrder4);
-			if (inputs > idx++) enableModel(kModelOrder2);
-			if (inputs > idx++) enableModel(kModelOrder6);
+			if (inputs > idx++) enableModel(kModelMask);
+			if (inputs > idx++) enableModel(kModelOrder1);
+			if (inputs > idx++) enableModel(kModelSparse23);
+			// if (inputs > idx++) enableModel(kModelOrder2);
+			// if (inputs > idx++) enableModel(kModelOrder6);
 			// if (inputs > idx++) enableModel(kModelOrder1);
 			// if (inputs > idx++) enableModel(kModelOrder3);
 			if (inputs > idx++) enableModel(static_cast<Model>(opt_var));

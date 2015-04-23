@@ -133,11 +133,13 @@ public:
 	};
 
 	class SuffixSortComparator {
+		static const uint32_t kMaxContext = 16;
 	public:
 		SuffixSortComparator(const uint8_t* arr) : arr_(arr) {
 		}
 		forceinline bool operator()(uint32_t a, uint32_t b) const {
-			while (a > 0 && b > 0) {
+			size_t max = std::min(std::min(a, b), kMaxContext);
+			for (; max > 0; --max) {
 				if (arr_[--a] != arr_[--b]) {
 					return arr_[a] < arr_[b];
 				}
@@ -184,18 +186,16 @@ public:
 					}
 					words_.addWord(word_, word_ + word_pos_);
 				}
-				/*
 				for (size_t i = 0; i < word_pos_; ++i) {
-					if (buffer_pos_ < buffer_.size()) buffer_[buffer_pos_++] = word_[i];
+					if (buffer_pos_ < buffer_.capacity()) buffer_.push_back(word_[i]);
 				}
-				if (buffer_pos_ < buffer_.size()) buffer_[buffer_pos_++] = c;
-				*/
+				if (buffer_pos_ < buffer_.capacity()) buffer_.push_back(c);
 				word_pos_ = 0;
 			}
 		}
 		void init() {
 			buffer_pos_ = 0;
-			buffer_.resize(kSuffixSize);
+			buffer_.reserve(kSuffixSize);
 			word_pos_ = 0;
 		}
 		Builder() {
@@ -303,6 +303,7 @@ public:
 				for (; it != cw->begin() + count1 + count2; ++it) {
 					words2b.insert(std::make_pair(*it, MeanPair(0, 0)));
 				}
+				if (false)  // 3 byte ones, ignore since they are probably low freq.
 				for (; it != cw->end(); ++it) {
 					words3b.insert(std::make_pair(*it, MeanPair(0, 0)));
 				}
@@ -338,7 +339,7 @@ public:
 
 				// Use suffix to build avg indexes.
 				// Whether or not do dump suffixes.
-				// std::ofstream fout("suffixes.txt");
+				std::ofstream fout("suffixes.txt");
 				for (size_t i = 0; i < indexes.size(); ++i) {
 					size_t pos = indexes[i] - kSuffixOffset;
 					check(isWordChar(arr[pos]));
@@ -347,7 +348,7 @@ public:
 					}
 					std::string s(arr + pos, arr + pos + len);
 
-#if 0
+#if 1
 					auto end = pos + len;
 					std::string str(std::max(arr, arr + pos - 12), std::min(arr + end, arr + buffer->size()));
 					for (auto& c : str) {

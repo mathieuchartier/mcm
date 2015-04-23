@@ -40,40 +40,72 @@
 // extern int64_t __cdecl _ftelli64(FILE *);
 #endif
 
+class FileList;
+
 class FileInfo {
 public:
-	FileInfo() : attributes(0) {
+	typedef uint16_t AttributeType;
+	static const uint16_t kAttrDirectory = 0x1;
+	static const uint16_t kAttrReadPermission = 0x2;
+	static const uint16_t kAttrWritePermission = 0x4;
+	static const uint16_t kAttrExecutePermission = 0x8;
+	static const uint16_t kAttrSystem = 0x10;
+	static const uint16_t kAttrHidden = 0x20;
+
+	FileInfo();
+	FileInfo(const std::string& name, const std::string* prefix = nullptr);
+	FileInfo(const FileInfo& f) { *this = f; }
+	FileInfo& operator=(const FileInfo& f) {
+		attributes_ = f.attributes_;
+		name_ = f.name_;
+		prefix_ = f.prefix_;
+		open_count_ = f.open_count_;
+		return *this;
 	}
+	const std::string& getName() const {
+		return name_;
+	}
+	const std::string getFullName() const {
+		return prefix_ == nullptr ? name_ : *prefix_ + name_;
+	}
+	AttributeType getAttributes() const {
+		return attributes_;
+	}
+	bool isDir() const {
+		return (getAttributes() & kAttrDirectory) != 0;
+	}
+	static std::string attrToStr(uint16_t attr);
+	bool previouslyOpened() const {
+		return open_count_ > 0;
+	}
+	void addOpen() {
+		++open_count_;
+	}
+	void setPrefix(const std::string* prefix) {
+		prefix_ = prefix;
+	}
+	
 private:
-	uint32_t attributes;
-	std::string name;
+	void convertAttributes(uint32_t attrs);
+
+	AttributeType attributes_;
+	std::string name_;
+	const std::string* prefix_;
+	uint32_t open_count_;
+	// TODO: File date.
+
+	friend class FileList;
 };
 
-class FilePath {
+class FileList : public std::vector<FileInfo> {
 public:
-	FilePath(const std::string& name = "") : name(name) {
-	}
-
-	std::string getName() const {
-		return name;
-	}
-
-	void setName(const std::string& new_name) {
-		name = new_name;
-	}
-
-	bool isEmpty() const {
-		return name.empty();
-	}
-
-private:
-	std::string name;
+	bool addDirectory(const std::string& dir, const std::string* prefix = nullptr);
+	bool addDirectoryRec(const std::string& dir, const std::string* prefix = nullptr);
+	// Read / write to stream.
+	void read(Stream* stream);
+	void write(Stream* stream);
 };
 
-inline std::vector<FileInfo> EnumerateFiles(const std::string& dir) {
-	std::vector<FileInfo> ret;
-	return ret;
-}
 
 class File : public Stream {
 protected:
@@ -81,9 +113,11 @@ protected:
 	uint64_t offset; // Current offset in the file.
 	FILE* handle;
 public:
-	File()
-		: handle(nullptr),
-		  offset(0) {
+	File() : handle(nullptr), offset(0) {
+	}
+
+	virtual ~File() {
+		close();
 	}
 
 	std::mutex& getLock() {
@@ -124,6 +158,7 @@ public:
 	
 	// Return 0 if successful, errno otherwise.
 	int open(const std::string& fileName, std::ios_base::open_mode mode = std::ios_base::in | std::ios_base::binary) {
+		close();
 		std::ostringstream oss;
 		if (mode & std::ios_base::out) {
 			oss << "w";
@@ -139,7 +174,7 @@ public:
 		}
 		handle = fopen(fileName.c_str(), oss.str().c_str());
 		if (handle != nullptr) {
-			offset = 0;
+			offset = _ftelli64(handle);
 			return 0;
 		}
 		return errno;
@@ -362,7 +397,7 @@ public:
 	};
 	class FileSegments {
 	public:
-		Stream* stream_;
+		size_t stream_idx_;
 		uint64_t base_offset_;
 		uint64_t total_size_;  // Used to optimized seek.
 		std::vector<SegmentRange> ranges_;
@@ -373,6 +408,7 @@ public:
 		}
 
 		void write(Stream* stream) {
+			stream->leb128Encode(stream_idx_);
 			stream->leb128Encode(base_offset_);
 			stream->leb128Encode(ranges_.size());
 			check(ranges_.size());
@@ -388,6 +424,7 @@ public:
 		}
 
 		void read(Stream* stream) {
+			stream_idx_ = stream->leb128Decode();
 			base_offset_ = stream->leb128Decode();
 			const auto num_ranges = stream->leb128Decode();
 			check(num_ranges < 10000000);
@@ -408,12 +445,15 @@ public:
 		: segments_(segments), count_(count) {
 		seekStart();
 	}
+	virtual ~FileSegmentStream() {
+	}
 	void seekStart() {
 		file_idx_ = -1;
 		range_idx_ = 0;
 		num_ranges_ = 0;
 		cur_pos_ = 0;
 		cur_end_ = 0;
+		cur_stream_ = nullptr;
 	}
 	virtual void put(int c) {
 		const uint8_t b = c;
@@ -434,10 +474,12 @@ public:
 		return count_;
 	}
 
+protected:
+	Stream* cur_stream_;
+
 private:
 	std::vector<FileSegments>* const segments_;
 	int file_idx_;
-	Stream* cur_stream_;
 	size_t range_idx_;
 	size_t num_ranges_;
 	uint64_t cur_pos_;
@@ -468,6 +510,7 @@ private:
 		count_ += buf - start;
 		return buf - start;
 	}
+	virtual Stream* openNewStream(size_t index) = 0;
 	void nextRange() {
 		while (cur_pos_ >= cur_end_) {
 			if (range_idx_ < num_ranges_) {
@@ -482,7 +525,7 @@ private:
 				if (file_idx_ >= segments_->size()) return;
 				auto* segs = &segments_->operator[](file_idx_);
 				num_ranges_ = segs->ranges_.size();
-				cur_stream_ = segs->stream_;
+				cur_stream_ = openNewStream(segs->stream_idx_);
 				range_idx_ = 0;
 			}
 		}
@@ -596,5 +639,8 @@ inline WriteStream& operator << (WriteStream& stream, float c) {
 inline WriteStream& operator << (WriteStream& stream, double c) {
 	return stream << *reinterpret_cast<uint64_t*>(&c);
 }
+
+
+// OS specific, directory.
 
 #endif

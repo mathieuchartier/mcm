@@ -78,7 +78,7 @@ public:
 	class Header {
 	public:
 		static const size_t kCurMajorVersion = 0;
-		static const size_t kCurMinorVersion = 83;
+		static const size_t kCurMinorVersion = 84;
 		static const size_t kMagicStringLength = 10;
 		
 		static const char* getMagic() {
@@ -135,10 +135,8 @@ public:
 		void read(Stream* stream);
 	};
 
-	class Blocks {
+	class Blocks : public std::vector<SolidBlock*> {
 	public:
-		std::vector<SolidBlock*> blocks_;
-
 		void write(Stream* stream);
 		void read(Stream* stream);
 	};
@@ -150,7 +148,7 @@ public:
 	Archive(Stream* stream);
 
 	// Construct blocks from analyzer.
-	void constructBlocks(Stream* in, Analyzer* analyzer);
+	void constructBlocks(Analyzer::Blocks* blocks_for_file);
 
 	const Header& getHeader() const {
 		return header_;
@@ -164,18 +162,22 @@ public:
 	void writeBlocks();
 	void readBlocks();
 
-	// Analyze and compress.
-	void compress(Stream* in);
+	// Analyze and compress. Returns how many bytes wre compressed.
+	uint64_t compress(const std::vector<FileInfo>& in_files);
 
 	// Decompress.
-	void decompress(Stream* out);
+	void decompress(const std::string& out_dir, bool verify = false);
+
+	// List files and info.
+	void list();
 
 private:
 	Stream* stream_;
 	Header header_;
 	CompressionOptions options_;
 	size_t opt_var_;
-	Blocks blocks_;
+	FileList files_;  // File list.
+	Blocks blocks_;  // Solid blocks.
 
 	void init();
 	Compressor* createMetaDataCompressor();

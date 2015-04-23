@@ -59,6 +59,7 @@ public:
 		kProfileText,
 		kProfileBinary,
 		kProfileWave16,
+		kProfileSkip,  // SKip this block, hopefully due to dedupe, or maybe zero pad.
 		kProfileEOF,
 		kProfileCount,
 		// Not a real profile, tells CM to use streaming detection.
@@ -389,7 +390,7 @@ public:
 										fpos += subchunk2_size;
 										if (fpos >= buffer_.size()) break;
 									}
-									}
+								}
 							}
 						} 
 					}
@@ -402,7 +403,7 @@ public:
 				}
 				++text_len;
 			}
-			if (text_len > 146) {
+			if (text_len > 16 * 8) {
 				if (binary_len == 0) {
 					return DetectedBlock(kProfileText, static_cast<uint32_t>(text_len));
 				} else {
@@ -438,15 +439,88 @@ public:
 	}
 };
 
+class Deduplicator {
+public:
+	class DedupEntry {
+	public:
+		DedupEntry() : file_idx_(0), hash_extra_(97654321), offset_(0) {
+		}
+		uint32_t file_idx_;  // File index.
+		uint32_t hash_extra_;  // High bits of the hash.
+		uint64_t offset_;  // Offset into the file to check against.
+	};
+
+	Deduplicator() {
+		init();
+		power_ = 1;
+		for (size_t i = 0; i < kWindowSize; ++i) {
+			power_ = power_ * kPrime;
+		}
+		// power_ &= hash_mask_;
+	}
+	void init() {
+		hash_table_.clear();
+		hash_mask_ = 0xFFFFF;
+		hash_table_.resize(hash_mask_ + 1);
+		resetPos();
+	}
+	DedupEntry* addChar(uint8_t in_byte, size_t file_idx) {
+ 		auto& out_byte = window_[pos_ & kWindowMask];
+		rolling_hash_ = rolling_hash_ * kPrime + in_byte - out_byte * power_;
+		auto masked_hash = static_cast<size_t>(rolling_hash_) & hash_mask_;
+		uint32_t hash_extra = static_cast<uint32_t>(rolling_hash_ >> 32);
+		auto& h = hash_table_[masked_hash];
+		// if ((hash_extra & hash_mask_) <= (hash_mask_ >> kWindowBits)) {
+		if (h.hash_extra_ == hash_extra) {
+			return &h;
+		} else if ((pos_ & kWindowMask) <= 0) {
+			h.offset_ = pos_;
+			h.file_idx_ = file_idx;
+			h.hash_extra_ = hash_extra;
+		} 
+		out_byte = in_byte;
+		pos_++;
+		return nullptr;
+	}
+	void resetPos() {
+		pos_ = 0;
+		for (auto& b : window_) b = 0;
+		rolling_hash_ = 0;
+	}
+	uint64_t getPos() const {
+		return pos_;
+	}
+
+private:
+	static const size_t kWindowBits = 16;
+	static const size_t kWindowSize = 1u << kWindowBits;
+	static const size_t kWindowMask = kWindowSize - 1;
+	static const size_t kPrime = 153191;
+
+	uint64_t pos_;
+	uint8_t window_[kWindowSize];
+	size_t hash_mask_;
+	uint64_t power_;
+	uint64_t rolling_hash_;
+	std::vector<DedupEntry> hash_table_;
+};
+
 // Detector analyzer, analyze a whole stream.
 class Analyzer {
 public:
 	typedef std::vector<Detector::DetectedBlock> Blocks;
 
-	void analyze(Stream* stream) {
+	// Pos / len.
+	virtual std::pair<uint64_t, uint64_t> confirmDedupe(Deduplicator::DedupEntry* e, Stream* stream, size_t file_idx, uint64_t* pos) {
+		return std::pair<uint64_t, uint64_t>(0u, 0u);
+	}
+	void analyze(Stream* stream, size_t file_idx = 0) {
 		Detector detector(stream);
+		detector.setOptVar(opt_var_);
 		detector.init();
+		dedupe_.resetPos();
 		for (;;) {
+			next_block:
 			auto block = detector.detectBlock();
 			if (block.profile() == Detector::kProfileEOF) {
 				break;
@@ -456,6 +530,41 @@ public:
 				if (c == EOF) {
 					block.setLength(i);
 					break;
+				}
+				auto* f = dedupe_.addChar(c, file_idx);
+				if (f != nullptr) {
+					auto old_pos = dedupe_.getPos();
+					auto new_pos = old_pos;
+					auto p = confirmDedupe(f, stream, file_idx, &new_pos);
+					auto dedupe_len = p.second;
+					if (dedupe_len > 0) {
+						check(new_pos <= old_pos);
+						uint64_t delta = old_pos - new_pos;
+						// Remove any chars we saw in current block so far.
+						delta -= std::min(delta, static_cast<uint64_t>(i + 1));
+						auto future_chars = dedupe_len;
+						// Remove things from the "blocks" array until we are at the actual start.
+						check(delta <= dedupe_len);
+						while (delta > 0) {
+							check(!blocks_.empty());
+							auto len = blocks_.size();
+							auto sub = std::min(len, delta);
+							if (len - sub > 0) {
+								blocks_.back().setLength(len - sub);  // Removed part of the block.
+							} else {
+								blocks_.pop_back();  // Removed whole block.
+							}
+							delta -= sub;
+						}
+						// Add skip block for how many bytes were deduped.
+						blocks_.push_back(Detector::DetectedBlock(Detector::kProfileSkip, dedupe_len));
+						for (uint64_t i = 1; i < future_chars; ++i) {
+							int c = detector.popChar();
+							dedupe_.addChar(c, file_idx);
+							check(c != EOF);
+						}
+						goto next_block;
+					}
 				}
 				if (block.profile() == Detector::kProfileText) {
 					dict_builder_.addChar(c);
@@ -503,10 +612,16 @@ public:
 	Dict::Builder& getDictBuilder() {
 		return dict_builder_;
 	}
+	void setOpt(size_t opt_var) {
+		opt_var_ = opt_var;
+	}
+	Analyzer() : opt_var_(0) { }
 
 private:
  	Blocks blocks_;
 	Dict::Builder dict_builder_;
+	Deduplicator dedupe_;
+	size_t opt_var_;
 };
 
 #endif

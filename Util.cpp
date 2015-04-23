@@ -86,6 +86,10 @@ std::string formatNumber(uint64_t n) {
 	return std::to_string(n) + ret;
 }
 
+std::string trimDir(const std::string& str) {
+	return str.substr(0, str.length() - (str.back() == '\\' || str.back() == '/'));
+}
+
 std::string trimExt(const std::string& str) {
 	std::streamsize start = 0, pos;
 	if ((pos = str.find_last_of('\\')) != std::string::npos) {
@@ -95,4 +99,25 @@ std::string trimExt(const std::string& str) {
 		start = std::max(start, pos + 1);
 	}
 	return str.substr(static_cast<uint32_t>(start));
+}
+
+std::string getExt(const std::string& str) {
+	for (int i = str.length(); i > 0; --i) {
+		auto c = str[i - 1];
+		if (c == '\\' || c == '/') break;
+		if (c == '.') {
+			return str.substr(i);
+		}
+	}
+	return "";
+}
+
+std::string getFileName(const std::string& str) {
+	int i = str.length();
+	for (; i > 0; --i) {
+		if (str[i - 1] == '\\' || str[i - 1] == '/') {
+			return str.substr(i);
+		}
+	}
+	return str;
 }

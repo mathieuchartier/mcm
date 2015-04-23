@@ -371,11 +371,15 @@ public:
 	VerifyStream(Stream* stream, size_t ref_count) : stream_(stream), count_(0), ref_count_(ref_count) {
 		init();
 	}
-
+	uint64_t getCount() const {
+		return count_;
+	}
+	void resetCount() {
+		count_ = 0;
+	}
 	void init() {
 		differences_ = 0;
 	}
-
 	void put(int c) {
 		auto ref = stream_->get();
 		if (c != ref) {
@@ -383,11 +387,9 @@ public:
 		}
 		++count_;
 	}
-
 	void seek(uint64_t pos) {
 		stream_->seek(pos);
 	}
-
 	void write(const uint8_t* buf, size_t n) {
 		uint8_t buffer[4 * KB];
 		while (n != 0) {
@@ -403,7 +405,6 @@ public:
 			count_ += count;
 		}
 	}
-
 	void difference(int ref, int c) {
 		if (differences_ == 0) {
 			std::cerr << "Difference found at byte! " << stream_->tell() << " b1: " << "ref: "
@@ -411,11 +412,9 @@ public:
 		}
 		++differences_;
 	}
-
 	virtual uint64_t tell() const {
 		return count_;
 	}
-
 	void summary() {
 		if (count_ != ref_count_) {
 			std::cerr << "ERROR: Missing bytes " << count_ << "/" << ref_count_ << " differences=" << differences_ << std::endl;

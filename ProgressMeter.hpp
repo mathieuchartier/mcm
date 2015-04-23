@@ -42,9 +42,6 @@ public:
 	}
 
 	~ProgressMeter() {
-#ifndef _WIN64
-		_mm_empty();
-#endif
 	}
 
 	forceinline uint64_t getCount() const {
@@ -73,17 +70,18 @@ public:
 			++time_delta;
 		}
 		const uint32_t rate = uint32_t(double(in_size / KB) / (double(time_delta) / double(CLOCKS_PER_SEC)));
-		std::cout << in_size / KB << "KB ";
+		std::ostringstream oss;
+		oss << in_size / KB << "KB ";
 		if (comp_size > KB) {
-			std::cout << (encode ? "->" : "<-") << " " << comp_size / KB << "KB ";
+			oss << (encode ? "->" : "<-") << " " << comp_size / KB << "KB ";
 		} else {
-			std::cout << ", ";
+			oss << ", ";
 		}
-		std::cout << rate << "KB/s";
+		oss << rate << "KB/s";
 		if (comp_size > KB) {
-			std::cout << " ratio: " << std::setprecision(5) << std::fixed << ratio << extra.c_str();
+			oss << " ratio: " << std::setprecision(5) << std::fixed << ratio << extra.c_str();
 		}
-		std::cout << "\t\r" << std::flush;
+		std::cout << oss.str() << "\t\r" << std::flush;
 	}
 
 	forceinline void addBytePrint(uint64_t total, const char* extra = "") {
@@ -103,6 +101,7 @@ public:
 	ProgressStream(Stream* in_stream, Stream* out_stream, bool encode = true)
 		: in_stream_(in_stream), out_stream_(out_stream), meter_(encode), update_count_(0) {
 	}
+	virtual ~ProgressStream() { }
 	virtual int get() {
 		byte b;
 		if (read(&b, 1) == 0) {
@@ -152,27 +151,65 @@ private:
 	uint64_t update_count_;
 };
 
-class ProgressThread {
+class AutoUpdater {
 public:
-	ProgressThread(Stream* in_stream, Stream* out_stream, bool encode = true, uint64_t sub_out = 0, uintptr_t interval = 250)
-		: done_(false), interval_(interval), in_stream_(in_stream), out_stream_(out_stream), sub_out_(sub_out), meter_(encode) {
+	AutoUpdater(uintptr_t interval = 250)
+		: done_(false), interval_(interval) {
 		thread_ = new std::thread(Callback, this);
 	}
-	virtual ~ProgressThread() {
+	virtual ~AutoUpdater() {
 		done();
-		delete thread_;
 	}
 	void done() {
-		if (!done_) {
-			{
-				ScopedLock mu(mutex_);
-				done_ = true;
-				cond_.notify_one();
+		{
+			std::unique_lock<std::mutex> lock(mutex_);
+			if (done_) return;
+			done_ = true;
+			cond_.notify_one();
+		}
+		thread_->join();
+		delete thread_;
+	}
+	virtual void print() = 0;
+
+protected:
+	bool done_;
+	std::thread* thread_;
+	std::mutex mutex_;
+	std::condition_variable cond_;
+	const uintptr_t interval_;
+
+	void run() {
+		std::unique_lock<std::mutex> lock(mutex_);
+		while (!done_) {
+			auto cur = std::chrono::high_resolution_clock::now();
+			auto target = cur + std::chrono::milliseconds(interval_);
+			while (true) {
+				cond_.wait_for(lock, std::chrono::milliseconds(interval_));  // target - cur
+				cur = std::chrono::high_resolution_clock::now();
+				if (done_) return;
+				if (cur >= target) break;
 			}
-			thread_->join();
+			if (!done_) {
+				print();
+			}
 		}
 	}
-	void print() {
+	static void Callback(AutoUpdater* thr) {
+		thr->run();
+	}
+};
+
+
+class ProgressThread : public AutoUpdater {
+public:
+	ProgressThread(Stream* in_stream, Stream* out_stream, bool encode = true, uint64_t sub_out = 0, uintptr_t interval = 250)
+		: AutoUpdater(interval), in_stream_(in_stream), out_stream_(out_stream), sub_out_(sub_out), meter_(encode) {
+	}
+	~ProgressThread() {
+		done();
+	}
+	virtual void print() {
 		auto out_c = out_stream_->tell() - sub_out_;
 		auto in_c = in_stream_->tell();
 		if (in_c != 0 && out_c != 0) {
@@ -180,27 +217,11 @@ public:
 		}
 	}
 
-private:
-	bool done_;
-	const uintptr_t interval_;
+protected:
 	Stream* const in_stream_;
 	Stream* const out_stream_;
 	const uint64_t sub_out_;
 	ProgressMeter meter_;
-	std::thread* thread_;
-	std::mutex mutex_;
-	std::condition_variable cond_;
-
-	void run() {
-		std::unique_lock<std::mutex> lock(mutex_);
-		while (!done_) {
-			cond_.wait_for(lock, std::chrono::milliseconds(interval_));
-			print();
-		}
-	}
-	static void Callback(ProgressThread* thr) {
-		thr->run();
-	}
 };
 
 #endif

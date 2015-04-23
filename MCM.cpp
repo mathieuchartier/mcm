@@ -76,6 +76,8 @@ public:
 		// Single hand mode.
 		kModeCompress,
 		kModeDecompress,
+		// List & other
+		kModeList,
 	};
 	Mode mode;
 	bool opt_mode;
@@ -83,8 +85,8 @@ public:
 	Compressor* compressor;
 	uint32_t threads;
 	uint64_t block_size;
-	FilePath archive_file;
-	std::vector<FilePath> files;
+	FileInfo archive_file;
+	std::vector<FileInfo> files;
 
 	Options()
 		: mode(kModeUnknown)
@@ -98,7 +100,7 @@ public:
 		printHeader();
 		std::cout
 			<< "Caution: Experimental, use only for testing!" << std::endl
-			<< "Usage: " << name << " [command] [options] <infile> <outfile>" << std::endl
+			<< "Usage: " << name << " [commands] [options] <infile|dir> <outfile>(default infile.mcm)" << std::endl
 			<< "Options: d for decompress" << std::endl
 			<< "-{t|f|m|h|x}{1 .. 11} compression option" << std::endl
 			<< "t is turbo, f is fast, m is mid, h is high, x is max (default " << CompressionOptions::kDefaultLevel << ")" << std::endl
@@ -127,6 +129,7 @@ public:
 			else if (arg == "-opt") parsed_mode = kModeOpt;
 			else if (arg == "-stest") parsed_mode = kModeSingleTest;
 			else if (arg == "c") parsed_mode = kModeCompress;
+			else if (arg == "l") parsed_mode = kModeList;
 			else if (arg == "d") parsed_mode = kModeDecompress;
 			else if (arg == "a") parsed_mode = kModeAdd;
 			else if (arg == "e") parsed_mode = kModeExtract;
@@ -147,7 +150,7 @@ public:
 							return 3;
 						}
 						// Archive is next.
-						archive_file = FilePath(argv[i]);
+						archive_file = FileInfo(argv[i]);
 						break;
 					}
 				}
@@ -209,7 +212,7 @@ public:
 			} else if (!arg.empty()) {
 				if (mode == kModeAdd || mode == kModeExtract) {
 					// Read in files.
-					files.push_back(FilePath(argv[i]));
+					files.push_back(FileInfo(argv[i]));
 				} else {
 					// Done parsing.
 					break;
@@ -221,7 +224,7 @@ public:
 		}
 		const bool single_file_mode =
 			mode == kModeCompress || mode == kModeDecompress || mode == kModeSingleTest ||
-			mode == kModeMemTest || mode == kModeOpt;
+			mode == kModeMemTest || mode == kModeOpt || kModeList;
 		if (single_file_mode) {
 			std::string in_file, out_file;
 			// Read in file and outfile.
@@ -234,21 +237,21 @@ public:
 				if (mode == kModeDecompress) {
 					out_file = in_file + ".decomp";
 				} else {
-					out_file = in_file + ".mcm";
+					out_file = trimDir(in_file) + ".mcm";
 				}
 			}
 			if (mode == kModeMemTest) {
 				// No out file for memtest.
-				files.push_back(FilePath(in_file));
+				files.push_back(FileInfo(trimDir(in_file)));
 			} else if (mode == kModeCompress || mode == kModeSingleTest || mode == kModeOpt) {
-				archive_file = FilePath(out_file);
-				files.push_back(FilePath(in_file));
+				archive_file = FileInfo(trimDir(out_file));
+				files.push_back(FileInfo(trimDir(in_file)));
 			} else {
-				archive_file = FilePath(in_file);
-				files.push_back(FilePath(out_file));
+				archive_file = FileInfo(trimDir(in_file));
+				files.push_back(FileInfo(trimDir(out_file)));
 			}
 		}
-		if (archive_file.isEmpty() || files.empty()) {
+		if (archive_file.getName().empty() || (files.empty() && mode != kModeList)) {
 			std::cerr << "Error, input or output files missing" << std::endl;
 			usage(program);
 			return 5;
@@ -337,7 +340,7 @@ int main(int argc, char* argv[]) {
 		}
 
 		uint32_t comp_end = clock();
-		std::cout << "Compression " << length << " -> " << comp_size << " = " << float(double(length) / double(comp_size)) << " rate: "
+		std::cout << "Done compressing " << length << " -> " << comp_size << " = " << float(double(length) / double(comp_size)) << " rate: "
 			<< prettySize(static_cast<uint64_t>(long_length * iterations / clockToSeconds(comp_end - comp_start))) << "/s" << std::endl;
 		memset(in_buffer, 0, length);
 		uint32_t decomp_start = clock();
@@ -374,29 +377,23 @@ int main(int argc, char* argv[]) {
 		printHeader();
 
 		int err = 0;
-		File fin;
+		
+		std::string out_file = options.archive_file.getName();
 		File fout;
-		auto in_file = options.files.back().getName();
-		auto out_file = options.archive_file.getName();
-
-		if (err = fin.open(in_file, std::ios_base::in | std::ios_base::binary)) {
-			std::cerr << "Error opening: " << in_file << " (" << errstr(err) << ")" << std::endl;
-			return 1;
-		}
 
 		if (options.mode == Options::kModeOpt) {
-			std::cout << "Optimizing " << in_file << std::endl;
+			std::cout << "Optimizing" << std::endl;
 			uint64_t best_size = std::numeric_limits<uint64_t>::max();
 			size_t best_var = 0;
 			for (size_t opt_var = 0; ; ++opt_var) {
 				const clock_t start = clock();
-				fin.seek(0);
 				VoidWriteStream fout;
 				Archive archive(&fout, options.options_);
 				if (!archive.setOpt(opt_var)) {
 					continue;
 				}
-				archive.compress(&fin);
+				uint64_t in_bytes = archive.compress(options.files);
+				if (in_bytes == 0) continue;
 				clock_t time = clock() - start;
 				const auto size = fout.tell();
 				if (size < best_size) {
@@ -404,8 +401,7 @@ int main(int argc, char* argv[]) {
 					best_var = opt_var;
 				}
 				std::cout << "opt_var=" << opt_var << " best=" << best_var << "(" << formatNumber(best_size) << ") "
-					<< formatNumber(fin.tell()) << "->" << formatNumber(size) << " took " << std::setprecision(3)
-					<< clockToSeconds(time) << "s" << std::endl;
+					<< formatNumber(in_bytes) << " -> " << formatNumber(size) << " took " << std::setprecision(3) << clockToSeconds(time) << "s" << std::endl;
 			}
 		} else {
 			const clock_t start = clock();
@@ -415,18 +411,13 @@ int main(int argc, char* argv[]) {
 			}
 
 			std::cout << "Compressing to " << out_file << " mode=" << options.options_.comp_level_ << " mem=" << options.options_.mem_usage_ << std::endl;
-
-			{
-				Archive archive(&fout, options.options_);
-				archive.compress(&fin);
-			}
+			Archive archive(&fout, options.options_);
+			uint64_t in_bytes = archive.compress(options.files);
 			clock_t time = clock() - start;
-			fin.seek(0, SEEK_END);
-			const uint64_t file_size = fin.tell();
-			std::cout << "Compressed " << formatNumber(fin.tell()) << "->" << formatNumber(fout.tell())
+			std::cout << "Done compressing " << formatNumber(in_bytes) << " -> " << formatNumber(fout.tell())
 				<< " in " << std::setprecision(3) << clockToSeconds(time) << "s"
-				<< " bpc=" << double(fout.tell()) * 8.0 / double(fin.tell()) << std::endl;
-			std::cout << "Avg rate: " << std::setprecision(3) << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(fin.tell()) << " ns/B" << std::endl;
+				<< " bpc=" << double(fout.tell()) * 8.0 / double(in_bytes) << std::endl;
+			// std::cout << "Avg rate: " << std::setprecision(3) << double(time) * (1000000000.0 / double(CLOCKS_PER_SEC)) / double(in_bytes) << " ns/B" << std::endl;
 
 			fout.close();
 			
@@ -436,13 +427,10 @@ int main(int argc, char* argv[]) {
 					return 1;
 				}
 				Archive archive(&fout);
-				std::cout << "Decompresing & verifying file" << std::endl;		
-				fin.seek(0);
-				VerifyStream verifyStream(&fin, file_size);
-				archive.decompress(&verifyStream);
-				verifyStream.summary();
+				archive.list();
+				std::cout << "Verifying archive decompression" << std::endl;
+				archive.decompress("", true);
 			}
-			fin.close();
 		}
 		break;
 #if 0
@@ -464,22 +452,41 @@ int main(int argc, char* argv[]) {
 		// Add a single file.
 		break;
 	}
+	case Options::kModeList: {
+		auto in_file = options.archive_file.getName();
+		File fin;
+		int err = 0;
+		if (err = fin.open(in_file, std::ios_base::in | std::ios_base::binary)) {
+			std::cerr << "Error opening: " << in_file << " (" << errstr(err) << ")" << std::endl;
+			return 1;
+		}
+		printHeader();
+		std::cout << "Listing files in archive " << in_file << std::endl;
+		Archive archive(&fin);
+		const auto& header = archive.getHeader();
+		if (!header.isArchive()) {
+			std::cerr << "Attempting to decompress non mcm compatible file" << std::endl;
+			return 1;
+		}
+		if (!header.isSameVersion()) {
+			std::cerr << "Attempting to open old version " << header.majorVersion() << "." << header.minorVersion() << std::endl;
+			return 1;
+		}
+		archive.list();
+		fin.close();
+		break;
+	}
 	case Options::kModeDecompress: {
 		auto in_file = options.archive_file.getName();
-		auto out_file = options.files.back().getName();
 		File fin;
 		File fout;
 		int err = 0;
 		if (err = fin.open(in_file, std::ios_base::in | std::ios_base::binary)) {
-			std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
+			std::cerr << "Error opening: " << in_file << " (" << errstr(err) << ")" << std::endl;
 			return 1;
 		}
-		if (err = fout.open(out_file, std::ios_base::out | std::ios_base::binary)) {
-			std::cerr << "Error opening: " << out_file << " (" << errstr(err) << ")" << std::endl;
-			return 2;
-		}
 		printHeader();
-		std::cout << "Decompresing file " << in_file << std::endl;
+		std::cout << "Decompresing archie " << in_file << std::endl;
 		Archive archive(&fin);
 		const auto& header = archive.getHeader();
 		if (!header.isArchive()) {
@@ -490,9 +497,8 @@ int main(int argc, char* argv[]) {
 			std::cerr << "Attempting to decompress old version " << header.majorVersion() << "." << header.minorVersion() << std::endl;
 			return 1;
 		}
-		archive.decompress(&fout);
+		archive.decompress(options.files.back().getName());
 		fin.close();
-		fout.close();
 		// Decompress the single file in the archive to the output out.
 		break;
 	}
