@@ -31,43 +31,35 @@
 // From 7zip, added single bit functions
 class Range7 {
 private:
-	uint32_t Range, Code, _cacheSize;
-	uint64_t Low;
-	byte _cache;
+	static constexpr uint32_t TopBits = 24, TopValue = 1 << TopBits, Top = 0xFFFFFFFF;
 
-	static const uint TopBits = 24, TopValue = 1 << TopBits, Top = 0xFFFFFFFF;
-
+	uint32_t Range = Top, Code = 0, _cacheSize = 1;
+	uint64_t Low = 0;
+	uint8_t _cache = 0;
+	
 	template <typename TOut>
-	forceinline void shiftLow(TOut& sout) { //Emit the top byte 
+	ALWAYS_INLINE void shiftLow(TOut& sout) { //Emit the top byte 
 		if (static_cast<uint32_t>(Low) < static_cast<uint32_t>(0xFF << TopBits) || (Low >> 32) != 0) {
-			byte temp = _cache;
+			uint8_t temp = _cache;
 			do {
-				sout.put(byte(temp + byte(Low >> 32)));
+				sout.put(uint8_t(temp + uint8_t(Low >> 32)));
 				temp = 0xFF;
 			} while(--_cacheSize);
-			_cache = byte(uint(Low >> 24));
+			_cache = uint8_t(uint32_t(Low >> 24));
 		}
 		++_cacheSize;
 		Low = static_cast<uint32_t>(Low << 8);
 	}
 public:
-	void init() {
-		Code = 0;
-		Low = 0;
-		Range = Top;
-		_cache = 0;
-		_cacheSize = 1;
-	}
-
 	template <typename TOut>
-	forceinline void IncreaseRange(TOut& out) {
+	ALWAYS_INLINE void IncreaseRange(TOut& out) {
 		while (Range < TopValue) {
 			Range <<= 8;
 			shiftLow(out);
 		}
 	}
 
-	forceinline uint32_t getDecodedBit(uint32_t p, uint32_t shift) {
+	ALWAYS_INLINE uint32_t getDecodedBit(uint32_t p, uint32_t shift) {
 		const uint32_t mid = (Range >> shift) * p;
 		uint32_t bit = Code < mid;
 		if (bit) {
@@ -80,7 +72,7 @@ public:
 	}
 
 	template <typename TOut>
-	forceinline void encode(TOut& out, uint32_t bit, uint32_t p, uint32_t shift) {
+	ALWAYS_INLINE void encode(TOut& out, uint32_t bit, uint32_t p, uint32_t shift) {
 		assert(p < (1U << shift));
 		assert(p != 0U);
 		const uint32_t mid = (Range >> shift) * p;
@@ -94,7 +86,7 @@ public:
 	}
 
 	template <typename TIn>
-	forceinline uint32_t decode(TIn& in, uint32_t p, uint32_t shift) {
+	ALWAYS_INLINE uint32_t decode(TIn& in, uint32_t p, uint32_t shift) {
 		assert(p < (1U << shift));
 		assert(p != 0U);
 		auto ret = getDecodedBit(p, shift);
@@ -129,7 +121,7 @@ public:
 	}
 
 	template <typename TOut>
-	void EncodeBits(TOut& Out, uint value, int numBits) {
+	void EncodeBits(TOut& Out, uint32_t value, int numBits) {
 		for (numBits--; numBits >= 0; numBits--) {
 			Range >>= 1;
 			Low += Range & (0 - ((value >> numBits) & 1));
@@ -141,11 +133,11 @@ public:
 	}
 
 	template <typename TIn>
-	uint DecodeDirectBits(TIn& In, int numTotalBits) {
-		uint range = Range, code = Code, result = 0;
+	uint32_t DecodeDirectBits(TIn& In, int numTotalBits) {
+		uint32_t range = Range, code = Code, result = 0;
 		for (int i = numTotalBits; i != 0; i--) {
 			range >>= 1;
-			uint t = (code - range) >> 31;
+			uint32_t t = (code - range) >> 31;
 			code -= range & (t - 1);
 			result = (result << 1) | (1 - t); 
 			if (range < TopValue) {
@@ -159,7 +151,7 @@ public:
 	}
 
 	template <typename TIn>
-	uint DecodeDirectBit(TIn& sin) {
+	uint32_t DecodeDirectBit(TIn& sin) {
 		Range >>= 1;
 		uint32_t t = (Code - Range) >> 31;
 		Code -= Range & (t - 1);
@@ -182,7 +174,7 @@ public:
 	}
 
 	template <typename TIn>
-	inline void Decode(TIn& In, uint start, uint size) {
+	inline void Decode(TIn& In, uint32_t start, uint32_t size) {
 		Code -= start * Range;
 		Range *= size;
 		Normalize(In);
@@ -200,7 +192,7 @@ public:
 	}
 
 	template <typename TIn>
-	inline uint decodeByte(TIn& In) {
+	inline uint32_t decodeByte(TIn& In) {
 		Range >>= 8;
 		uint32_t start = Code / Range;
 		Code -= start * Range;
@@ -209,8 +201,8 @@ public:
 	}
 
 	template <typename TIn>
-	inline uint decodeDirect(TIn& In, uint Total) {
-		uint start = GetThreshold(Total);
+	inline uint32_t decodeDirect(TIn& In, uint32_t Total) {
+		uint32_t start = GetThreshold(Total);
 		Code -= start * Range;
 		Normalize(In);
 		return start;
@@ -218,26 +210,25 @@ public:
 
 	template <typename TOut>
 	void flush(TOut& Out) {
-		for (uint i = 0; i < 5; i++)
+		for (uint32_t i = 0; i < 5; i++)
 			 shiftLow(Out);
 	}
 
 	template <typename TIn>
-	void initDecoder(TIn& In)
-	{
-		init();
+	void initDecoder(TIn& In) {
+		*this = Range7();
 		Code = 0;
 		Range = Top;
-		for(uint i = 0;i < 5;i++)
+		for (uint32_t i = 0; i < 5; i++)
 			Code = (Code << 8) | (In.get() & 0xFF);	
 	}
 
-	inline uint GetThreshold(uint Total) {
+	inline uint32_t GetThreshold(uint32_t Total) {
 		return Code / (Range /= Total);
 	}
 
 	template <typename TIn>
-	forceinline void Normalize(TIn& In) {
+	ALWAYS_INLINE void Normalize(TIn& In) {
 		while (Range < TopValue) {
 			Code = (Code << 8) | (In.get() & 0xFF);
 			Range <<= 8;

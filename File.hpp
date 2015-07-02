@@ -52,8 +52,9 @@ public:
 	static const uint16_t kAttrSystem = 0x10;
 	static const uint16_t kAttrHidden = 0x20;
 
-	FileInfo();
+	FileInfo() {}
 	FileInfo(const std::string& name, const std::string* prefix = nullptr);
+	FileInfo(const std::string& name, const std::string* prefix, uint32_t attributes);
 	FileInfo(const FileInfo& f) { *this = f; }
 	FileInfo& operator=(const FileInfo& f) {
 		attributes_ = f.attributes_;
@@ -88,10 +89,10 @@ public:
 private:
 	void convertAttributes(uint32_t attrs);
 
-	AttributeType attributes_;
+	AttributeType attributes_ = 0;
 	std::string name_;
-	const std::string* prefix_;
-	uint32_t open_count_;
+	const std::string* prefix_ = nullptr;
+	uint32_t open_count_ = 0;
 	// TODO: File date.
 
 	friend class FileList;
@@ -110,19 +111,19 @@ public:
 class File : public Stream {
 protected:
 	std::mutex lock;
-	uint64_t offset; // Current offset in the file.
-	FILE* handle;
+	uint64_t offset = 0; // Current offset in the file.
+	FILE* handle = nullptr;
 public:
-	File() : handle(nullptr), offset(0) {
-	}
-
 	virtual ~File() {
 		close();
 	}
 
-	std::mutex& getLock() {
-		return lock;
+	File() {}
+	File(const std::string& file_name, std::ios_base::open_mode mode = std::ios_base::in | std::ios_base::binary) {
+		open(file_name, mode);
 	}
+
+	std::mutex& getLock() { return lock; }
 
 	// Not thread safe.
 	void write(const uint8_t* bytes, size_t count) {
@@ -132,7 +133,7 @@ public:
 	}
 
 	// Not thread safe.
-	forceinline void put(int c) {
+	ALWAYS_INLINE void put(int c) {
 		++offset;
 		fputc(c, handle);
 	}
@@ -218,13 +219,13 @@ public:
 		return ret;
 	}
 
-	forceinline FILE* getHandle() {
+	ALWAYS_INLINE FILE* getHandle() {
 		return handle;
 	}
 
 	// Atomic read.
 	// TODO: fread already acquires a lock.
-	forceinline size_t readat(uint64_t pos, uint8_t* buffer, size_t bytes) {
+	ALWAYS_INLINE size_t readat(uint64_t pos, uint8_t* buffer, size_t bytes) {
 		std::unique_lock<std::mutex> mu(lock);
 		seek(pos);
 		return read(buffer, bytes);
@@ -232,27 +233,27 @@ public:
 
 	// Atomic write.
 	// TODO: fwrite already acquires a lock.
-	forceinline void writeat(uint64_t pos, const uint8_t* buffer, size_t bytes) {
+	ALWAYS_INLINE void writeat(uint64_t pos, const uint8_t* buffer, size_t bytes) {
 		std::unique_lock<std::mutex> mu(lock);
 		seek(pos);
 		write(buffer, bytes);
 	}
 
 	// Atomic get (slow).
-	forceinline int aget(uint64_t pos) {
+	ALWAYS_INLINE int aget(uint64_t pos) {
 		std::unique_lock<std::mutex> mu(lock);
 		seek(pos);
 		return get();
 	}
 
 	// Atomic write (slow).
-	forceinline void aput(uint64_t pos, byte c) {
+	ALWAYS_INLINE void aput(uint64_t pos, uint8_t c) {
 		std::unique_lock<std::mutex> mu(lock);
 		seek(pos);
 		put(c);
 	}
 
-	forceinline uint64_t length() {
+	ALWAYS_INLINE uint64_t length() {
 		std::unique_lock<std::mutex> mu(lock);
 		seek(0, SEEK_END);
 		uint64_t length = tell();
@@ -291,100 +292,6 @@ public:
 	uint64_t getOffset() const {
 		return offset_;
 	}
-};
-
-template <const uint32_t size = 16 * KB>
-class BufferedFileStream {
-public:
-	static const uint64_t mask = size - 1;
-	byte buffer[size];
-	uint64_t total, eof_pos;
-	File* file;
-
-private:
-	void flush() {
-		if ((total & mask) != 0) {
-			file->write(buffer, static_cast<uint32_t>(total & mask));
-		}
-	}
-
-	void flushWhole() {
-		assert((total & mask) == 0);
-		file->write(buffer, static_cast<uint32_t>(size));
-	}
-
-public:
-	inline uint64_t getTotal() const {
-		return total;
-	}
-
-	inline bool eof() const {
-		return total >= eof_pos;
-	}
-
-	inline bool good() const {
-		return !eof();
-	}
-
-	int open(const std::string& fileName, std::ios_base::open_mode mode = std::ios_base::in | std::ios_base::binary) {
-		close();
-		return file->open(fileName, mode);
-	}
-
-	inline void write(byte ch) {
-		uint64_t pos = total++;
-		buffer[pos & mask] = ch;
-		if ((total & mask) == 0) {
-			flushWhole();
-		}
-	}
-	
-	void prefetch() {
-		uint64_t readCount = file->read(buffer, size);
-		if (readCount != size) {
-			eof_pos = total + readCount;
-		}
-	}
-
-	inline int read() {
-		if (!(total & mask)) {
-			prefetch();
-		}
-		if (LIKELY(total < eof_pos)) {
-			return (int)(byte)buffer[total++ & mask];
-		} else {
-			return EOF;
-		}
-	}
-
-	// Go back to the start of the file.
-	void restart() {
-		total = 0;
-		eof_pos = (uint32_t)-1;
-		file->rewind();
-	}
-
-	void close() {
-		if (file->isOpen()) {
-			flush();
-			file->close();
-			total = 0;
-		}
-	}
-		
-	void reset() {
-		file->close();
-		total = 0;
-		eof_pos = (uint32_t)-1;
-	}
-
-	BufferedFileStream() {
-		reset();
-	}
-
-	virtual ~BufferedFileStream() {
-		close();
-	} 
 };
 
 // FileSegmentStream is an advanced stream which reads / writes from arbitrary sections from multiple files.
@@ -445,8 +352,7 @@ public:
 		: segments_(segments), count_(count) {
 		seekStart();
 	}
-	virtual ~FileSegmentStream() {
-	}
+	virtual ~FileSegmentStream() {}
 	void seekStart() {
 		file_idx_ = -1;
 		range_idx_ = 0;
@@ -539,18 +445,10 @@ public:
 		std::string name;
 		std::ios_base::open_mode mode;
 		File file;
-		uint32_t count;
+		uint32_t count = 0;
 		
-		File* getFile() {
-			return &file;
-		}
-
-		const std::string& getName() const {
-			return name;
-		}
-
-		CachedFile() : count(0) {
-		}
+		File* getFile() { return &file; }
+		const std::string& getName() const { return name; }
 	};
 
 	// Clean up.
@@ -599,20 +497,20 @@ private:
 	std::mutex lock;
 };
 
-forceinline WriteStream& operator << (WriteStream& stream, uint8_t c) {
+ALWAYS_INLINE WriteStream& operator << (WriteStream& stream, uint8_t c) {
 	stream.put(c);
 	return stream;
 }
 
-forceinline WriteStream& operator << (WriteStream& stream, int8_t c) {
+ALWAYS_INLINE WriteStream& operator << (WriteStream& stream, int8_t c) {
 	return stream << static_cast<uint8_t>(c);
 }
 
-forceinline WriteStream& operator << (WriteStream& stream, uint16_t c) {
+ALWAYS_INLINE WriteStream& operator << (WriteStream& stream, uint16_t c) {
 	return stream << static_cast<uint8_t>(c >> 8) << static_cast<uint8_t>(c);
 }
 
-forceinline WriteStream& operator << (WriteStream& stream, int16_t c) {
+ALWAYS_INLINE WriteStream& operator << (WriteStream& stream, int16_t c) {
 	return stream << static_cast<uint16_t>(c);
 }
 

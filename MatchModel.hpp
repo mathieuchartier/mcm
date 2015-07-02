@@ -9,7 +9,6 @@ public:
 	static const size_t kMinMatch = 4; // TODO: Tweak this??????
 	static const size_t kSmallMatch = 8;
 	static const size_t kMaxCtx = 256U;
-	static const size_t kMMShift = 2;  // WTF DIS 4.
 	static const size_t kMaxValue = 1 << 12;
 	static const size_t kMaxCtxLen = 32;
 	static const bool kMultiMatch = false;
@@ -41,10 +40,7 @@ private:
 	static const uint32_t kCodeBitShift = sizeof(uint32_t) * 8 - 1;
 public:
 	typedef CyclicBuffer<uint8_t> Buffer;
-	uint32_t opt_var;
-
-	MatchModel() : opt_var(0) {
-	}
+	uint32_t opt_var = 0;
 
 	void setOpt(uint32_t var) {
 		opt_var = var;
@@ -58,20 +54,20 @@ public:
 		hash_table = (uint32_t*)hash_storage.getData();
 	}
 
-	forceinline int getP(const short* st, size_t expected_bit) {
+	ALWAYS_INLINE int getP(const short* st, size_t expected_bit) {
 		dcheck(len != 0);
 		return st[cur_mdl[expected_bit].getP()];
 	}
 
-	forceinline size_t getPos() const {
+	ALWAYS_INLINE size_t getPos() const {
 		return pos;
 	}
 
-	forceinline uint32_t getExpectedBit() const {
+	ALWAYS_INLINE uint32_t getExpectedBit() const {
 		return expected_code >> kCodeBitShift;
 	}
 
-	forceinline size_t getMinMatch() const {
+	ALWAYS_INLINE size_t getMinMatch() const {
 		return kMinMatch;
 	}
 
@@ -99,15 +95,15 @@ public:
 		updateCurMdl();
 	}
 
-	forceinline size_t getLength() const {
+	ALWAYS_INLINE size_t getLength() const {
 		return len;
 	}
 
-	forceinline void resetMatch() {
+	ALWAYS_INLINE void resetMatch() {
 		len = 0;
 	}
 
-	forceinline void setCtx(size_t ctx) {
+	ALWAYS_INLINE void setCtx(size_t ctx) {
 		model_base = &models[ctx * num_length_models_];
 	}
 
@@ -167,13 +163,13 @@ public:
 		hash_ = h;
 	}
 
-	forceinline void updateCurMdl() {
+	ALWAYS_INLINE void updateCurMdl() {
 		if (len) {
 			cur_mdl = model_base + 2 * std::min(len - kMinMatch, cur_max_match);
 		}
 	}
 
-	forceinline uint32_t getExpectedChar(Buffer& buffer) const {
+	ALWAYS_INLINE uint32_t getExpectedChar(Buffer& buffer) const {
 		return buffer[pos + 1];
 	}
 
@@ -181,14 +177,14 @@ public:
 		expected_code = code << (kCodeBitShift + 1 - bit_len);
 	}
 
-	forceinline void updateCurMdl(size_t expected_bit, uint32_t bit) {
-		cur_mdl[expected_bit].update(bit);
+	ALWAYS_INLINE void updateCurMdl(size_t expected_bit, uint32_t bit, size_t learn_rate) {
+		cur_mdl[expected_bit].update(bit, learn_rate);
 	}
 
-	forceinline void updateBit(uint32_t bit) {
+	ALWAYS_INLINE void updateBit(uint32_t bit, uint32_t learn_rate = 9) {
 		if (len) {
 			uint32_t diff = (expected_code >> kCodeBitShift) ^ bit;
-			cur_mdl[getExpectedBit()].update(bit);
+			cur_mdl[getExpectedBit()].update(bit, learn_rate);
 			len &= -(1 ^ diff);
 			expected_code <<= 1;
 		}

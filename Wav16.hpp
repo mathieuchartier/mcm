@@ -185,7 +185,7 @@ public:
 		assert(in_stream != nullptr);
 		assert(out_stream != nullptr);
 		init();
-		ent.init();
+		ent = Range7();
 		uint16_t last_a = 0, last_b = 0;
 		uint16_t last_a2 = 0, last_b2 = 0;
 		uint16_t last_a3 = 0, last_b3 = 0;

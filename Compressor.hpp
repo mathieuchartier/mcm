@@ -99,6 +99,8 @@ public:
 		kTypeCMMid,
 		kTypeCMHigh,
 		kTypeCMMax,
+		kTypeCMSimple,
+		kTypeDMC,
 	};
 
 	class Factory {
@@ -114,6 +116,9 @@ public:
 
 	// Optimization variable for brute forcing.
 	virtual bool setOpt(uint32_t opt) {
+		return true;
+	}
+  virtual bool setOpts(size_t* opts) {
 		return true;
 	}
 	virtual uint32_t getOpt() const {
@@ -133,15 +138,16 @@ public:
 };
 
 // In memory compressor.
-class MemoryCompressor {
+class MemoryCompressor : public Compressor {
+	static const size_t kBufferSize = 32 * MB;
 public:
-	virtual void setOpt(size_t opt) {}
-	virtual size_t getOpt() const {
-		return 0;
-	}
-	virtual size_t getMaxExpansion(size_t in_size) = 0;
-	virtual size_t compressBytes(byte* in, byte* out, size_t count) = 0;
-	virtual void decompressBytes(byte* in, byte* out, size_t count) = 0;
+	virtual size_t getMaxExpansion(size_t s) = 0;
+	virtual size_t compress(uint8_t* in, uint8_t* out, size_t count) = 0;
+	virtual void decompress(uint8_t* in, uint8_t* out, size_t count) = 0;
+	// Initial implementations of compress and decompress from memory.
+	virtual void compress(Stream* in, Stream* out, uint64_t max_count = 0xFFFFFFFFFFFFFFFF);
+	// Decompress n bytes, the calls must line up.
+	virtual void decompress(Stream* in, Stream* out, uint64_t max_count = 0xFFFFFFFFFFFFFFFF);
 };
 
 template <typename T>
@@ -153,14 +159,14 @@ public:
 		return in_size * 3 / 2;
 	}
 
-	virtual uint32_t compressBytes(byte* in, byte* out, size_t count) {
+	virtual uint32_t compressBytes(uint8_t* in, uint8_t* out, size_t count) {
 		WriteMemoryStream wms(out);
 		ReadMemoryStream rms(in, in + count);
 		compressor.compress(rms, wms);
 		return wms.tell();
 	}
 
-	virtual void decompressBytes(byte* in, byte* out, size_t count) {
+	virtual void decompressBytes(uint8_t* in, uint8_t* out, size_t count) {
 		WriteMemoryStream wms(out);
 		ReadMemoryStream rms(in, in + count);
 		compressor.decompress(rms, wms);
@@ -179,7 +185,7 @@ public:
 	CompressorFactories();
 	Compressor::Factory* getLegacyFactory(uint32_t index);
 	Compressor::Factory* getFactory(uint32_t index);
-	forceinline static CompressorFactories* getInstance() {
+	ALWAYS_INLINE static CompressorFactories* getInstance() {
 		return instance;
 	}
 	static Compressor* makeCompressor(uint32_t type);
@@ -198,26 +204,22 @@ public:
 class MemCopyCompressor : public MemoryCompressor {
 public:
 	size_t getMaxExpansion(size_t in_size);
-	size_t compressBytes(byte* in, byte* out, size_t count);
-	void decompressBytes(byte* in, byte* out, size_t count);
+	size_t compress(uint8_t* in, uint8_t* out, size_t count);
+	void decompress(uint8_t* in, uint8_t* out, size_t count);
 };
 
 class BitStreamCompressor : public MemoryCompressor {
 	static const uint32_t kBits = 8;
 public:
 	size_t getMaxExpansion(size_t in_size);
-	size_t compressBytes(byte* in, byte* out, size_t count);
-	void decompressBytes(byte* in, byte* out, size_t count);
+	size_t compressBytes(uint8_t* in, uint8_t* out, size_t count);
+	void decompressBytes(uint8_t* in, uint8_t* out, size_t count);
 };
 
 template <uint32_t kAlphabetSize = 0x100>
 class FrequencyCounter {
-	uint32_t frequencies_[kAlphabetSize];
+	uint32_t frequencies_[kAlphabetSize] = {};
 public:
-	FrequencyCounter() {
-		std::fill(frequencies_, frequencies_ + kAlphabetSize, 0U);
-	}
-
 	inline void addFrequency(uint32_t index) {
 		++frequencies_[index];
 	}
@@ -258,7 +260,7 @@ public:
 		return frequencies_;
 	}
 
-	void count(byte* data, uint32_t bytes) {
+	void count(uint8_t* data, uint32_t bytes) {
 		// TODO: Vectorize.
 		for (; count; --count) {
 			addFrequency(*data++);

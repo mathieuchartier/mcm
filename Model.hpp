@@ -31,29 +31,24 @@
 #pragma pack(push)
 #pragma pack(1)
 template <typename T, const int max>
-class floatBitModel
-{
+class floatBitModel {
 	float f;
 public:
-	floatBitModel()
-	{
+	floatBitModel() {
 		init();
 	}
 
-	void init()
-	{
+	void init() {
 		f = 0.5f;
 	}
 
-	inline void update(T bit, T dummy)
-	{
+	inline void update(T bit, T dummy) {
 		f += ((float)(bit^1) - f) * 0.02;
 		if (f < 0.001) f = 0.001;
 		if (f > 0.999) f = 0.999;
 	}
 
-	inline uint32_t getP() const
-	{
+	inline uint32_t getP() const {
 		return (uint32_t)(f * (float)max);
 	}
 };
@@ -66,20 +61,11 @@ public:
 template <typename T, const uint32_t _shift, const uint32_t _learn_rate = 5, const uint32_t _bits = 15>
 class safeBitModel {
 protected:
-	T p;
 	static const uint32_t pmax = (1 << _bits) - 1;
 public:
 	static const uint32_t shift = _shift;
 	static const uint32_t learn_rate = _learn_rate;
 	static const uint32_t max = 1 << shift;
-
-	void init() {
-		p = pmax / 2;
-	}
-
-	safeBitModel() {
-		init();
-	}
 
 	inline void update(T bit) {
 		int round = 1 << (_learn_rate - 1);
@@ -91,6 +77,9 @@ public:
 		ret += ret == 0;
 		return ret;
 	}
+
+private:
+	T p = pmax / 2;
 };
 
 template <const uint32_t _shift, const uint32_t _learn_rate = 5, const uint32_t _bits = 15> 
@@ -105,39 +94,34 @@ public:
 	static const uint32_t learn_rate = _learn_rate;
 	static const uint32_t max = 1 << shift;
 
-	forceinline void init(int new_p = 1 << (_shift - 1)) {
-		setP(new_p, kInitialCount << 5);
+	ALWAYS_INLINE void init(int new_p = 1 << (_shift - 1)) {
+		setP(new_p);
 	}
 
-	forceinline bitLearnModel() {
+	ALWAYS_INLINE bitLearnModel() {
 		init();
 	}
 
-	forceinline void update(uint32_t bit) {
+	ALWAYS_INLINE void update(uint32_t bit) {
 		const size_t count = p & kCountMask;
+		// 255 / 32 = 9
 		const size_t learn_rate = 2 + (count >> 5);
-#if 0
-		auto delta = ((static_cast<int>(bit) << 31) - static_cast<int>(p & ~kCountMask)) >> learn_rate;
-		p += delta & ~kCountMask;
-		p += count < kCountMask;
-		p &= 0x7FFFFFFF;
-#else
 		const int m[2] = {kCountMask, (1u << 31) - 1};
 		p = p + (((m[bit] - static_cast<int>(p)) >> learn_rate) & ~kCountMask);
 		p += count < kCountMask;
-#endif
 	}
 
-	forceinline uint32_t getCount() {
+	ALWAYS_INLINE uint32_t getCount() {
 		return p & kCountMask;
 	}
 
-	forceinline void setP(uint32_t new_p, uint32_t count) {
+	ALWAYS_INLINE void setP(uint32_t new_p, uint32_t count = kInitialCount << 5) {
 		p = new_p << (31 - shift) | count;
 	}
 
-	forceinline uint32_t getP() const {
-		return p >> (31 - shift);
+	ALWAYS_INLINE uint32_t getP() const {
+		int ret = p >> (31 - shift);
+		return ret;
 	}
 };
 
@@ -153,23 +137,22 @@ public:
 	static const uint32_t learn_rate = _learn_rate;
 	static const uint32_t max = 1 << shift;
 
-	forceinline void init(int new_p = 1u << (_shift - 1)) {
+	ALWAYS_INLINE void init(int new_p = 1u << (_shift - 1)) {
 		p = new_p << (_bits - shift);
 	}
-	forceinline fastBitModel() {
+	ALWAYS_INLINE fastBitModel() {
 		init();
 	}
-	forceinline void update(T bit) {
+	ALWAYS_INLINE void update(T bit) {
 		update(bit, learn_rate);
 	}
-	forceinline void update(T bit, int32_t learn_rate) {
-		const int round = kUseRounding ? (1 << (learn_rate - 1)) : 0;
+	ALWAYS_INLINE void update(T bit, int32_t learn_rate, int32_t round = 0) {
 		p += ((static_cast<int>(bit) << _bits) - static_cast<int>(p) + round) >> learn_rate;
 	}
-	forceinline void setP(uint32_t new_p) {
+	ALWAYS_INLINE void setP(uint32_t new_p) {
 		p = new_p << (_bits - shift);
 	}
-	forceinline uint32_t getP() const {
+	ALWAYS_INLINE uint32_t getP() const {
 		return p >> (_bits - shift);
 	}
 };
@@ -178,19 +161,11 @@ public:
 template <typename T, const uint32_t _shift, const uint32_t _learn_rate = 5>
 class fastBitSTModel {
 protected:
-	T p;
+	T p = 0;
 public:
 	static const uint32_t shift = _shift;
 	static const uint32_t learn_rate = _learn_rate;
 	static const uint32_t max = 1 << shift;
-
-	void init() {
-		p = 0;
-	}
-
-	fastBitSTModel() {
-		init();
-	}
 
 	template <typename Table>
 	inline void update(T bit, Table& table) {
@@ -218,20 +193,11 @@ public:
 template <typename T, const uint32_t _shift, const uint32_t _learn_rate = 5, const uint32_t _bits = 15>
 class fastBitSTAModel {
 protected:
-	T p;
 	static const uint32_t pmax = (1 << _bits) - 1;
 public:
 	static const uint32_t shift = _shift;
 	static const uint32_t learn_rate = _learn_rate;
 	static const uint32_t max = 1 << shift;
-
-	void init() {
-		p = pmax / 2;
-	}
-
-	fastBitSTAModel() {
-		init();
-	}
 
 	inline void update(T bit) {
 		int round = 1 << (_learn_rate - 1);
@@ -245,6 +211,9 @@ public:
 	inline int getSTP() const {
 		return (p >> (_bits - shift)) - 2048;
 	}
+
+private:
+	T p = pmax / 2;
 };
 
 template <typename T, const uint32_t _shift, const uint32_t _learn_rate = 5>
@@ -264,7 +233,7 @@ public:
 // Semistationary model.
 template <typename T>
 class fastCountModel {
-	T n[2];
+	T n[2] = {};
 public:
 	inline uint32_t getN(uint32_t i) const {
 		return n[i];
@@ -272,14 +241,6 @@ public:
 
 	inline uint32_t getTotal() const {
 		return n[0] + n[1];
-	}
-
-	fastCountModel() {
-		init();
-	}
-
-	void init() {
-		n[0] = n[1] = 0;
 	}
 
 	void update(uint32_t bit) {

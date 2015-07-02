@@ -22,7 +22,7 @@
 */
 
 #include "Compressor.hpp"
-#include "CM.hpp"
+#include "CM-inl.hpp"
 #include "DeltaFilter.hpp"
 #include "Filter.hpp"
 #include "TurboCM.hpp"
@@ -43,14 +43,14 @@ typedef FixedDeltaFilter<2, 2> WavDeltaFilter;
 class SimpleFilter : public ByteStreamFilter<4 * KB, 4 * KB> {
 public:
 	SimpleFilter(Stream* stream) : ByteStreamFilter(stream) { }
-	virtual void forwardFilter(byte* out, size_t* out_count, byte* in, size_t* in_count) {
+	virtual void forwardFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
 		const auto max_c = std::min(*out_count, *in_count);
 		for (auto i = 0; i < max_c; ++i) {
 			out[i] = in[i] + 1;
 		}
 		*out_count = *in_count = max_c;
 	}
-	virtual void reverseFilter(byte* out, size_t* out_count, byte* in, size_t* in_count) {
+	virtual void reverseFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
 		const auto max_c = std::min(*out_count, *in_count);
 		for (auto i = 0; i < max_c; ++i) {
 			out[i] = in[i] - 1;
@@ -65,7 +65,7 @@ public:
 class SplitFilter : public ByteStreamFilter<4 * KB, 4 * KB> {
 public:
 	SplitFilter(Stream* stream) : ByteStreamFilter(stream) { }
-	virtual void forwardFilter(byte* out, size_t* out_count, byte* in, size_t* in_count) {
+	virtual void forwardFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
 		const auto max_in = std::min(*out_count / 3, *in_count);
 		for (auto i = 0; i < max_in; ++i) {
 			out[i * 3] = in[i] / 3;
@@ -75,7 +75,7 @@ public:
 		*out_count = max_in * 3;
 		*in_count = max_in;
 	}
-	virtual void reverseFilter(byte* out, size_t* out_count, byte* in, size_t* in_count) {
+	virtual void reverseFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
 		const auto max_out = std::min(*out_count, *in_count / 3);
 		for (auto i = 0; i < max_out; ++i) {
 			out[i] = in[i * 3] + in[i * 3 + 1] + in[i * 3 + 2];
@@ -92,7 +92,7 @@ class Delta16 : public ByteBufferFilter<0x10000> {
 public:
 	Delta16(Stream* stream) : ByteBufferFilter(stream), prev_(0), prev2_(0) {
 	}
-	virtual void forwardFilter(byte* ptr, size_t count) {
+	virtual void forwardFilter(uint8_t* ptr, size_t count) {
 		for (auto i = 0; i + 1 < count; i += 2) {
 			uint16_t c = ptr[i] + (static_cast<uint32_t>(ptr[i + 1]) << 8);
 			uint16_t new_c = c - prev2_;
@@ -102,7 +102,7 @@ public:
 			prev_ = c;
 		}
 	}
-	virtual void reverseFilter(byte* ptr, size_t count) {
+	virtual void reverseFilter(uint8_t* ptr, size_t count) {
 		for (auto i = 0; i + 1 < count; i += 2) {
 			uint16_t c = ptr[i] + (static_cast<uint32_t>(ptr[i + 1]) << 8);
 			uint16_t new_c = c + prev2_;
@@ -130,7 +130,7 @@ public:
 	Delta8(Stream* stream) : ByteBufferFilter(stream) {
 		std::fill(prev_, prev_ + 4, 0U);
 	}
-	virtual void forwardFilter(byte* ptr, uint32_t count) {
+	virtual void forwardFilter(uint8_t* ptr, uint32_t count) {
 		for (uint32_t i = 0; i < count; i += 2) {
 			uint8_t c = ptr[i];
 			ptr[i] = c - prev_[3];
@@ -138,7 +138,7 @@ public:
 			prev_[0] = c;
 		}
 	}
-	virtual void reverseFilter(byte* ptr, uint32_t count) {
+	virtual void reverseFilter(uint8_t* ptr, uint32_t count) {
 		for (uint32_t i = 0; i + 1 < count; i += 2) {
 			uint8_t c = ptr[i];
 			ptr[i] = c + prev_[3];
@@ -162,13 +162,13 @@ class ColorTrans : public ByteBufferFilter<0x5000 * 3> {
 public:
 	ColorTrans(Stream* stream) : ByteBufferFilter(stream) {
 	}
-	virtual void forwardFilter(byte* ptr, uint32_t count) {
+	virtual void forwardFilter(uint8_t* ptr, uint32_t count) {
 		for (uint32_t i = 0; i + 2 < count; i += 3) {
 			ptr[i + 1] -= ptr[i];
 			ptr[i + 2] -= ptr[i];
 		}
 	}
-	virtual void reverseFilter(byte* ptr, uint32_t count) {
+	virtual void reverseFilter(uint8_t* ptr, uint32_t count) {
 		for (uint32_t i = 0; i + 2 < count; i += 3) {
 			ptr[i + 1] += ptr[i];
 			ptr[i + 2] += ptr[i];
@@ -189,11 +189,11 @@ class BlockSplit : public ByteBufferFilter<0x10000> {
 public:
 	BlockSplit(Stream* stream) : ByteBufferFilter(stream) {
 	}
-	virtual void forwardFilter(byte* ptr, uint32_t count) {
+	virtual void forwardFilter(uint8_t* ptr, uint32_t count) {
 		if (count != kBlockSize) {
 			return;
 		}
-		byte out[kBlockSize];
+		uint8_t out[kBlockSize];
 		uint32_t pos[4] = { 0 };
 		pos[1] = kBlockSize / 4;
 		pos[2] = kBlockSize / 2;
@@ -203,11 +203,11 @@ public:
 		}
 		memcpy(ptr, out, count);
 	}
-	virtual void reverseFilter(byte* ptr, uint32_t count) {
+	virtual void reverseFilter(uint8_t* ptr, uint32_t count) {
 		if (count != 0x10000) {
 			return;
 		}
-		byte out[kBlockSize];
+		uint8_t out[kBlockSize];
 		uint32_t pos = 0;
 		for (uint32_t i = 0; i < 4; ++i) {
 			for (uint32_t j = 0; j < kBlockSize / 4; ++j) {
@@ -231,14 +231,14 @@ private:
 template<class FilterType>
 void testFilter() {
 	Store store_comp;
-	std::vector<byte> data;
+	std::vector<uint8_t> data;
 	uint32_t size = (rand() * 7654321 + rand()) % kDataSize;
 	for (uint32_t i = 0; i < size; ++i) {
 		data.push_back(rand() % 256);
 	}
-	std::vector<byte> out_data;
+	std::vector<uint8_t> out_data;
 	store_comp.compress(&FilterType(&ReadMemoryStream(&data)), &WriteVectorStream(&out_data), std::numeric_limits<uint64_t>::max());
-	std::vector<byte> result;
+	std::vector<uint8_t> result;
 	WriteVectorStream wvs(&result);
 	FilterType reverse_filter(&wvs); 
 	store_comp.decompress(&ReadMemoryStream(&out_data), &reverse_filter, std::numeric_limits<uint64_t>::max());
@@ -246,19 +246,19 @@ void testFilter() {
 	// Check tht the shit matches.
 	check(result.size() == data.size());
 	for (uint32_t i = 0; i < data.size(); ++i) {
-		byte a = result[i];
-		byte b = data[i];
+		uint8_t a = result[i];
+		uint8_t b = data[i];
 		check(a == b);
 	}
 }
 
 template<class FilterType>
-void benchFilter(const std::vector<byte>& data) {
-	CM<kCMTypeMax> comp(6);
+void benchFilter(const std::vector<uint8_t>& data) {
+	cm::CM<8, false> comp(6);
 	// data = randomArray(kBenchDataSize);
 	check(!data.empty());
 	const uint64_t expected_sum = std::accumulate(data.begin(), data.end(), 0UL);
-	std::vector<byte> out_data;
+	std::vector<uint8_t> out_data;
 	out_data.resize(20 * MB + static_cast<uint32_t>(data.size() * FilterType::getMaxExpansion() * 1.2));
 	uint64_t start = clock();
 	uint64_t write_count;
@@ -290,7 +290,7 @@ void benchFilter(const std::vector<byte>& data) {
 	}	
 	std::cout << "Forward: " << data.size() << "->" << write_count << " rate=" << prettySize(computeRate(data.size() * kIterations, clock() - start)) << "/S" << std::endl;
 
-	std::vector<byte> result;
+	std::vector<uint8_t> result;
 	result.resize(data.size());
 	start = clock();
 	for (uint32_t i = 0; i < kIterations; ++i) {
@@ -324,7 +324,7 @@ void runFilterTests() {
 	}
 	std::cout << "Done running " << kTestIterations << " test iterations" << std::endl;
 
-	std::vector<byte> data = loadFile("vcfiu.hlp", 4 * MB);
+	std::vector<uint8_t> data = loadFile("vcfiu.hlp", 4 * MB);
 	//std::vector<byte> data = loadFile("rafale.bmp", 4 * MB);
 	//std::vector<byte> data = loadFile("ohs.doc", 5 * MB);
 	//std::vector<byte> data = loadFile("world95.txt", 4 * MB);
@@ -344,7 +344,7 @@ void runFilterTests() {
 	//std::vector<byte> data = loadFile("include.tar", 4 * MB);
 	// Count freqs.
 	uint32_t freq[256] = { 0 };
-	for (byte c : data) {
+	for (uint8_t c : data) {
 		++freq[c];
 	}
 	for (uint32_t i = 0; i < 256; ++i) {

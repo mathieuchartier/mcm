@@ -29,21 +29,25 @@
 // squash = ln(p/(1-p))
 // stretch = squash^-1 = 1/(1+e^-x)
 
-inline double squash(double p)
-{
+inline double squash(double p) {
 	if (p < 0.0001) return -999.0;
 	if (p > 0.9999) return 999.0;
 	return (double) std::log((double) p / (1.0 - (double) p));
 }
 
-inline double stretch(double p)
-{
+inline double stretch(double p) {
 	return 1.0 / double(1.0 +	exp((double) -p));
 }
 
-inline int roundint(double p)
-{
+inline int roundint(double p) {
 	return int(p + 0.5);
+}
+
+static int squash_init(int d, int opt = 0) {
+  if (d>=2047) return 4095;
+  if (d<=-2047) return 0;
+  double k=(4096-opt)/(double(1+exp(-(double(d)/(128+15*10+6)))));
+  return int(k);
 }
 
 // Squash - stretch table
@@ -52,17 +56,20 @@ struct ss_table {
 	static const int total = maxInt - minInt;
 	T stretchTable[denom], squashTable[total], *squashPtr;
 public:
-	// probability = p / Denom
-	void build(int delta) {
+	// probability = p / Denom		
+	void build(size_t* opts) {
 		squashPtr = &squashTable[0 - minInt];
 		// From paq9a
-		const size_t num_stems = 33;
+		const size_t num_stems = 32 + 1;
 		int stems[num_stems] = {
-			//1,2,3,6,10,16,27,50,79,126,198,306,465,719,1072,1478,2047,
-			1,2,3,6-2,10+9,16+12,27+15,50+18,79+9,126-12,198+1-8,306+5,465-4,719-26,1072+8,1478+57-10-47,2047+32-56-105+22,
-			//1,2,3,6,10,16,27,45,73,120,194,310,488,747+2,1101-3,1546-8*delta,2047,
-			0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-		for (int i = 17; i < num_stems; ++i) {
+      1,2,4,6,19,25,38,71,82,128,210,323,497,778,1142,1526, // 2022098
+      // 15 3 8 0 3 0 0 0 0 0 0 0 0 0 0 0
+			// 1,1,2,2,3,4,5,6,11,19,20,20,27,31,42,53,61,82,93,107,161,196,258,314,426,486,684,810,1048,1246,1521,1724, // 2023116
+      // 1,1,2,3,4,5,6,13,19,22,25,32,38,55,71,77,82,105,128,169,210,267,323,410,497,638,778,960,1142,1334,1526,1787, // 2022098
+      2047,
+			};
+    // check(stems[num_stems / 2] == 2047);
+		for (int i = num_stems / 2 + 1; i < num_stems; ++i) {
 			stems[i] = 4096 - stems[num_stems - 1 - i];
 		}
 		// Interpolate between stems.
@@ -73,11 +80,14 @@ public:
 			const int stem_frac = pos % stem_divisor;
 			squashTable[pos] = 
 				(stems[stem_idx] * (stem_divisor - stem_frac) + stems[stem_idx + 1] * stem_frac + stem_divisor / 2) / stem_divisor;
+			squashTable[pos] = Clamp(squashTable[pos], 1, 4095);
 		}
 		int pi = 0;
-		// invert squash()
+		// Inverse squash function.
 		for (int x = minInt; x < maxInt; ++x) {
-			int i = squashPtr[x];
+      // squashPtr[x] = squash_init(x, opts[0]);
+      int i = squashPtr[x];
+      squashPtr[x] = Clamp(squashPtr[x], 1, 4095);
 			for (int j = pi; j < i; ++j) {
 				stretchTable[j] = x;
 			}
@@ -93,12 +103,12 @@ public:
 	}
 
 	// 0 <= p < denom
-	forceinline int st(uint32_t p) const {
+	ALWAYS_INLINE int st(uint32_t p) const {
 		return stretchTable[p];
 	}
 
 	// minInt <= p < maxInt
-	forceinline uint32_t sq(int p) const {
+	ALWAYS_INLINE uint32_t sq(int p) const {
 		if (p <= minInt) {
 			return 1;
 		}
@@ -107,7 +117,8 @@ public:
 		}
 		return squashPtr[p];
 	}
-	forceinline uint32_t squnsafe(int p) const {
+
+	ALWAYS_INLINE uint32_t squnsafe(int p) const {
 		dcheck(p >= minInt);
 		dcheck(p < maxInt);
 		return squashPtr[p];

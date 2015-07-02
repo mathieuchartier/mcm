@@ -51,7 +51,7 @@ public:
 };
 
 template <typename T, bool kBigEndian>
-T readBytes(byte* ptr, size_t bytes) {
+T readBytes(uint8_t* ptr, size_t bytes) {
 	T acc = 0;
 	if (!kBigEndian) {
 		ptr += bytes;
@@ -63,7 +63,7 @@ T readBytes(byte* ptr, size_t bytes) {
 }
 
 template <typename T, bool kBigEndian>
-void writeBytes(byte* ptr, size_t bytes, T value) {
+void writeBytes(uint8_t* ptr, size_t bytes, T value) {
 	T acc = 0;
 	if (kBigEndian) {
 		ptr += bytes;

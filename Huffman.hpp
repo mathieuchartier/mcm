@@ -52,15 +52,15 @@ public:
 		T weight;
 		Tree *a, *b;
 
-		forceinline uint32_t getAlphabet() const {
+		ALWAYS_INLINE uint32_t getAlphabet() const {
 			return value;
 		}
 
-		forceinline bool isLeaf() const {
+		ALWAYS_INLINE bool isLeaf() const {
 			return a == nullptr && b == nullptr;
 		}
 
-		forceinline T getWeight() const {
+		ALWAYS_INLINE T getWeight() const {
 			return weight;
 		}
 
@@ -139,21 +139,21 @@ public:
 	
 	static const uint16_t start_state = 0;
 
-	forceinline static bool isLeaf(uint16_t state) {
+	ALWAYS_INLINE static bool isLeaf(uint16_t state) {
 		return (state & 0x100) != 0;
 	}
 
-	forceinline uint32_t getTransition(uint16_t state, uint32_t bit) {
+	ALWAYS_INLINE uint32_t getTransition(uint16_t state, uint32_t bit) {
 		assert(state < 256);
 		return state_trans[state][bit];
 	}
 
-	forceinline static uint32_t getChar(uint16_t state) {
+	ALWAYS_INLINE static uint32_t getChar(uint16_t state) {
 		assert(isLeaf(state));
 		return state ^ 0x100;
 	}
 
-	forceinline const Code& getCode(uint32_t index) const {
+	ALWAYS_INLINE const Code& getCode(uint32_t index) const {
 		return codes[index];
 	}
 
@@ -394,7 +394,7 @@ public:
 		tree->printRatio("LL(16)");
 
 		ProgressMeter meter;
-		ent.init();
+		ent = Range7();
 		writeTree(ent, sout, tree, alphabet_size, max_length);
 		build(tree);
 		std::cout << "Encoded huffmann tree in ~" << sout.getTotal() << " bytes" << std::endl;
@@ -448,8 +448,8 @@ public:
 	virtual uint32_t getMaxExpansion(uint32_t in_size) {
 		return in_size * 6 / 5 + (kCodeBits * 256 / kBitsPerByte + 100);
 	}
-	virtual uint32_t compressBytes(byte* in, byte* out, uint32_t count);
-	virtual void decompressBytes(byte* in, byte* out, uint32_t count);
+	virtual uint32_t compressBytes(uint8_t* in, uint8_t* out, uint32_t count);
+	virtual void decompressBytes(uint8_t* in, uint8_t* out, uint32_t count);
 };
 
 #endif

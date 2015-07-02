@@ -32,24 +32,58 @@
 #include <unordered_set>
 
 #include "Filter.hpp"
+#include "WordCounter.hpp"
+
+enum WordModifier {
+	kWordNormal,
+	// Toggle case of first char.
+	kWordLowerFirstChar,
+	// Toggle case of whole word.
+	kWordToggleAll,
+	kWordModifierCount,
+};
 
 class Dict {
 public:
+  static const size_t kMinWordLen = 3;
 	static const size_t kMaxWordLen = 256;
 	static const size_t kInvalidChar = 256;
-	typedef std::pair<size_t, std::string> WCPair;
+	typedef std::pair<uint32_t, std::string> WCPair;
 	
-	class CompareWCPair {
-	public:
-		CompareWCPair(size_t extra_cost = 0) : extra_cost_(extra_cost) {
+	struct ReverseCompareString {
+		bool operator()(const std::string& a, const std::string& b) const {
+			const size_t count = std::min(a.length(), b.length());
+			const char* ptr_a = &a[a.length() - 1];
+			const char* ptr_b = &b[b.length() - 1];
+			for (size_t i = 0; i < count; ++i) {
+				if (*ptr_a != *ptr_b) {
+					return *ptr_a < *ptr_b;
+				}
+				--ptr_a;
+				--ptr_b;
+			}
+			return a.length() < b.length();
 		}
-		bool operator()(const WCPair& a, const WCPair& b) const {
-			return (a.first - 1) * (std::max(extra_cost_, a.second.length()) - extra_cost_) <
-				(b.first - 1) * (std::max(extra_cost_, b.second.length()) - extra_cost_);
+	};
+
+	class DictCompare {
+	public:
+		DictCompare(std::unordered_map<std::string, size_t>* group) : group_(group) {}
+
+		bool operator()(const std::string& a, const std::string& b) const {
+			auto it1 = group_->find(a);
+			size_t idx1 = it1 != group_->end() ? it1->second : 999999999u;
+			auto it2 = group_->find(b);
+			size_t idx2 = it2 != group_->end() ? it2->second : 999999999u;
+			if (idx1 != idx2) {
+				return idx1 < idx2;
+			}
+			// return a < b;
+      return strcmp(a.c_str(), b.c_str()) < 0;
 		}
 
 	private:
-		const size_t extra_cost_;
+		std::unordered_map<std::string, size_t>* group_;
 	};
 
 	// Maybe not very memory efficient.
@@ -57,31 +91,24 @@ public:
 		std::unordered_map<std::string, uint32_t> words_;
 		size_t max_words_;
 	public:
-
 		WordCollectionMap(size_t max_words = 10000000) : max_words_(max_words) {
 		}
-		void getWords(std::vector<WCPair>& out_pairs, size_t min_occurences = 10) {
+    void Init(size_t size) {}
+		void GetWords(std::vector<WCPair>& out_pairs, size_t min_occurences = 10) {
 			for (auto& p : words_) {
-				if (p.second > min_occurences) {
+				if (p.second >= min_occurences) {
 					out_pairs.push_back(WCPair(p.second, p.first));
 				}
 			}
 		}
-		forceinline size_t size() const {
-			return words_.size();
-		}
-		void clear() {
-			words_.clear();
-		}
-		void addWord(const uint8_t* begin, const uint8_t* end) {
+		ALWAYS_INLINE size_t size() const { return words_.size(); }
+		void Clear() { words_.clear(); }
+		void AddWord(const uint8_t* begin, const uint8_t* end) {
 			while (words_.size() > max_words_) {
 				for (auto it = words_.begin(); it != words_.end(); ) {
 					it->second /= 2;
-					if (it->second == 0) {
-						it = words_.erase(it);
-					} else {
-						++it;
-					}
+					if (it->second == 0) it = words_.erase(it);
+					else ++it;
 				}
 			}
 			++words_[std::string(begin, end)];
@@ -90,34 +117,29 @@ public:
 
 	class CodeWord {
 	public:
-		uint32_t code_;
+		uint32_t code_ = 0;
+    WordCC expected_case_ = kWordCCNone;
 
-		void setCode(uint32_t code) {
-			code_ = code;
-		}
+		void setCode(uint32_t code) { code_ = code; }
 		CodeWord(uint8_t num_bytes = 0u, uint8_t c1 = 0u, uint8_t c2 = 0u, uint8_t c3 = 0u) {
 			code_ = num_bytes;
 			code_ = (code_ << 8) | c1;
 			code_ = (code_ << 8) | c2;
 			code_ = (code_ << 8) | c3;
 		}
-		uint32_t byte1() const {
-			return (code_ >> 16) & 0xFFu;
-		}
-		uint32_t byte2() const {
-			return (code_ >> 8) & 0xFFu;
-		}
-		uint32_t byte3() const {
-			return (code_ >> 0) & 0xFFu;
-		}
+		uint32_t byte1() const { return (code_ >> 16) & 0xFFu; }
+		uint32_t byte2() const { return (code_ >> 8) & 0xFFu; }
+		uint32_t byte3() const { return (code_ >> 0) & 0xFFu; }
 		size_t numBytes() const {
-			auto bytes = code_ >> 24;
+			const auto bytes = code_ >> 24;
 			assert(bytes <= 3);
 			return bytes;
 		}
+    WordCC ExpectedCase() {
+      return expected_case_;
+    }
 	};
 
-	typedef std::pair<std::string, CodeWord> CodeWordPair;
 	// Simple collection of words and their codes.
 	class CodeWordSet {
 	public:
@@ -135,9 +157,8 @@ public:
 	class SuffixSortComparator {
 		static const uint32_t kMaxContext = 16;
 	public:
-		SuffixSortComparator(const uint8_t* arr) : arr_(arr) {
-		}
-		forceinline bool operator()(uint32_t a, uint32_t b) const {
+		SuffixSortComparator(const uint8_t* arr) : arr_(arr) {}
+		ALWAYS_INLINE bool operator()(uint32_t a, uint32_t b) const {
 			size_t max = std::min(std::min(a, b), kMaxContext);
 			for (; max > 0; --max) {
 				if (arr_[--a] != arr_[--b]) {
@@ -158,12 +179,18 @@ public:
 		// Current word.
 		static const size_t kMinWordLen = 3;
 		static const size_t kMaxWordLen = 0x20;
-		static const size_t kMinOccurences = 100;
+		static const size_t kDefaultMinOccurrences = 8;
 		uint8_t word_[kMaxWordLen];
 		size_t word_pos_;
 		// CC: first char EOR whole word.
-		WordCollectionMap words_;
+		WordCounter words_;
+    /// WordCollectionMap words_;
 	public:
+    void GetWords(std::vector<WordCount>& out, size_t min_occurences = kDefaultMinOccurrences) {
+      words_.GetWords(out, min_occurences);
+      words_.Clear();
+    }
+
 		void addChar(uint8_t c) {
 			// Add to current word.
 			if (isWordChar(c)) {
@@ -172,24 +199,29 @@ public:
 				}
 			} else {
 				if (word_pos_ >= kMinWordLen) {
-					bool first_cap = isUpperCase(word_[0]);
-					size_t cap_count = first_cap;
-					for (size_t i = 1; i < word_pos_; ++i) {
-						cap_count += isUpperCase(word_[i]);
-					}
-					if (cap_count == word_pos_) {
+          WordCC cc_type = GetWordCase(word_, word_pos_);
+					if (cc_type == kWordCCAll) {
 						for (size_t i = 0; i < word_pos_; ++i) {
 							word_[i] = makeLowerCase(word_[i]);
 						}
-					} else if (first_cap && cap_count == 1) {
+					} else if (cc_type == kWordCCFirstChar) {
 						word_[0] = makeLowerCase(word_[0]);
-					}
-					words_.addWord(word_, word_ + word_pos_);
+          } else if (cc_type == kWordCCInvalid && (false)) {
+            for (size_t i = 0; i < word_pos_; ++i) {
+							if (isUpperCase(word_[i])) {
+                word_[i] = makeLowerCase(word_[i]);
+              }
+						}
+            cc_type = kWordCCNone;
+          }
+          if (cc_type != kWordCCInvalid) {
+            words_.AddWord(word_, word_ + word_pos_, cc_type);
+          }
 				}
-				for (size_t i = 0; i < word_pos_; ++i) {
+				if (false) for (size_t i = 0; i < word_pos_; ++i) {
 					if (buffer_pos_ < buffer_.capacity()) buffer_.push_back(word_[i]);
 				}
-				if (buffer_pos_ < buffer_.capacity()) buffer_.push_back(c);
+				if (false) if (buffer_pos_ < buffer_.capacity()) buffer_.push_back(c);
 				word_pos_ = 0;
 			}
 		}
@@ -197,15 +229,10 @@ public:
 			buffer_pos_ = 0;
 			buffer_.reserve(kSuffixSize);
 			word_pos_ = 0;
+      words_.Init(256 * MB);
 		}
 		Builder() {
 			init();
-		}
-		const WordCollectionMap& getWords() const {
-			return words_;
-		}
-		WordCollectionMap& getWords() {
-			return words_;
 		}
 		const std::vector<uint8_t>* getBuffer() const {
 			return &buffer_;
@@ -220,21 +247,18 @@ public:
 	class CodeWordGeneratorFast {
 		static const bool kVerbose = true;
 	public:
-		void generateCodeWords(Builder& builder, CodeWordSet* words) {
+		void generateCodeWords(Builder& builder, CodeWordSet* words, size_t min_occurrences, size_t num_1 = 32) {
 			auto start_time = clock();
 			auto* cw = words->getCodeWords();
 			cw->clear();
 
-			auto& word_map = builder.getWords();
-			std::vector<WCPair> word_pairs;
-			const size_t kMinOccurences = 9u;
-			word_map.getWords(word_pairs, kMinOccurences);
-			word_map.clear();
+			std::vector<WordCount> word_pairs;
+      builder.GetWords(word_pairs, min_occurrences);
 			const auto occurences = word_pairs.size();
-			std::sort(word_pairs.rbegin(), word_pairs.rend(), CompareWCPair(1));
+			std::sort(word_pairs.rbegin(), word_pairs.rend(), WordCount::CompareSavings(1));
 
 			// Calculate number of 1 byte codewords in case its more than the original max.
-			words->num1_ = std::min(static_cast<size_t>(32u), word_pairs.size());
+			words->num1_ = std::min(static_cast<size_t>(num_1), word_pairs.size());
 			while (words->num1_ + 1 < word_pairs.size()) {
 				// Remain.
 				size_t remain = 128 - words->num1_;
@@ -245,19 +269,19 @@ public:
 				++words->num1_;
 			}
 
-			size_t save1 = 0, save2 = 0, save3 = 0; // Number of bytes saved.
+			int64_t save1 = 0, save2 = 0, save3 = 0; // Number of bytes saved.
 			size_t num1 = words->num1_, num2 = 0, num3 = 0; // Number of first byte which are 1b/2b/3b.
 			size_t count1 = 0, count2 = 0, count3 = 0; /// Number of words.
 			for (size_t i = 0; i < words->num1_; ++i) {
 				const auto& p = word_pairs[i];
 				++count1;
-				save1 += (p.first - 1) * (p.second.length() - 1);
-				cw->push_back(p.second);
+				cw->push_back(p.word);
+        save1 += p.Savings(1);
 			}
 			std::sort(cw->begin(), cw->end());
 			word_pairs.erase(word_pairs.begin(), word_pairs.begin() + count1);
-			std::sort(word_pairs.rbegin(), word_pairs.rend(), CompareWCPair(2));
-
+			std::sort(word_pairs.rbegin(), word_pairs.rend(), WordCount::CompareSavings(2));
+      
 			// 2 byte codes.
 			for (num3 = 0; num3 < 32 && num3 + num1 < 128; ++num3) {
 				const size_t count3 = num3 * 128 * 128;
@@ -271,13 +295,22 @@ public:
 				for (size_t b2 = 128u; b2 < 256; ++b2) {
 					if (count2 < word_pairs.size()) {
 						const auto& p = word_pairs[count2++];
-						cw->push_back(p.second);
-						save2 += (p.first - 1) * (p.second.length() - 2);
+						cw->push_back(p.word);
+						save2 += p.Savings(2);
 					}
 				}
 			}
 			word_pairs.erase(word_pairs.begin(), word_pairs.begin() + count2);
-			std::sort(word_pairs.rbegin(), word_pairs.rend(), CompareWCPair(3));
+			std::sort(word_pairs.rbegin(), word_pairs.rend(), WordCount::CompareSavings(3));
+
+      constexpr bool kPopBads = true;
+      if (kPopBads) {
+        // Remove dictionary replacements that will actually increase size.
+        while (!word_pairs.empty() && word_pairs.back().Savings(3) <= 0) {
+          // std::cerr << "POP " << word_pairs.back().word << std::endl;
+          word_pairs.pop_back();
+        }
+      }
 
 			// 3 byte codes.
 			for (size_t b1 = end2; b1 < 256; ++b1) {
@@ -285,8 +318,8 @@ public:
 					for (size_t b3 = 128u; b3 < 256; ++b3) {
 						if (count3 < word_pairs.size()) {
 							const auto& p = word_pairs[count3++];
-							cw->push_back(p.second);
-							save3 += (p.first - 1) * (p.second.length() - 3);
+							cw->push_back(p.word);
+              save3 += p.Savings(3);
 						}
 					}
 				}
@@ -322,7 +355,7 @@ public:
 						}
 						std::string s(arr + pos, arr + pos + len);
 						if (words2b.find(s) != words2b.end() || words3b.find(s) != words3b.end()) {
-							indexes.push_back(pos + kSuffixOffset);
+							indexes.push_back(static_cast<uint32_t>(pos + kSuffixOffset));
 						}
 						++num_words;
 						pos += len;
@@ -390,13 +423,26 @@ public:
 				}
 
 			} else {
-				std::sort(cw->begin() + count1, cw->begin() + count1 + count2);
-				std::sort(cw->begin() + count1 + count2, cw->end());
+				// std::sort(cw->begin() + count1, cw->begin() + count1 + count2, ReverseCompareString());
+				// std::sort(cw->begin() + count1 + count2, cw->end(), ReverseCompareString());
+				size_t count = 0;
+				std::unordered_map<std::string, size_t> dict;
+				if (false) {
+					std::ifstream fin("dict.dic");
+					std::string line;
+					while (std::getline(fin, line)) {
+						if (line != "") {
+							dict[line] = count++;
+						}
+					}
+				}
+				std::sort(cw->begin() + count1, cw->begin() + count1 + count2, DictCompare(&dict));
+				std::sort(cw->begin() + count1 + count2, cw->end(), DictCompare(&dict));
 			}
 			if (kVerbose) {
 				// Remaining chars.
-				size_t remain = 0;
-				for (const auto& p : word_pairs) remain += (p.first - 1) * (p.second.length() - 3);
+				int64_t remain = 0;
+				for (const auto& p : word_pairs) remain += p.Savings(3);
 				std::cout << "Constructed dict words=" << count1 << "+" << count2 << "+" << count3 << "=" << occurences
 					<< " save=" << save1 << "+" << save2 << "+" << save3 << "=" << save1 + save2 + save3
 					<< " extra=" << remain
@@ -406,6 +452,33 @@ public:
 			}
 		}
 	};
+
+  class EncodeMap {
+  public:
+    struct Entry {
+      CodeWord code_word;
+      WordCC word_case;
+    };
+
+    void Add(const std::string& word, const CodeWord& code_word) {
+      std::string lower_case(word);
+      auto word_case = GetWordCase(reinterpret_cast<const uint8_t*>(word.c_str()), word.length());
+      for (auto& c : lower_case) {
+        if (isUpperCase(c)) {
+          c = makeLowerCase(c);
+        }
+      }
+      map_.emplace(lower_case, Entry{code_word, word_case});
+    }
+
+    const Entry* Find(const std::string& word) const {
+      auto it = map_.find(word);
+      return it != map_.end() ? &it->second : nullptr;
+    }
+
+  private:
+    std::unordered_map<std::string, Entry> map_;
+  };
 
 	// Encodes / decods words / code words.
 	class Filter : public ByteStreamFilter<16 * KB, 16 * KB> {
@@ -422,10 +495,11 @@ public:
 		size_t dict_buffer_size_;
 
 		// Encoding data structures.
-		std::unordered_map<std::string, CodeWord> encode_map_;
+		EncodeMap encode_map_;
 
 		// State
 		uint8_t last_char_;
+    bool capital_mode_ = false;
 
 		// Decode data structures
 		std::vector<std::string> words1b;
@@ -437,6 +511,15 @@ public:
 
 		// Optimizations
 		uint8_t is_word_char_[256];
+
+    // Options
+    static constexpr bool kOnlyDict = false;
+
+    // Stats
+    static const bool kStats = true;
+    size_t escape_count_ = 0;
+    size_t escape_count_word_ = 0;
+    size_t escape_count_first_ = 0;
 	public:
 		// Serialize to and from.
 		// num words
@@ -446,12 +529,6 @@ public:
 		// 1b count
 		// 2b count
 		// 3b count
-		void writeDict(std::vector<uint8_t>* dict) {
-			WriteVectorStream wvs(dict);
-		}
-		void readDict() {
-
-		}
 
 		// Creates an encodable dictionary array.
 		void addCodeWords(std::vector<std::string>* words, uint8_t num1, uint8_t num2, uint8_t num3) {
@@ -470,8 +547,22 @@ public:
 			dict_buffer_.push_back(num2);
 			dict_buffer_.push_back(num3);
 			// Encode words.
+			std::string last;
 			for (const auto& s : *words) {
-				wvs.writeString(&s[0]);
+				size_t common_len = 0;
+				// Common prefix encoding, seems to hurt ratio.
+				if (false) {
+					while (common_len < 32 && common_len < s.length() && common_len < last.length() && last[common_len] == s[common_len]) {
+						++common_len;
+					}
+					if (common_len > 4) {
+						wvs.put(1 + common_len);
+					} else {
+						common_len = 0;
+					}
+				}
+				wvs.writeString(&s[0] + common_len, '\0');
+				last = s;
 			}
 			// Save size.
 			dict_buffer_pos_ = 0;
@@ -519,7 +610,7 @@ public:
 			for (size_t b1 = start; b1 < end1; ++b1) {
 				if (idx < words.size()) {
 					if (encode) {
-						encode_map_.insert(std::make_pair(words[idx++], CodeWord(1, static_cast<uint8_t>(b1))));
+						encode_map_.Add(words[idx++], CodeWord(1, static_cast<uint8_t>(b1)));
 					} else {
 						words1b.push_back(words[idx++]);
 					}
@@ -529,7 +620,7 @@ public:
 				for (size_t b2 = start; b2 < 256; ++b2) {
 					if (idx < words.size()) {
 						if (encode) {
-							encode_map_.insert(std::make_pair(words[idx++], CodeWord(2, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2))));
+							encode_map_.Add(words[idx++], CodeWord(2, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2)));
 						} else {
 							words2b.push_back(words[idx++]);
 						}
@@ -541,8 +632,7 @@ public:
 					for (size_t b3 = start; b3 < 256; ++b3) {
 						if (idx < words.size()) {
 							if (encode) {
-								encode_map_.insert(std::make_pair(
-									words[idx++], CodeWord(3, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2), static_cast<uint8_t>(b3))));
+								encode_map_.Add(words[idx++], CodeWord(3, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2), static_cast<uint8_t>(b3)));
 							} else {
 								words3b.push_back(words[idx++]);
 							}
@@ -562,10 +652,14 @@ public:
 				std::copy(&dict_buffer_[0] + dict_buffer_pos_, &dict_buffer_[0] + dict_buffer_pos_ + max_write, out_ptr);
 				out_ptr += max_write;
 				dict_buffer_pos_ += max_write;
+			} else if (kOnlyDict) {
+			  *out_count = *in_count = 0;
+				return;
 			}
-			while (in_ptr < in_limit && out_ptr + 4 < out_limit) {
+			while (in_ptr < in_limit && out_ptr + 5 < out_limit) {
 				if (!is_word_char_[last_char_]) {
 					if (is_word_char_[*in_ptr]) {
+            // Calculate maximum word length.
 						size_t word_len = 0;
 						while (word_len < kMaxWordLen && in_ptr + word_len < in_limit && is_word_char_[in_ptr[word_len]]) {
 							++word_len;
@@ -574,39 +668,77 @@ public:
 							// If the word is all the remaining chars and not the whole string, then it may be a prefix.
 							break;
 						}
+            // Using prefix codes makes compression worse.
+            const bool kSupportPrefix = false;
+            bool next_word = false;
 						const size_t max_out = static_cast<size_t>(out_limit - out_ptr);
-						if (word_len >= 3 && word_len <= kMaxWordLen) {
-							std::string word(in_ptr, in_ptr + word_len);
+            const size_t min_len = kSupportPrefix ? kMinWordLen : std::max(word_len, kMinWordLen);
+            if (word_len <= kMaxWordLen) {
+              for (size_t cur_len = word_len; cur_len >= min_len; --cur_len) {
+                WordCC cc = GetWordCase(in_ptr, cur_len);
+							  std::string word(in_ptr, in_ptr + cur_len);
+							  if (cc == kWordCCAll) {
+								  for (auto& c : word) c = makeLowerCase(c);
+							  } else if (cc == kWordCCFirstChar) {
+								  word[0] = makeLowerCase(word[0]);
+                }
+							  const EncodeMap::Entry* entry = encode_map_.Find(word);
+							  if (entry != nullptr) {
+								  if (cc == kWordCCAll) {
+									  *(out_ptr++) = static_cast<uint8_t>(escape_cap_word_);
+                    if (kStats) ++escape_count_word_;
+								  } else if (cc != kWordCCNone) {
+                    check(entry->word_case != kWordCCFirstChar);
+									  *(out_ptr++) = static_cast<uint8_t>(escape_cap_first_);
+                    if (kStats) ++escape_count_first_;
+                  } else {
+                    check(entry->word_case != kWordCCFirstChar);
+                    // *(out_ptr++) = static_cast<uint8_t>(escape_cap_first_);
+                    // if (kStats) ++escape_count_first_;
+                  }
+								  auto& code_word = entry->code_word;
+								  const auto num_bytes = code_word.numBytes();
+								  dcheck(num_bytes >= 1 && num_bytes <= 3);
+								  *(out_ptr++) = code_word.byte1();
+								  if (num_bytes > 1) *(out_ptr++) = static_cast<uint8_t>(code_word.byte2());
+								  if (num_bytes > 2) *(out_ptr++) = static_cast<uint8_t>(code_word.byte3());
+								  in_ptr += cur_len;
+								  last_char_ = 'a';
+								  next_word = true;
+                  break;
+                }
+              }
+            }
+            if (next_word) {
+              continue;
+            }
+            if (word_len < max_out) {
+              WordCC cc = GetWordCase(in_ptr, word_len);
+              last_char_ = 'a';
+              std::string word(in_ptr, in_ptr + word_len);
 							size_t upper_count = 0;
-							for (size_t i = 0; i < word_len; ++i) {
-								upper_count += isUpperCase(in_ptr[i]);
-							}
-							if (upper_count == word_len) {
-								for (auto& c : word) c = makeLowerCase(c);
-							} else if (upper_count == 1 && isUpperCase(in_ptr[0])) {
-								word[0] = makeLowerCase(word[0]);
-							}
-							auto it = encode_map_.find(word);
-							if (it != encode_map_.end()) {
-								if (upper_count == word_len) {
-									*(out_ptr++) = escape_cap_word_;
-								} else if (upper_count == 1 && isUpperCase(in_ptr[0])) {
-									*(out_ptr++) = escape_cap_first_;
-								}
-								auto& code_word = it->second;
-								const auto num_bytes = code_word.numBytes();
-								dcheck(num_bytes >= 1 && num_bytes <= 3);
-								*(out_ptr++) = code_word.byte1();
-								if (num_bytes > 1) *(out_ptr++) = code_word.byte2();
-								if (num_bytes > 2) *(out_ptr++) = code_word.byte3();
-								in_ptr += word_len;
-								last_char_ = 'a';
-								continue;
-							}
-						}
-					}
+              if (cc == kWordCCAll) {
+                for (auto& c : word) c = makeLowerCase(c);
+                *(out_ptr++) = static_cast<uint8_t>(escape_cap_word_);
+                if (kStats) ++escape_count_word_;
+                memcpy(out_ptr, &word[0], word_len);
+                in_ptr += word_len;
+                out_ptr += word_len;
+                break;
+							} else if (cc == kWordCCFirstChar) {
+                word[0] = makeLowerCase(word[0]);
+                *(out_ptr++) = static_cast<uint8_t>(escape_cap_first_);
+                if (kStats) ++escape_count_first_;
+                memcpy(out_ptr, &word[0], word_len);
+                in_ptr += word_len;
+                out_ptr += word_len;
+                break;
+              }
+            }
+          }
 					if (*in_ptr == escape_char_ || *in_ptr == escape_cap_first_ || *in_ptr == escape_cap_word_ || *in_ptr >= 128) {
-						*(out_ptr++) = escape_char_;
+            if (kStats) ++escape_count_;
+						*(out_ptr++) = static_cast<uint8_t>(escape_char_);
 					}
 				}
 				*(out_ptr++) = last_char_ = *(in_ptr++);
@@ -640,38 +772,50 @@ public:
 					const bool first_cap = c == escape_cap_first_;
 					const bool all_cap = c == escape_cap_word_;
 					if (c >= 128 || first_cap || all_cap) {
-						if (first_cap || all_cap) c = *(in_ptr++);
-						std::string* word;
-						assert(c >= 128);
-						if (c < word2bstart) {
-							word = &words1b[c - word1bstart];
-						} else if (c < word3bstart) {
-							int c2 = *(in_ptr++);
-							assert(c2 >= 128);
-							word = &words2b[(c - word2bstart) * 128 + c2 - start_byte];
-						} else {
-							assert(c >= word3bstart);
-							int c2 = *(in_ptr++);
-							int c3 = *(in_ptr++);
-							assert(c2 >= start_byte);
-							assert(c3 >= start_byte);
-							word = &words3b[(c - word3bstart) * 128 * 128 + (c2 - start_byte) * 128 + c3 - start_byte];
-						}
-						const size_t word_len = word->length();
-						auto* word_start = &word->operator[](0);
-						std::copy(word_start, word_start + word_len, out_ptr);
-						const size_t capital_c = all_cap ? word_len : static_cast<size_t>(first_cap);
-						for (size_t i = 0; i < capital_c; ++i) {
-							out_ptr[i] = makeUpperCase(out_ptr[i]);
-						}
-						out_ptr += word_len;
-						last_char_ = out_ptr[-1];
-						continue;
-					}
+						if (first_cap || all_cap) {
+              c = *(in_ptr++);
+            }
+            if (c >= word1bstart) {
+  					  std::string* word;
+						  if (c < word2bstart) {
+							  word = &words1b[c - word1bstart];
+						  } else if (c < word3bstart) {
+							  int c2 = *(in_ptr++);
+							  assert(c2 >= 128);
+							  word = &words2b[(c - word2bstart) * 128 + c2 - start_byte];
+						  } else {
+							  assert(c >= word3bstart);
+							  int c2 = *(in_ptr++);
+							  int c3 = *(in_ptr++);
+							  assert(c2 >= start_byte);
+							  assert(c3 >= start_byte);
+							  word = &words3b[(c - word3bstart) * 128 * 128 + (c2 - start_byte) * 128 + c3 - start_byte];
+						  }
+						  const size_t word_len = word->length();
+						  auto* word_start = &word->operator[](0);
+						  std::copy(word_start, word_start + word_len, out_ptr);
+						  const size_t capital_c = all_cap ? word_len : static_cast<size_t>(first_cap);
+						  for (size_t i = 0; i < capital_c; ++i) {
+							  out_ptr[i] = makeUpperCase(out_ptr[i]);
+						  }
+						  out_ptr += word_len;
+						  last_char_ = out_ptr[-1];
+						  continue;
+            } else if (first_cap && c >= 'a' && c <= 'z') {
+              c = makeUpperCase(c);
+            } else if (all_cap) {
+              capital_mode_ = true;
+            }
+          }
 					if (c == escape_char_) {
 						c = *(in_ptr++);
 					}
 				}
+        if (capital_mode_ && c >= 'a' && c <= 'z') {
+          c = makeUpperCase(c);
+        } else {
+          capital_mode_ = false;
+        }
 				*(out_ptr++) = last_char_ = c;
 			}
 			dcheck(in_ptr <= in_limit);
@@ -691,9 +835,14 @@ public:
 			, last_char_(0) {
 			init();
 		}
+    ~Filter() {
+      if (kStats) {
+        std::cout << std::endl << "Escape " << escape_count_ << " word " << escape_count_word_ << " first " << escape_count_first_ << std::endl;
+      }
+    }
 		void init() {
-			for (size_t i = 0; i < 256; ++i) {
-				is_word_char_[i] = isWordChar(i);
+			for (int i = 0; i < 256; ++i) {
+				is_word_char_[i] = static_cast<uint8_t>(isWordChar(i));
 			}
 		}
 	};

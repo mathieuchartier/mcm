@@ -159,10 +159,10 @@ class X86BinaryFilter : public ByteBufferFilter<0x10000> {
 public:
 	X86BinaryFilter(Stream* stream) : ByteBufferFilter(stream), offset_(17), count_(0), opt_var_(0) {
 	}
-	virtual void forwardFilter(byte* ptr, size_t count) {
+	virtual void forwardFilter(uint8_t* ptr, size_t count) {
 		process<true>(ptr, count); 
 	}
-	virtual void reverseFilter(byte* ptr, size_t count) {
+	virtual void reverseFilter(uint8_t* ptr, size_t count) {
 		process<false>(ptr, count);
 	}
 	static uint32_t getMaxExpansion() {
@@ -180,13 +180,13 @@ private:
 	void process(uint8_t* ptr, size_t count) {
 		uint8_t* limit = ptr + count - 5;
 		if (encode) {
-			for (byte* cur_ptr = limit; cur_ptr >= ptr; --cur_ptr) {
+			for (uint8_t* cur_ptr = limit; cur_ptr >= ptr; --cur_ptr) {
 				if ((*cur_ptr & 0xFE) == 0xE8 || ((*cur_ptr & 0xF0) == 0x80 && cur_ptr > ptr && cur_ptr[-1] == 0x0F)) {
 					handleE8E9<encode>(cur_ptr, offset_ + (cur_ptr - ptr));
 				}
 			}
 		} else {
-			for (byte* cur_ptr = ptr; cur_ptr <= limit; ++cur_ptr) {
+			for (uint8_t* cur_ptr = ptr; cur_ptr <= limit; ++cur_ptr) {
 				if ((*cur_ptr & 0xFE) == 0xE8 || ((*cur_ptr & 0xF0) == 0x80 && cur_ptr > ptr && cur_ptr[-1] == 0x0F)) {
 					handleE8E9<encode>(cur_ptr, offset_ + (cur_ptr - ptr));
 				}
@@ -196,7 +196,7 @@ private:
 	}
 	template <bool encode>
 	inline void handleE8E9(uint8_t* ptr, size_t cur_offset) {
-		const byte sign_byte = ptr[4];
+		const uint8_t sign_byte = ptr[4];
 		if (sign_byte == 0xFF || sign_byte == 0x00) {
 			++count_;
 			uint32_t offset = 

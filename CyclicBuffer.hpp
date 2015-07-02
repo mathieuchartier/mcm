@@ -35,9 +35,9 @@ protected:
 	T *storage_, *data_;
 public:
 
-	forceinline size_t getPos() const {return pos_;}
-	forceinline size_t getMask() const {return mask_;}
-	forceinline T* getData() { return data_; }
+	ALWAYS_INLINE size_t getPos() const {return pos_;}
+	ALWAYS_INLINE size_t getMask() const {return mask_;}
+	ALWAYS_INLINE T* getData() { return data_; }
 
 	inline size_t prev(size_t pos, size_t count) const {
 		// Relies on integer underflow behavior. Works since pow 2 size.
@@ -49,7 +49,7 @@ public:
 	}
 
 	// Maximum size.
-	forceinline size_t getSize() const {
+	ALWAYS_INLINE size_t getSize() const {
 		return mask_ + 1;
 	}
 
@@ -64,17 +64,17 @@ public:
 		pos_ = 0;
 	}
 
-	forceinline void push(T val) {
+	ALWAYS_INLINE void push(T val) {
 		data_[pos_++ & mask_] = val;
 	}
 
-	forceinline T& operator [] (size_t offset) {
+	ALWAYS_INLINE T& operator [] (size_t offset) {
 		return data_[offset & mask_];
 	}
-	forceinline T operator [] (size_t offset) const {
+	ALWAYS_INLINE T operator [] (size_t offset) const {
 		return data_[offset & mask_];
 	}
-	forceinline T operator () (size_t offset) const {
+	ALWAYS_INLINE T operator () (size_t offset) const {
 		return data_[offset];
 	}
 
@@ -124,7 +124,7 @@ class CyclicDeque : public CyclicBuffer<T> {
 public:
 	CyclicDeque() : size_(0), front_pos_(0) {
 	}
-	forceinline size_t capacity() const {
+	ALWAYS_INLINE size_t capacity() const {
 		return this->mask_ + 1;
 	}
 	void pop_front(size_t count = 1) {
@@ -137,19 +137,19 @@ public:
 		++size_;
 		this->push(c);
 	}
-	forceinline T front() const {
+	ALWAYS_INLINE T front() const {
 		return this->data_[front_pos_ & this->mask_];
 	}
-	forceinline size_t size() const {
+	ALWAYS_INLINE size_t size() const {
 		return size_;
 	}
-	forceinline T operator [] (size_t offset) const {
+	ALWAYS_INLINE T operator [] (size_t offset) const {
 		return this->data_[(front_pos_ + offset) & this->mask_];
 	}
-	forceinline bool full() const {
+	ALWAYS_INLINE bool full() const {
 		return this->size() == capacity();
 	}
-	forceinline bool empty() const {
+	ALWAYS_INLINE bool empty() const {
 		return this->size() == 0;
 	}
 };

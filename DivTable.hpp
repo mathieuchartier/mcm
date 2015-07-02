@@ -38,15 +38,15 @@ public:
 		}
 	}
 
-	forceinline uint32_t size() const {
+	ALWAYS_INLINE uint32_t size() const {
 		return size_;
 	}
 
-	forceinline T& operator [] (T i) {
+	ALWAYS_INLINE T& operator [] (T i) {
 		return data[i];
 	}
 
-	forceinline T operator [] (T i) const {
+	ALWAYS_INLINE T operator [] (T i) const {
 		return data[i];
 	}
 };

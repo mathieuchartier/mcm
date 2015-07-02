@@ -23,7 +23,7 @@
 
 #include "Huffman.hpp"
 
-uint32_t HuffmanStatic::compressBytes(byte* in, byte* out, uint32_t count) {
+uint32_t HuffmanStatic::compressBytes(uint8_t* in, uint8_t* out, uint32_t count) {
 	size_t freq[256] = { 0 };
 
 	// Get frequencies
@@ -63,6 +63,4 @@ uint32_t HuffmanStatic::compressBytes(byte* in, byte* out, uint32_t count) {
 	return 0;
 }
 
-void HuffmanStatic::decompressBytes(byte* in, byte* out, uint32_t count) {
-
-}
+void HuffmanStatic::decompressBytes(uint8_t* in, uint8_t* out, uint32_t count) {}

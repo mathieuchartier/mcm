@@ -40,10 +40,10 @@ public:
 		prev_ = prev_storage_.get();
 		std::fill(prev_, prev_ + offset, 0U);
 	}
-	virtual void forwardFilter(byte* out, size_t* out_count, byte* in, size_t* in_count) {
+	virtual void forwardFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
 		process<true>(out, out_count, in, in_count);
 	}
-	virtual void reverseFilter(byte* out, size_t* out_count, byte* in, size_t* in_count) {
+	virtual void reverseFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
 		process<false>(out, out_count, in, in_count);
 	}
 	static uint32_t getMaxExpansion() {
@@ -56,7 +56,7 @@ public:
 	
 private:
 	template <bool encode>
-	void process(byte* out, size_t* out_count, byte* in, size_t* in_count) {
+	void process(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
 		const auto max_c = std::min(*out_count, *in_count);
 		if (max_c < bytes_) {
 			memcpy(out, in, max_c);

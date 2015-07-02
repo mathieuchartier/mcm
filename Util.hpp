@@ -24,12 +24,12 @@
 #ifndef _UTIL_HPP_
 #define _UTIL_HPP_
 
+#include <mutex>
 #include <cassert>
 #include <ctime>
 #include <emmintrin.h>
 #include <iostream>
 #include <mmintrin.h>
-#include <mutex>
 #include <ostream>
 #include <stdint.h>
 #include <sstream>
@@ -39,28 +39,13 @@
 #define OVERRIDE
 
 #ifdef WIN32
-#define forceinline __forceinline
+#define ALWAYS_INLINE __forceinline
 #else
-#define forceinline inline __attribute__((always_inline))
+#define ALWAYS_INLINE inline __attribute__((always_inline))
 #endif
-#define ALWAYS_INLINE forceinline
 
 #define no_alias __restrict
-
-#ifndef BYTE_DEFINED
-#define BYTE_DEFINED
-typedef unsigned char byte;
-#endif
-
-#ifndef UINT_DEFINED
-#define UINT_DEFINED
-typedef unsigned int uint;
-#endif
-
-#ifndef WORD_DEFINED
-#define WORD_DEFINED
-typedef unsigned short word;
-#endif
+#define rst no_alias
 
 // TODO: Implement these.
 #define LIKELY(x) x
@@ -87,7 +72,7 @@ static const uint32_t kCacheLineSize = 64; // Sandy bridge.
 static const uint32_t kPageSize = 4 * KB;
 static const uint32_t kBitsPerByte = 8;
 
-forceinline void prefetch(const void* ptr) {
+ALWAYS_INLINE void prefetch(const void* ptr) {
 #ifdef WIN32
 	_mm_prefetch((char*)ptr, _MM_HINT_T0);
 #else
@@ -95,30 +80,30 @@ forceinline void prefetch(const void* ptr) {
 #endif
 }
 
-forceinline static bool isUpperCase(int c) {
+ALWAYS_INLINE static bool isUpperCase(int c) {
 	return c >= 'A' && c <= 'Z';
 }
-forceinline static bool isLowerCase(int c) {
+ALWAYS_INLINE static bool isLowerCase(int c) {
 	return c >= 'a' && c <= 'z';
 }
-forceinline static bool isWordChar(int c) {
+ALWAYS_INLINE static bool isWordChar(int c) {
 	return isLowerCase(c) || isUpperCase(c) || c >= 128;
 }
-forceinline static int makeLowerCase(int c) {
+ALWAYS_INLINE static int makeLowerCase(int c) {
 	assert(isUpperCase(c));
 	return c - 'A' + 'a';
 }
-forceinline static int makeUpperCase(int c) {
+ALWAYS_INLINE static int makeUpperCase(int c) {
 	assert(isLowerCase(c));
 	return c - 'a' + 'A';
 }
 
 // Trust in the compiler
-forceinline uint32_t rotate_left(uint32_t h, uint32_t bits) {
+ALWAYS_INLINE uint32_t rotate_left(uint32_t h, uint32_t bits) {
 	return (h << bits) | (h >> (sizeof(h) * 8 - bits));
 }
 
-forceinline uint32_t rotate_right(uint32_t h, uint32_t bits) {
+ALWAYS_INLINE uint32_t rotate_right(uint32_t h, uint32_t bits) {
 	return (h << (sizeof(h) * 8 - bits)) | (h >> bits);
 }
 
@@ -132,12 +117,12 @@ struct shuffle {
 	};
 };
 
-forceinline bool isPowerOf2(uint32_t n) {
+ALWAYS_INLINE bool isPowerOf2(uint32_t n) {
 	return (n & (n - 1)) == 0;
 }
 
-forceinline uint bitSize(uint Value) {
-	uint Total = 0;
+ALWAYS_INLINE uint32_t bitSize(uint32_t Value) {
+	uint32_t Total = 0;
 	for (;Value;Value >>= 1, Total++);
 	return Total;
 }
@@ -175,7 +160,7 @@ inline uint32_t rand32() {
 	return rand() ^ (rand() << 16);
 }
 
-forceinline int fastAbs(int n) {
+ALWAYS_INLINE int fastAbs(int n) {
 	int mask = n >> 31;
 	return (n ^ mask) - mask;
 }
@@ -209,19 +194,19 @@ private:
 	std::mutex& mutex_;
 };
 
-forceinline void copy16bytes(byte* no_alias out, const byte* no_alias in, const byte* limit) {
+ALWAYS_INLINE void copy16bytes(uint8_t* no_alias out, const uint8_t* no_alias in) {
 	_mm_storeu_ps(reinterpret_cast<float*>(out), _mm_loadu_ps(reinterpret_cast<const float*>(in)));
 }
 
-forceinline static void memcpy16(void* dest, const void* src, size_t len) {
+ALWAYS_INLINE static void memcpy16(void* dest, const void* src, size_t len) {
 	uint8_t* no_alias dest_ptr = reinterpret_cast<uint8_t* no_alias>(dest);
 	const uint8_t* no_alias src_ptr = reinterpret_cast<const uint8_t* no_alias>(src);
 	const uint8_t* no_alias limit = dest_ptr + len;
 	*dest_ptr++ = *src_ptr++;
 	if (len >= sizeof(__m128)) {
-		const byte* no_alias limit2 = limit - sizeof(__m128);
+		const uint8_t* no_alias limit2 = limit - sizeof(__m128);
 		do {
-			copy16bytes(dest_ptr, src_ptr, limit);
+			copy16bytes(dest_ptr, src_ptr);
 			src_ptr += sizeof(__m128);
 			dest_ptr += sizeof(__m128);
 		} while (dest_ptr < limit2);
@@ -232,7 +217,7 @@ forceinline static void memcpy16(void* dest, const void* src, size_t len) {
 }
 
 template<typename CopyUnit>
-forceinline void fastcopy(byte* no_alias out, const byte* no_alias in, const byte* limit) {
+ALWAYS_INLINE void fastcopy(uint8_t* no_alias out, const uint8_t* no_alias in, const uint8_t* limit) {
 	do {
 		*reinterpret_cast<CopyUnit* no_alias>(out) = *reinterpret_cast<const CopyUnit* no_alias>(in);
 		out += sizeof(CopyUnit);
@@ -240,9 +225,9 @@ forceinline void fastcopy(byte* no_alias out, const byte* no_alias in, const byt
 	} while (in < limit);
 }
 
-forceinline void memcpy16unsafe(byte* no_alias out, const byte* no_alias in, const byte* limit) {
+ALWAYS_INLINE void memcpy16unsafe(uint8_t* no_alias out, const uint8_t* no_alias in, const uint8_t* limit) {
 	do {
-		copy16bytes(out, in, limit);
+		copy16bytes(out, in);
 		out += 16;
 		in += 16;
 	} while (out < limit);
@@ -256,7 +241,7 @@ public:
 	}
 
 protected:
-	byte buffer_[kMaxSize];
+	uint8_t buffer_[kMaxSize];
 };
 
 // Move to front.
@@ -278,7 +263,7 @@ public:
 		}
 		return data_.size();
 	}
-	forceinline T back() const {
+	ALWAYS_INLINE T back() const {
 		return data_.back();
 	}
 	size_t size() const {
@@ -391,12 +376,44 @@ std::string prettySize(uint64_t size);
 std::string formatNumber(uint64_t n);
 double clockToSeconds(clock_t c);
 std::string errstr(int err);
-std::vector<byte> randomArray(size_t size);
+std::vector<uint8_t> randomArray(size_t size);
 uint64_t computeRate(uint64_t size, uint64_t delta_time);
-std::vector<byte> loadFile(const std::string& name, uint32_t max_size = 0xFFFFFFF);
+std::vector<uint8_t> loadFile(const std::string& name, uint32_t max_size = 0xFFFFFFF);
 std::string trimExt(const std::string& str);
 std::string trimDir(const std::string& str);
 std::string getExt(const std::string& str);
 std::string getFileName(const std::string& str);
+
+static inline int Clamp(int a, int min, int max) {
+	if (a < min) a = min;
+	if (a > max) a = max;
+	return a;
+}
+
+static inline const size_t RoundDown(size_t n, size_t r) {
+	return n - n % r;
+}
+
+static inline const size_t RoundUp(size_t n, size_t r) {
+	return RoundDown(n + r - 1, r);
+}
+
+template <typename T>
+static void ReplaceSubstring(T* data, size_t old_pos, size_t len, size_t new_pos) {
+	if (old_pos == new_pos) {
+		return;
+	}
+	size_t cur_len = 256;
+	T temp[256];
+	// Delete cur and reinsert.
+	memcpy(temp, &data[old_pos], len * sizeof(T));
+	cur_len -= len;
+	memmove(&data[old_pos], &data[old_pos + len], (cur_len - old_pos) * sizeof(T));
+	// Reinsert.
+	new_pos = new_pos % (cur_len + 1);
+	memmove(&data[new_pos + len], &data[new_pos], (cur_len - new_pos) * sizeof(T));
+	memcpy(&data[new_pos], temp, len * sizeof(T));
+}
+
 
 #endif

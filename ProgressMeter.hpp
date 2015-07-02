@@ -44,11 +44,11 @@ public:
 	~ProgressMeter() {
 	}
 
-	forceinline uint64_t getCount() const {
+	ALWAYS_INLINE uint64_t getCount() const {
 		return count;
 	}
 
-	forceinline uint64_t addByte() {
+	ALWAYS_INLINE uint64_t addByte() {
 		return ++count;
 	}
 
@@ -84,7 +84,7 @@ public:
 		std::cout << oss.str() << "\t\r" << std::flush;
 	}
 
-	forceinline void addBytePrint(uint64_t total, const char* extra = "") {
+	ALWAYS_INLINE void addBytePrint(uint64_t total, const char* extra = "") {
 		if (!(addByte() & 0xFFFF)) {
 			// 4 updates per second.
 			// if (clock() - prev_time > 250) {
@@ -103,13 +103,13 @@ public:
 	}
 	virtual ~ProgressStream() { }
 	virtual int get() {
-		byte b;
+		uint8_t b;
 		if (read(&b, 1) == 0) {
 			return EOF;
 		}
 		return b;
 	}
-	virtual size_t read(byte* buf, size_t n) {
+	virtual size_t read(uint8_t* buf, size_t n) {
 		size_t ret = in_stream_->read(buf, n);
 		update_count_ += ret;
 		if (update_count_ > kUpdateInterval) {
@@ -119,10 +119,10 @@ public:
 		return ret;
 	}
 	virtual void put(int c) {
-		byte b = c;
+		uint8_t b = c;
 		write(&b, 1);
 	}
-	virtual void write(const byte* buf, size_t n) {
+	virtual void write(const uint8_t* buf, size_t n) {
 		out_stream_->write(buf, n);
 		addCount(n);
 	}

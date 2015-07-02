@@ -44,23 +44,23 @@ public:
 		error = false;
 	}
 
-	forceinline bool done() const {
+	ALWAYS_INLINE bool done() const {
 		return !extra;
 	}
 
-	forceinline uint32_t getAcc() const {
+	ALWAYS_INLINE uint32_t getAcc() const {
 		return acc;
 	}
 
-	forceinline bool err() const {
+	ALWAYS_INLINE bool err() const {
 		return error;
 	}
 
-	forceinline void clear_err() const {
+	ALWAYS_INLINE void clear_err() const {
 		error = false;
 	}
 
-	forceinline void update(uint32_t c) {// 5 extra bits
+	ALWAYS_INLINE void update(uint32_t c) {// 5 extra bits
 		if (extra) {
 			// Add another char to the UTF char.
 			acc = (acc << 6) | (c & 0x3F);

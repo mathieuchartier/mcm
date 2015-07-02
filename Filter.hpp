@@ -43,9 +43,15 @@ compres(&f, in_stream);
 */
 
 class Filter : public Stream {
+protected:
+  uint32_t opt_var_ = 0;
 public:
-	virtual void flush() {
-	}
+
+  void setOpt(uint32_t opt_var) {
+    opt_var_ = opt_var;
+  }
+
+	virtual void flush() {}
 };
 
 // Byte filter is complicated since filters are not necessarily a 1:1 mapping.
@@ -67,8 +73,8 @@ public:
 		}
 		return out_buffer_.get();
 	}
-	virtual size_t read(byte* buf, size_t n) {
-		const byte* start_ptr = buf;
+	virtual size_t read(uint8_t* buf, size_t n) {
+		const uint8_t* start_ptr = buf;
 		while (n != 0) {
 			size_t remain = out_buffer_.remain();
 			if (remain == 0) {
@@ -91,7 +97,7 @@ public:
 		}
 		in_buffer_.put(c);
 	}
-	virtual void write(const byte* buf, size_t n) {
+	virtual void write(const uint8_t* buf, size_t n) {
 		while (n != 0) {
 			size_t remain = in_buffer_.remain();
 			if (remain == 0) {
@@ -190,8 +196,8 @@ public:
 		}
 		return block_data_[block_pos_++];
 	}
-    virtual size_t read(byte* buf, size_t n) {
-		byte* ptr = buf;
+  virtual size_t read(uint8_t* buf, size_t n) {
+		uint8_t* ptr = buf;
 		while (n != 0) {
 			size_t remain = block_size_ - block_pos_;
 			if (remain == 0) {
@@ -214,7 +220,7 @@ public:
 		}
 		block_data_[block_pos_++] = c;
 	}
-	virtual void write(const byte* buf, size_t n) {
+	virtual void write(const uint8_t* buf, size_t n) {
 		while (n != 0) {
 			size_t remain = block_size_ - block_pos_;
 			if (remain == 0) {
@@ -228,8 +234,8 @@ public:
 			n -= count;
 		}
 	}
-	virtual void forwardFilter(byte* ptr, size_t size) = 0;
-	virtual void reverseFilter(byte* ptr, size_t size) = 0;
+	virtual void forwardFilter(uint8_t* ptr, size_t size) = 0;
+	virtual void reverseFilter(uint8_t* ptr, size_t size) = 0;
 
 private:
 	size_t refillRead() {
@@ -259,9 +265,9 @@ class IdentityBlockFilter : public ByteBufferFilter<0x10000> {
 public:
 	IdentityBlockFilter(Stream* stream) : ByteBufferFilter(stream) {
 	}
-	virtual void forwardFilter(byte* ptr, size_t count) {
+	virtual void forwardFilter(uint8_t* ptr, size_t count) {
 	}
-	virtual void reverseFilter(byte* ptr, size_t count) {
+	virtual void reverseFilter(uint8_t* ptr, size_t count) {
 	}
 	static uint32_t getMaxExpansion() {
 		return 1;

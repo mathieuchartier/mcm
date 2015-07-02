@@ -38,7 +38,7 @@ class Detector {
 	bool is_forbidden[256]; // Chars which don't appear in text often.
 	
 	// MZ pattern, todo replace with better detection.
-	typedef std::vector<byte> Pattern;
+	typedef std::vector<uint8_t> Pattern;
 	Pattern exe_pattern;
 
 	// Lookahed.
@@ -59,6 +59,7 @@ public:
 		kProfileText,
 		kProfileBinary,
 		kProfileWave16,
+		kProfileSimple,
 		kProfileSkip,  // SKip this block, hopefully due to dedupe, or maybe zero pad.
 		kProfileEOF,
 		kProfileCount,
@@ -183,7 +184,7 @@ public:
 		out_buffer_pos_ = out_buffer_size_ = 0;
 		for (auto& b : is_forbidden) b = false;
 
-		const byte forbidden_arr[] = {
+		const uint8_t forbidden_arr[] = {
 			0, 1, 2, 3, 4,
 			5, 6, 7, 8, 11,
 			12, 14, 15, 16, 17,
@@ -195,7 +196,7 @@ public:
 		
 		buffer_.resize(256 * KB);
 		// Exe pattern
-		byte p[] = {0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0xFF, 0xFF,};
+		uint8_t p[] = {0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0xFF, 0xFF,};
 		exe_pattern.clear();
 		for (auto& c : p) exe_pattern.push_back(c);
 	}
@@ -213,11 +214,11 @@ public:
 		}
 	}
 
-	forceinline bool empty() const {
+	ALWAYS_INLINE bool empty() const {
 		return size() == 0;
 	}
 
-	forceinline size_t size() const {
+	ALWAYS_INLINE size_t size() const {
 		return buffer_.size();
 	}
 
@@ -262,7 +263,7 @@ public:
 		sout.flush();
 	}
 
-	forceinline uint32_t at(uint32_t index) const {
+	ALWAYS_INLINE uint32_t at(uint32_t index) const {
 		assert(index < buffer_.size());
 		return buffer_[index];
 	}
@@ -345,7 +346,7 @@ public:
 			return DetectedBlock(kProfileEOF, 0);
 		}
 		if (false) {
-			return DetectedBlock(kProfileBinary, static_cast<uint32_t>(buffer_.size()));
+			return DetectedBlock(kProfileText, static_cast<uint32_t>(buffer_.size()));
 		}
 
 		size_t binary_len = 0;
@@ -357,7 +358,7 @@ public:
 				if (true && last_word_ == 0x52494646) {
 					refillRead();
 					// This is pretty bad, need a clean way to do it.
-					uint32_t fpos = pos;
+					uint32_t fpos = static_cast<uint32_t>(pos);
 					uint32_t chunk_size = readBytes(fpos, 4, false); fpos += 4;
 					uint32_t format = readBytes(fpos); fpos += 4;
 					// Format subchunk.
@@ -420,7 +421,7 @@ public:
 		return DetectedBlock(kProfileBinary, static_cast<uint32_t>(binary_len));
 	}
 
-	forceinline size_t readBytes(size_t pos, size_t bytes = 4, bool big_endian = true) {
+	ALWAYS_INLINE size_t readBytes(size_t pos, size_t bytes = 4, bool big_endian = true) {
 		if (pos + bytes > buffer_.size()) {
 			return 0;
 		}
@@ -451,7 +452,6 @@ public:
 	};
 
 	Deduplicator() {
-		init();
 		power_ = 1;
 		for (size_t i = 0; i < kWindowSize; ++i) {
 			power_ = power_ * kPrime;
@@ -460,27 +460,29 @@ public:
 	}
 	void init() {
 		hash_table_.clear();
-		hash_mask_ = 0xFFFFF;
+		hash_mask_ = 0x3FFFFF;
 		hash_table_.resize(hash_mask_ + 1);
 		resetPos();
 	}
-	DedupEntry* addChar(uint8_t in_byte, size_t file_idx) {
- 		auto& out_byte = window_[pos_ & kWindowMask];
-		rolling_hash_ = rolling_hash_ * kPrime + in_byte - out_byte * power_;
+	DedupEntry* update(size_t file_idx, bool force_write = false) {
 		auto masked_hash = static_cast<size_t>(rolling_hash_) & hash_mask_;
 		uint32_t hash_extra = static_cast<uint32_t>(rolling_hash_ >> 32);
 		auto& h = hash_table_[masked_hash];
 		// if ((hash_extra & hash_mask_) <= (hash_mask_ >> kWindowBits)) {
-		if (h.hash_extra_ == hash_extra) {
-			return &h;
-		} else if ((pos_ & kWindowMask) <= 0) {
+		DedupEntry* ret = nullptr;
+		if (h.hash_extra_ == hash_extra && (h.file_idx_ != file_idx || h.offset_ != pos_)) {
+			ret = &h;
+		} else if (force_write || (pos_ & kWindowMask) <= 0) {
 			h.offset_ = pos_;
 			h.file_idx_ = file_idx;
 			h.hash_extra_ = hash_extra;
 		} 
+		return ret;
+	}
+	void addChar(uint8_t in_byte) {
+ 		auto& out_byte = window_[pos_++ & kWindowMask];
+		rolling_hash_ = rolling_hash_ * kPrime + in_byte - out_byte * power_;
 		out_byte = in_byte;
-		pos_++;
-		return nullptr;
 	}
 	void resetPos() {
 		pos_ = 0;
@@ -508,17 +510,21 @@ private:
 // Detector analyzer, analyze a whole stream.
 class Analyzer {
 public:
+	static const bool kUseDedupe = false;
 	typedef std::vector<Detector::DetectedBlock> Blocks;
 
 	// Pos / len.
-	virtual std::pair<uint64_t, uint64_t> confirmDedupe(Deduplicator::DedupEntry* e, Stream* stream, size_t file_idx, uint64_t* pos) {
+	virtual std::pair<uint64_t, uint64_t> confirmDedupe(Deduplicator::DedupEntry* e, Stream* stream, size_t file_idx, uint64_t pos) {
 		return std::pair<uint64_t, uint64_t>(0u, 0u);
 	}
 	void analyze(Stream* stream, size_t file_idx = 0) {
 		Detector detector(stream);
 		detector.setOptVar(opt_var_);
 		detector.init();
-		dedupe_.resetPos();
+		if (kUseDedupe) {
+			dedupe_.init();
+			dedupe_.resetPos();
+		}
 		for (;;) {
 			next_block:
 			auto block = detector.detectBlock();
@@ -527,27 +533,35 @@ public:
 			}
 			for (size_t i = 0; i < block.length(); ++i) {
 				auto c = detector.popChar();
-				if (c == EOF) {
-					block.setLength(i);
-					break;
+				if (kUseDedupe && c != EOF) {
+					dedupe_.addChar(c);
 				}
-				auto* f = dedupe_.addChar(c, file_idx);
+				// If we are EOF, force update at the end of the file.
+				Deduplicator::DedupEntry* f = kUseDedupe ? dedupe_.update(file_idx, c == EOF) : nullptr;
+				// Deduplicator::DedupEntry* f = nullptr;
 				if (f != nullptr) {
 					auto old_pos = dedupe_.getPos();
-					auto new_pos = old_pos;
-					auto p = confirmDedupe(f, stream, file_idx, &new_pos);
+					auto p = confirmDedupe(f, stream, file_idx, old_pos);
 					auto dedupe_len = p.second;
 					if (dedupe_len > 0) {
+						auto new_pos = p.first;
 						check(new_pos <= old_pos);
 						uint64_t delta = old_pos - new_pos;
+						if (delta > 0) {
+							delta = delta;
+						}
+						auto orig_delta = delta;
 						// Remove any chars we saw in current block so far.
-						delta -= std::min(delta, static_cast<uint64_t>(i + 1));
-						auto future_chars = dedupe_len;
+						auto sub = std::min(delta, static_cast<uint64_t>(i + 1));
+						check(dedupe_len >= delta);
+						auto future_chars = dedupe_len - delta;
+						delta -= sub;
 						// Remove things from the "blocks" array until we are at the actual start.
 						check(delta <= dedupe_len);
 						while (delta > 0) {
 							check(!blocks_.empty());
-							auto len = blocks_.size();
+							if (blocks_.back().profile() == Detector::kProfileSkip) break;
+							auto len = blocks_.back().length();
 							auto sub = std::min(len, delta);
 							if (len - sub > 0) {
 								blocks_.back().setLength(len - sub);  // Removed part of the block.
@@ -558,13 +572,18 @@ public:
 						}
 						// Add skip block for how many bytes were deduped.
 						blocks_.push_back(Detector::DetectedBlock(Detector::kProfileSkip, dedupe_len));
-						for (uint64_t i = 1; i < future_chars; ++i) {
+						for (uint64_t j = 1; j < future_chars; ++j) {
 							int c = detector.popChar();
-							dedupe_.addChar(c, file_idx);
+							dedupe_.addChar(c);
+							dedupe_.update(file_idx);
 							check(c != EOF);
 						}
 						goto next_block;
 					}
+				}
+				if (c == EOF) {
+					block.setLength(i);
+					break;
 				}
 				if (block.profile() == Detector::kProfileText) {
 					dict_builder_.addChar(c);

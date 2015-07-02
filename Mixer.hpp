@@ -48,12 +48,12 @@ public:
 	}
 
 	// Calculate and return prediction.
-	forceinline uint32_t p(int pr) const {
+	ALWAYS_INLINE uint32_t p(int pr) const {
 		return (pr * w + (skew << 12)) >> fp_shift;
 	}
 
 	// Neural network learn, assumes probs are stretched.
-	forceinline void update(int p0, int pr, uint32_t bit, uint32_t pshift = 12) {
+	ALWAYS_INLINE void update(int p0, int pr, uint32_t bit, uint32_t pshift = 12) {
 		int err = ((bit << pshift) - pr) * 16;
 		int round = 1 << (fp_shift - 1);
 		w += (p0 * err + round) >> fp_shift;
@@ -61,119 +61,112 @@ public:
 	}
 };
 
-template <typename T, const uint32_t weights, const uint32_t fp_shift = 16, const uint32_t wshift = 7>
+template <typename T, const uint32_t kWeights>
 class Mixer {
 public:
-	static const bool kUseRound = true;
-	static const int round = kUseRound ? (1 << (fp_shift - 1)) : 0u;
 	// Each mixer has its own set of weights.
-	T w[weights + 1]; // Add dummy skew weight at the end.
+	T w_[kWeights];
+
+	// Skew weiht.
+	int skew_;
+
 	// Current learn rate.
-	int learn;
+	int learn_;
 public:
 	Mixer() {
-		init();
+		Init(12);
 	}
 
-	forceinline static uint32_t size() {
-		return weights + 1;
+	ALWAYS_INLINE static uint32_t NumWeights() {
+		return kWeights;
 	}
 
-	forceinline static uint32_t shift() {
-		return fp_shift;
+	ALWAYS_INLINE int GetLearn() const {
+		return learn_;
 	}
 
-	forceinline int getLearn() const {
-		return learn;
+	ALWAYS_INLINE T GetWeight(uint32_t index) const {
+		assert(index < kWeights);
+		return w_[index];
 	}
 
-	forceinline T getWeight(uint32_t index) const {
-		assert(index <= weights);
-		return w[index];
+	ALWAYS_INLINE void SetWeight(uint32_t index, T weight) {
+		assert(index < kWeights);
+		w_[index] = weight;
 	}
 
-	void init(uint32_t learn_rate = 366) {
-		if (weights != 0) {
-			int wdiv = weights;
-			for (auto& cw : w) {
-				cw = static_cast<T>((1 << fp_shift) / wdiv);
-			}
+	void Init(int prob_shift) {
+		for (auto& cw : w_) {
+			cw = static_cast<T>((1 << prob_shift) / kWeights);
 		}
-		w[weights] = 0;
-		learn = learn_rate;
-	}
-
-	// Calculate and return prediction.
-	forceinline int p(int* probs) const {
-		int ptotal = 0;
-		for (uint32_t i = 0; i < weights; ++i) {
-			ptotal += probs[i] * int(w[i]);
-		}
-		ptotal += w[weights] << wshift;
-		return ptotal >> fp_shift;
+		// Last weight is skew.
+		skew_ = 0;
+		learn_ = 0;
 	}
 
 	// "Fast" version
-	forceinline int p(int shift,
-		int p0 = 0, int p1 = 0, int p2 = 0, int p3 = 0, int p4 = 0,
-		int p5 = 0, int p6 = 0, int p7 = 0, int p8 = 0, int p9 = 0) const {
-		int ptotal = 0;
-		if (weights > 0) ptotal += p0 * static_cast<int>(w[0]);
-		if (weights > 1) ptotal += p1 * static_cast<int>(w[1]);
-		if (weights > 2) ptotal += p2 * static_cast<int>(w[2]);
-		if (weights > 3) ptotal += p3 * static_cast<int>(w[3]);
-		if (weights > 4) ptotal += p4 * static_cast<int>(w[4]);
-		if (weights > 5) ptotal += p5 * static_cast<int>(w[5]);
-		if (weights > 6) ptotal += p6 * static_cast<int>(w[6]);
-		if (weights > 7) ptotal += p7 * static_cast<int>(w[7]);
-		if (weights > 8) ptotal += p8 * static_cast<int>(w[8]);
-		if (weights > 9) ptotal += p9 * static_cast<int>(w[9]);
-		ptotal += w[weights] << shift;
-		return ptotal >> fp_shift;
+	ALWAYS_INLINE int P(
+		int prob_shift,
+		int p0 = 0, int p1 = 0, int p2 = 0, int p3 = 0, int p4 = 0, int p5 = 0, int p6 = 0, int p7 = 0,
+		int p8 = 0, int p9 = 0, int p10 = 0, int p11 = 0, int p12 = 0, int p13 = 0, int p14 = 0, int p15 = 0) const {
+		// int64_t ptotal = skew_;
+    int64_t ptotal = skew_;
+		if (kWeights > 0) ptotal += p0 * static_cast<int>(w_[0]);
+		if (kWeights > 1) ptotal += p1 * static_cast<int>(w_[1]);
+		if (kWeights > 2) ptotal += p2 * static_cast<int>(w_[2]);
+		if (kWeights > 3) ptotal += p3 * static_cast<int>(w_[3]);
+		if (kWeights > 4) ptotal += p4 * static_cast<int>(w_[4]);
+		if (kWeights > 5) ptotal += p5 * static_cast<int>(w_[5]);
+		if (kWeights > 6) ptotal += p6 * static_cast<int>(w_[6]);
+		if (kWeights > 7) ptotal += p7 * static_cast<int>(w_[7]);
+		if (kWeights > 8) ptotal += p8 * static_cast<int>(w_[8]);
+		if (kWeights > 9) ptotal += p9 * static_cast<int>(w_[9]);
+		if (kWeights > 10) ptotal += p10 * static_cast<int>(w_[10]);
+		if (kWeights > 11) ptotal += p11 * static_cast<int>(w_[11]);
+		if (kWeights > 12) ptotal += p12 * static_cast<int>(w_[12]);
+		if (kWeights > 13) ptotal += p13 * static_cast<int>(w_[13]);
+		if (kWeights > 14) ptotal += p14 * static_cast<int>(w_[14]);
+		if (kWeights > 15) ptotal += p15 * static_cast<int>(w_[15]);
+		return ptotal >> prob_shift;
 	}
 
-	// Neural network learn, assumes probs are stretched.
-	forceinline void update(int* probs, int pr, int32_t bit, uint32_t pshift = 12, uint32_t limit = 13) {
-		int err = ((bit << pshift) - pr) * learn;
-		for (uint32_t i = 0; i < weights; ++i) {
-			w[i] += (probs[i] * err + round) >> fp_shift;
-		}
-		static const uint32_t sq_learn = 9;
-		w[weights] += (err + (1 << (sq_learn - 1))) >> sq_learn;
-		learn -= learn > limit;
-	}
-
-	// "Fast" version
-	forceinline bool update(int pr, uint32_t bit, uint32_t pshift = 12, int limit = 24, int delta = 1,
-		int p0 = 0, int p1 = 0, int p2 = 0, int p3 = 0, int p4 = 0,
-		int p5 = 0, int p6 = 0, int p7 = 0, int p8 = 0, int p9 = 0) {
-		const int err = ((bit << pshift) - pr) * learn;
-		const int delta_round = round >> (pshift - 3);
+	ALWAYS_INLINE bool Update(int pr, uint32_t bit,
+		uint32_t prob_shift = 12, int limit = 24, int delta = 1, int skew_learn = 9,
+		int learn_mult = 31, size_t shift = 16,
+		int p0 = 0, int p1 = 0, int p2 = 0, int p3 = 0, int p4 = 0, int p5 = 0, int p6 = 0, int p7 = 0,
+		int p8 = 0, int p9 = 0, int p10 = 0, int p11 = 0, int p12 = 0, int p13 = 0, int p14 = 0, int p15 = 0) {
+		const int err = ((bit << prob_shift) - pr) * learn_mult;
+		// const int delta_round = (1 << shift) >> (prob_shift - delta);
+    const int delta_round = 250;
 		const bool ret = err < -delta_round || err > delta_round;
-		if (ret) { // Branch is around 50 / 50.
-			updateRec<0>(p0, err);
-			updateRec<1>(p1, err);
-			updateRec<2>(p2, err);
-			updateRec<3>(p3, err);
-			updateRec<4>(p4, err);
-			updateRec<5>(p5, err);
-			updateRec<6>(p6, err);
-			updateRec<7>(p7, err);
-			updateRec<8>(p8, err);
-			updateRec<9>(p9, err);
-			const size_t sq_learn = 9;
-			const size_t sq_round = 1 << (sq_learn - 1);
-			w[weights] += (err + sq_round) >> sq_learn;
-			learn -= learn > limit;
+		if (ret) {
+			UpdateRec<0>(p0, err, shift);
+			UpdateRec<1>(p1, err, shift);
+			UpdateRec<2>(p2, err, shift);
+			UpdateRec<3>(p3, err, shift);
+			UpdateRec<4>(p4, err, shift);
+			UpdateRec<5>(p5, err, shift);
+			UpdateRec<6>(p6, err, shift);
+			UpdateRec<7>(p7, err, shift);
+			UpdateRec<8>(p8, err, shift);
+			UpdateRec<9>(p9, err, shift);
+			UpdateRec<10>(p10, err, shift);
+			UpdateRec<11>(p11, err, shift);
+			UpdateRec<12>(p12, err, shift);
+			UpdateRec<13>(p13, err, shift);
+			UpdateRec<14>(p14, err, shift);
+			UpdateRec<15>(p15, err, shift);
+			skew_ += err << skew_learn;
+      learn_ += learn_ < limit;
 		}
 		return ret;
 	}
 
 private:
-	template <const int index>
-	forceinline void updateRec(int p, int err) {
-		if (weights > index) {
-			w[index] += (p * err + round) >> fp_shift;
+	template <const int kIndex>
+	ALWAYS_INLINE void UpdateRec(int p, int err, size_t shift) {
+		if (kWeights > kIndex) {
+			w_[kIndex] += (static_cast<int64_t>(p) * static_cast<int64_t>(err)) >> shift;
 		}
 	}
 };
@@ -192,7 +185,7 @@ public:
 		init();
 	}
 
-	forceinline int getLearn() const {
+	ALWAYS_INLINE int getLearn() const {
 		return learn;
 	}
 
@@ -229,7 +222,7 @@ public:
 	}
 
 	// Calculate and return prediction.
-	forceinline uint32_t p(__m128i probs) const {
+	ALWAYS_INLINE uint32_t p(__m128i probs) const {
 		__m128i dp = _mm_madd_epi16(w, probs);
 		// p0*w0+p1*w1, ...
 
@@ -242,7 +235,7 @@ public:
 	}
 
 	// Neural network learn, assumes probs are stretched.
-	forceinline bool update(__m128i probs, int pr, uint32_t bit, uint32_t pshift = 12, uint32_t limit = 13) {
+	ALWAYS_INLINE bool update(__m128i probs, int pr, uint32_t bit, uint32_t pshift = 12, uint32_t limit = 13) {
 		int err = ((bit << pshift) - pr) * learn;
 		bool ret = false;
 		if (fastAbs(err) >= (round >> (pshift - 1))) {
@@ -280,11 +273,11 @@ public:
 		init();
 	}
 
-	forceinline int getLearn() const {
+	ALWAYS_INLINE int getLearn() const {
 		return learn;
 	}
 
-	forceinline float getWeight(uint32_t index) const {
+	ALWAYS_INLINE float getWeight(uint32_t index) const {
 		assert(index < weights);
 		return w[index];
 	}
@@ -301,7 +294,7 @@ public:
 	}
 
 	// "Fast" version
-	forceinline float p(
+	ALWAYS_INLINE float p(
 		float p0 = 0, float p1 = 0, float p2 = 0, float p3 = 0,
 		float  p4 = 0, float p5 = 0, float p6 = 0, float p7 = 0) const {
 		float ptotal = 0;
@@ -318,7 +311,7 @@ public:
 	}
 
 	// "Fast" version
-	forceinline bool update(
+	ALWAYS_INLINE bool update(
 			float p0, float p1, float p2, float p3, float p4, float p5, float p6, float p7, 
 			int pr, uint32_t bit, uint32_t pshift = 12, uint32_t limit = 13) {		
 		float err = float(((1 ^ bit) << pshift) - pr) * learn * (1.0f / 256.0f);
@@ -338,10 +331,45 @@ public:
 
 private:
 	template <const int index>
-	forceinline void updateRec(float p, float err) {
+	ALWAYS_INLINE void updateRec(float p, float err) {
 		if (weights > index) {
 			w[index] += p * err;
 		}
+	}
+};
+
+template <typename Mixer>
+class MixerArray {
+	std::vector<Mixer> mixers_;
+	Mixer* cur_mixers_;
+public:
+	template <typename... Args>
+	void Init(size_t count, Args... args) {
+		mixers_.resize(count);
+		for (auto& m : mixers_) {
+			m.Init(args...);
+		}
+		SetContext(0);
+	}
+
+	ALWAYS_INLINE size_t Size() const {
+		return mixers_.size();
+	}
+
+	ALWAYS_INLINE void SetContext(size_t ctx) {
+		cur_mixers_ = &mixers_[ctx];
+	}
+
+	ALWAYS_INLINE size_t GetContext() const {
+		return cur_mixers_ - &mixers_[0];
+	}
+
+	ALWAYS_INLINE Mixer* GetMixer() {
+		return cur_mixers_;
+	}
+
+	ALWAYS_INLINE Mixer* GetMixer(size_t idx) {
+		return mixers_[idx];
 	}
 };
 

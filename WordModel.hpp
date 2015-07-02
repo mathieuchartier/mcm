@@ -6,8 +6,8 @@
 class WordModel {
 public:
 	// Hashes.
-	uint32_t prev;
-	uint32_t h1, h2;
+	uint64_t prev;
+	uint64_t h1, h2;
 
 	// UTF decoder.
 	UTF8Decoder<false> decoder;
@@ -20,39 +20,43 @@ public:
 	static const uint32_t transform_table_size = 256;
 	uint32_t transform[transform_table_size];
 
-	uint32_t opt_var;
+	uint32_t opt_var_ = 0;
+
 	void setOpt(uint32_t n) {
-		opt_var = n;
+		opt_var_ = n;
 	}
 
-	forceinline uint32_t& trans(char c) {
+	ALWAYS_INLINE uint32_t& trans(char c) {
 		uint32_t index = (uint32_t)(uint8_t)c;
 		check(index < transform_table_size);
 		return transform[index];
 	}
 
-	WordModel() : opt_var(0) { 
-	}
+	WordModel() {}
 
-	void init() {
+	void init(uint8_t* reorder) {
 		uint32_t index = 0;
 		for (auto& t : transform) t = transform_table_size;
 		for (uint32_t i = 'a'; i <= 'z'; ++i) {
-			transform[i] = index++;
+			transform[reorder[i]] = index++;
 		}
 		for (uint32_t i = 'A'; i <= 'Z'; ++i) {
-			transform[i] = transform[makeLowerCase(static_cast<int>(i))];
+			transform[reorder[i]] = transform[reorder[makeLowerCase(static_cast<int>(i))]];
 		}
+		// trans('"') = index++;
+		// trans('&') = index++;
+		// trans('<') = index++;
+		// trans('{') = index++;
+    // trans(3) = index++;
+		// trans(41) = index++;
+		// trans(33) = index++;
+    // trans('[') = index++;
+    // trans(3) = index++;
+    // trans(38) = index++;
+    // trans(6) = index++;
+    // trans(92) = index++;
+
 #if 0
-		for (uint32_t i = '0'; i <= '9'; ++i) {
-			transform[i] = index++;
-		}
-#endif
-		// 34 38
-		trans('"') = index++;
-		trans('&') = index++;
-		trans('<') = index++;
-		trans('{') = index++;
 		trans('À') = trans('à') = index++;
 		trans('Á') = trans('á') = index++;
 		trans('Â') = trans('â') = index++;
@@ -97,14 +101,14 @@ public:
 		trans('Ú') = trans('ú') = index++;
 		trans('Û') = trans('û') = index++;
 		trans('Ü') = trans('ü') = index++;
-
-		if (true) {
+#endif
+		// if (transform[opt_var_] == transform_table_size) transform[opt_var_] = index++;
+		if (true)
 			for (size_t i = 128; i < 256; ++i) {
-				if (transform[i] == transform_table_size) {
-					transform[i] = index++;
+				if (transform[reorder[i]] == transform_table_size) {
+					transform[reorder[i]] = index++;
 				}
 			}
-		}
 
 		len = 0;
 		prev = 0;
@@ -112,64 +116,122 @@ public:
 		decoder.init();
 	}
 
-	forceinline void reset() {
+	ALWAYS_INLINE void reset() {
 		h1 = 0x1F20239A;
 		h2 = 0xBE5FD47A;
 		len = 0;
 	}
 
-	forceinline uint32_t getHash() const {
-		return h1 * 11 + h2 * 7;
+	ALWAYS_INLINE uint32_t getHash() const {
+		auto ret = (h1 * 15) ^ (h2 * 41);
+		ret ^= ret >> 4;
+		return ret;
 	}
 
-	forceinline uint32_t getPrevHash() const {
+	ALWAYS_INLINE uint32_t getPrevHash() const {
 		return prev;
 	}
 
-	forceinline uint32_t get01Hash() const {
+	ALWAYS_INLINE uint32_t getMixedHash() const {
+		auto ret = getHash();
+		if (len < 3) {
+			ret ^= getPrevHash();
+		}
+		return ret;
+	}
+
+	ALWAYS_INLINE uint32_t get01Hash() const {
 		return getHash() ^ getPrevHash();
 	}
 
-	forceinline size_t getLength() const {
+	ALWAYS_INLINE size_t getLength() const {
 		return len;
 	}
 
-	void update(uint8_t c) {
+	// Return true if just finished word.
+	bool update(uint8_t c) {
 		const auto cur = transform[c];
 		if (LIKELY(cur != transform_table_size)) {
-			h1 = hashFunc(cur, h1);
-			h2 = h1 * 4;
-			len += len < kMaxLen;
+			h1 = HashFunc(cur, h1);
+			h2 = h1 * 24;
+			len += len < 16;
 		} else if (len) {
-			prev = rotate_left(getHash(), 21);
+			prev = rotate_left(getHash(), 14);
 			reset();
+			return true;
 		}
+		return false;
 	}
 
-	forceinline uint32_t hashFunc(uint32_t c, uint32_t h) {
-		h *= 61;
+	ALWAYS_INLINE uint64_t HashFunc(uint64_t c, uint64_t h) {
+		/*
+		h ^= (h * (1 + 24 * 1)) >> 24;
+		// h *= 61;
 		h += c;
-		h += rotate_left(h, 10);
+		h += rotate_left(h, 12);
 		return h ^ (h >> 8);
+		*/
+		return (h * 43) + c;
+	}
+};
+
+class XMLWordModel : public WordModel {
+public:
+	void init(uint8_t* reorder) {
+		for (auto& c : stack_) c = 0;
+		stack_pos_ = 0;
+		last_symbol_ = 0;
+		tag_ = kTagNone;
+		WordModel::init(reorder);
 	}
 
-	void updateUTF(char c) {
-		decoder.update(c);
-		uint32_t cur = decoder.getAcc();
-		if (decoder.done()) {
-			if (cur < 256) cur = transform[cur];
-			if (LIKELY(cur != transform_table_size)) {
-				h1 = hashFunc(cur, h1);
-				h2 = h1 * 4;
-				len += len < kMaxLen;
-			} else if (len) {
-				prev = rotate_left(getHash(), 21);
-				reset();
+	void update(uint8_t c) {
+		bool update = WordModel::update(c);
+		if (c == '<') {
+			last_symbol_ = c;
+			tag_ = kTagOpen; 
+		} else if (c == '/' && last_symbol_ == '<') {
+			last_symbol_ = c;
+			tag_ = kTagClose;
+		} else if (update) {
+			if (tag_ == kTagOpen) {
+				// st_[stack_pos_ & kStackMask] = s;
+				stack_[stack_pos_++ & kStackMask] = prev;
+			} else if (tag_ == kTagClose && c == '>') {
+				if (stack_[--stack_pos_ & kStackMask] != prev) {
+					stack_pos_ = 0;
+				} else {
+					int x = 2;
+				}
 			}
-		} else {
-			h2 = hashFunc(cur, h2);
+			// Done word.
+			tag_ = kTagNone;
+//			s = "";
 		}
+		// s += c;
 	}
+
+	uint32_t getMixedHash() {
+		auto ret = WordModel::getMixedHash();
+		if (tag_ == kTagClose) {
+			ret ^= stack_[(stack_pos_ - 1) & kStackMask] * 3;
+		}
+		return ret;
+	}
+
+private:
+	enum CurrentTag {
+		kTagOpen,
+		kTagClose,
+		kTagNone,
+	};
+	// std::string s;
+	CurrentTag tag_;
+	static const uint32_t kStackMask = 255;
+	uint32_t stack_[kStackMask + 1];
+	// std::string st_[kStackMask + 1];
+	uint32_t stack_pos_;
+	uint8_t last_symbol_ = 0;
 };
 
 #endif

@@ -23,6 +23,8 @@
 
 #include "Compressor.hpp"
 
+#include <memory>
+
 void CompressorFactories::init() {
 	if (instance == nullptr) {
 		instance = new CompressorFactories;
@@ -34,12 +36,12 @@ size_t MemCopyCompressor::getMaxExpansion(size_t in_size) {
 	return in_size;
 }
 
-size_t MemCopyCompressor::compressBytes(byte* in, byte* out, size_t count) {
+size_t MemCopyCompressor::compress(uint8_t* in, uint8_t* out, size_t count) {
 	memcpy16(out, in, count);
 	return count;
 }
 
-void MemCopyCompressor::decompressBytes(byte* in, byte* out, size_t count) {
+void MemCopyCompressor::decompress(uint8_t* in, uint8_t* out, size_t count) {
 	memcpy16(out, in, count);
 }
 
@@ -47,7 +49,7 @@ size_t BitStreamCompressor::getMaxExpansion(size_t in_size) {
 	return in_size * kBits / 8 + 100;
 }
 
-size_t BitStreamCompressor::compressBytes(byte* in, byte* out, size_t count) {
+size_t BitStreamCompressor::compressBytes(uint8_t* in, uint8_t* out, size_t count) {
 	MemoryBitStream<true> stream_out(out);
 	for (; count; --count) {
 		stream_out.writeBits(*in++, kBits);
@@ -56,7 +58,7 @@ size_t BitStreamCompressor::compressBytes(byte* in, byte* out, size_t count) {
 	return stream_out.getData() - out;
 }
 
-void BitStreamCompressor::decompressBytes(byte* in, byte* out, size_t count) {
+void BitStreamCompressor::decompressBytes(uint8_t* in, uint8_t* out, size_t count) {
 	MemoryBitStream<true> stream_in(in);
 	for (size_t i = 0; i < count; ++i) {
 		out[i] = stream_in.readBits(kBits);
@@ -65,7 +67,7 @@ void BitStreamCompressor::decompressBytes(byte* in, byte* out, size_t count) {
 
 void Store::compress(Stream* in, Stream* out, uint64_t count) {
 	static const uint64_t kBufferSize = 8 * KB;
-	byte buffer[kBufferSize];
+	uint8_t buffer[kBufferSize];
 	while (count > 0) {
 		const size_t read = in->read(buffer, std::min(count, kBufferSize));
 		if (read == 0) {
@@ -78,7 +80,7 @@ void Store::compress(Stream* in, Stream* out, uint64_t count) {
 
 void Store::decompress(Stream* in, Stream* out, uint64_t count) {
 	static const uint64_t kBufferSize = 8 * KB;
-	byte buffer[kBufferSize];
+	uint8_t buffer[kBufferSize];
 	while (count > 0) {
 		const size_t read = in->read(buffer, std::min(count, kBufferSize));
 		if (read == 0) {
@@ -121,4 +123,38 @@ Compressor* CompressorFactories::makeCompressor(uint32_t type) {
 	auto* factory = CompressorFactories::getInstance()->getFactory(type);
 	check(factory != nullptr);
 	return factory->create();
+}
+
+void MemoryCompressor::compress(Stream* in, Stream* out, uint64_t max_count) {
+	std::unique_ptr<uint8_t[]> in_buffer(new uint8_t[kBufferSize]);
+	std::unique_ptr<uint8_t[]> out_buffer(new uint8_t[getMaxExpansion(kBufferSize)]);
+	for (;;) {
+		const size_t n = in->read(in_buffer.get(), std::min(kBufferSize, max_count));
+		if (n == 0) {
+			break;
+		}
+		const size_t out_bytes = compress(in_buffer.get(), out_buffer.get(), n);
+		out->leb128Encode(out_bytes);
+		out->write(out_buffer.get(), out_bytes);
+		max_count -= n;
+	}
+	out->leb128Encode(0);
+}
+
+void MemoryCompressor::decompress(Stream* in, Stream* out, uint64_t max_count) {
+	const size_t in_buffer_size = getMaxExpansion(kBufferSize);
+	std::unique_ptr<uint8_t[]> in_buffer(new uint8_t[in_buffer_size]);
+	std::unique_ptr<uint8_t[]> out_buffer(new uint8_t[kBufferSize]);
+	for (;;) {
+		size_t size = in->leb128Decode();
+		check(size <= in_buffer_size);
+		const size_t n = in->read(in_buffer.get(), size);
+		check(n == size);
+		if (n == 0) {
+			break;
+		}
+		decompress(in_buffer.get(), out_buffer.get(), n);
+		out->write(out_buffer.get(), kBufferSize);
+		max_count -= kBufferSize;
+	}
 }

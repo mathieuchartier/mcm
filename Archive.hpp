@@ -47,6 +47,7 @@ enum CompLevel {
 	kCompLevelMid,
 	kCompLevelHigh,
 	kCompLevelMax,
+	kCompLevelSimple,
 };
 std::ostream& operator<<(std::ostream& os, CompLevel comp_level);
 
@@ -98,8 +99,8 @@ public:
 
 	private:
 		char magic_[10]; // MCMARCHIVE
-		uint16_t major_version_;
-		uint16_t minor_version_;
+		uint16_t major_version_ = kCurMajorVersion;
+		uint16_t minor_version_ = kCurMinorVersion;
 	};
 
 	class Algorithm {
@@ -110,7 +111,7 @@ public:
 		Compressor* createCompressor();
 		void read(Stream* stream);
 		void write(Stream* stream);
-		Filter* createFilter(Stream* stream, Analyzer* analyzer);
+		Filter* createFilter(Stream* stream, Analyzer* analyzer, size_t opt_var = 0);
 		Detector::Profile profile() const {
 			return profile_;
 		}
@@ -128,14 +129,15 @@ public:
 		Algorithm algorithm_;
 		std::vector<FileSegmentStream::FileSegments> segments_;
 		// Not stored, obtianed from segments.
-		uint64_t total_size_;
+		uint64_t total_size_ = 0u;
 
-		SolidBlock();
+		SolidBlock() = default;
+		SolidBlock(const Algorithm& algorithm) : algorithm_(algorithm) {}
 		void write(Stream* stream);
 		void read(Stream* stream);
 	};
 
-	class Blocks : public std::vector<SolidBlock*> {
+	class Blocks : public std::vector<std::unique_ptr<SolidBlock>> {
 	public:
 		void write(Stream* stream);
 		void read(Stream* stream);
@@ -159,6 +161,12 @@ public:
 		return true;
 	}
 
+  bool setOpts(size_t* vars) {
+    opt_vars_ = vars;
+    setOpt(vars[0]);
+    return true;
+  }
+
 	void writeBlocks();
 	void readBlocks();
 
@@ -176,6 +184,7 @@ private:
 	Header header_;
 	CompressionOptions options_;
 	size_t opt_var_;
+  size_t* opt_vars_ = nullptr;
 	FileList files_;  // File list.
 	Blocks blocks_;  // Solid blocks.
 

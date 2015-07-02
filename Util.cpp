@@ -1,5 +1,6 @@
 #include "Util.hpp"
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
@@ -46,8 +47,8 @@ std::string errstr(int err) {
 #endif
 }
 
-std::vector<byte> randomArray(uint32_t size) {
-	std::vector<byte> ret;
+std::vector<uint8_t> randomArray(uint32_t size) {
+	std::vector<uint8_t> ret;
 	for (uint32_t i = 0; i < size; ++i) {
 		ret.push_back(rand() % 256);
 	}
@@ -62,15 +63,15 @@ uint64_t computeRate(uint64_t size, uint64_t delta_time) {
 	return static_cast<uint64_t>(size / seconds);
 }
 
-std::vector<byte> loadFile(const std::string& name, uint32_t max_size) {
-	std::vector<byte> ret;
+std::vector<uint8_t> loadFile(const std::string& name, uint32_t max_size) {
+	std::vector<uint8_t> ret;
 	std::ifstream fin(name.c_str(), std::ios_base::in | std::ios_base::binary);
 	for (uint32_t i = 0; i < max_size; ++i) {
 		int c = fin.get();
 		if (fin.eof()) {
 			break;
 		}
-		ret.push_back(static_cast<byte>(static_cast<uint>(c)));
+		ret.push_back(static_cast<uint8_t>(static_cast<uint32_t>(c)));
 	}
 	return ret;
 }
