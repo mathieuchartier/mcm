@@ -1,9 +1,9 @@
 /*	MCM file compressor
 
-	Copyright (C) 2015, Google Inc.
-	Authors: Mathieu Chartier
+  Copyright (C) 2015, Google Inc.
+  Authors: Mathieu Chartier
 
-	LICENSE
+  LICENSE
 
     This file is part of the MCM file compressor.
 
@@ -35,65 +35,65 @@
 // E8/E9 <other> -> E8/E9 <other>
 class DeltaFilter : public ByteStreamFilter<16 * KB, 20 * KB> {
 public:
-	DeltaFilter(Stream* stream, uint32_t bytes, uint32_t offset /* multiple of bytes*/) : ByteStreamFilter(stream), prev_(0), bytes_(bytes), offset_(offset), pos_(0) {
-		prev_storage_.reset(new uint32_t[offset]);
-		prev_ = prev_storage_.get();
-		std::fill(prev_, prev_ + offset, 0U);
-	}
-	virtual void forwardFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
-		process<true>(out, out_count, in, in_count);
-	}
-	virtual void reverseFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
-		process<false>(out, out_count, in, in_count);
-	}
-	static uint32_t getMaxExpansion() {
-		return 1;
-	}
-	void dumpInfo() const {
-	}
-	void setSpecific(uint32_t s) {
-	}
-	
-private:
-	template <bool encode>
-	void process(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
-		const auto max_c = std::min(*out_count, *in_count);
-		if (max_c < bytes_) {
-			memcpy(out, in, max_c);
-			*out_count = *in_count = max_c;
-		} else {
-			size_t i;
-			for (i = 0; i <= max_c - bytes_; i += bytes_) {
-				uint32_t cur = static_cast<uint32_t>(readBytes<uint32_t, false>(in + i, bytes_));
-				uint32_t prev = prev_[pos_];
-				if (encode) {
-					prev_[pos_] = cur;
-					cur -= prev;
-				} else {
-					cur += prev;
-					prev_[pos_] = cur;
-				}
-				writeBytes<uint32_t, false>(out + i, bytes_, cur);
-				if (++pos_ == offset_) {
-					pos_ = 0;
-				}
-			}
-			*out_count = *in_count = i;
-		}
-	}
+  DeltaFilter(Stream* stream, uint32_t bytes, uint32_t offset /* multiple of bytes*/) : ByteStreamFilter(stream), prev_(0), bytes_(bytes), offset_(offset), pos_(0) {
+    prev_storage_.reset(new uint32_t[offset]);
+    prev_ = prev_storage_.get();
+    std::fill(prev_, prev_ + offset, 0U);
+  }
+  virtual void forwardFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
+    process<true>(out, out_count, in, in_count);
+  }
+  virtual void reverseFilter(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
+    process<false>(out, out_count, in, in_count);
+  }
+  static uint32_t getMaxExpansion() {
+    return 1;
+  }
+  void dumpInfo() const {
+  }
+  void setSpecific(uint32_t s) {
+  }
 
-	std::unique_ptr<uint32_t[]> prev_storage_;
-	uint32_t* prev_;
-	size_t bytes_;
-	size_t offset_;
-	size_t pos_;
+private:
+  template <bool encode>
+  void process(uint8_t* out, size_t* out_count, uint8_t* in, size_t* in_count) {
+    const auto max_c = std::min(*out_count, *in_count);
+    if (max_c < bytes_) {
+      memcpy(out, in, max_c);
+      *out_count = *in_count = max_c;
+    } else {
+      size_t i;
+      for (i = 0; i <= max_c - bytes_; i += bytes_) {
+        uint32_t cur = static_cast<uint32_t>(readBytes<uint32_t, false>(in + i, bytes_));
+        uint32_t prev = prev_[pos_];
+        if (encode) {
+          prev_[pos_] = cur;
+          cur -= prev;
+        } else {
+          cur += prev;
+          prev_[pos_] = cur;
+        }
+        writeBytes<uint32_t, false>(out + i, bytes_, cur);
+        if (++pos_ == offset_) {
+          pos_ = 0;
+        }
+      }
+      *out_count = *in_count = i;
+    }
+  }
+
+  std::unique_ptr<uint32_t[]> prev_storage_;
+  uint32_t* prev_;
+  size_t bytes_;
+  size_t offset_;
+  size_t pos_;
 };
 
 template <uint32_t bytes, uint32_t offset>
 class FixedDeltaFilter : public DeltaFilter {
 public:
-	FixedDeltaFilter(Stream* stream) : DeltaFilter(stream, bytes, offset) { }
-	void setOpt(size_t) {}
+  FixedDeltaFilter(Stream* stream) : DeltaFilter(stream, bytes, offset) {}
+  void setOpt(size_t) {}
 };
 
 #endif

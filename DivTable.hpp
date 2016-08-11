@@ -1,9 +1,9 @@
 /*	MCM file compressor
 
-	Copyright (C) 2013, Google Inc.
-	Authors: Mathieu Chartier
+  Copyright (C) 2013, Google Inc.
+  Authors: Mathieu Chartier
 
-	LICENSE
+  LICENSE
 
     This file is part of the MCM file compressor.
 
@@ -26,29 +26,29 @@
 
 template <typename T, const uint32_t shift_, const uint32_t size_>
 class DivTable {
-	T data[size_];
+  T data[size_];
 public:
-	DivTable() {
-		
-	}
+  DivTable() {
 
-	void init() {
-		for (uint32_t i = 0; i < size_; ++i) {
-			data[i] = int(1 << shift_) / int(i * 16 + 1);
-		}
-	}
+  }
 
-	ALWAYS_INLINE uint32_t size() const {
-		return size_;
-	}
+  void init() {
+    for (uint32_t i = 0; i < size_; ++i) {
+      data[i] = int(1 << shift_) / int(i * 16 + 1);
+    }
+  }
 
-	ALWAYS_INLINE T& operator [] (T i) {
-		return data[i];
-	}
+  ALWAYS_INLINE uint32_t size() const {
+    return size_;
+  }
 
-	ALWAYS_INLINE T operator [] (T i) const {
-		return data[i];
-	}
+  ALWAYS_INLINE T& operator [] (T i) {
+    return data[i];
+  }
+
+  ALWAYS_INLINE T operator [] (T i) const {
+    return data[i];
+  }
 };
 
 #endif

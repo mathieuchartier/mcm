@@ -1,9 +1,9 @@
 /*	MCM file compressor
 
-	Copyright (C) 2013, Google Inc.
-	Authors: Mathieu Chartier
+  Copyright (C) 2013, Google Inc.
+  Authors: Mathieu Chartier
 
-	LICENSE
+  LICENSE
 
     This file is part of the MCM file compressor.
 
@@ -30,99 +30,99 @@
 // stretch = squash^-1 = 1/(1+e^-x)
 
 inline double squash(double p) {
-	if (p < 0.0001) return -999.0;
-	if (p > 0.9999) return 999.0;
-	return (double) std::log((double) p / (1.0 - (double) p));
+  if (p < 0.0001) return -999.0;
+  if (p > 0.9999) return 999.0;
+  return (double)std::log((double)p / (1.0 - (double)p));
 }
 
 inline double stretch(double p) {
-	return 1.0 / double(1.0 +	exp((double) -p));
+  return 1.0 / double(1.0 + exp((double)-p));
 }
 
 inline int roundint(double p) {
-	return int(p + 0.5);
+  return int(p + 0.5);
 }
 
 static int squash_init(int d, int opt = 0) {
-  if (d>=2047) return 4095;
-  if (d<=-2047) return 0;
-  double k=(4096-opt)/(double(1+exp(-(double(d)/(128+15*10+6)))));
+  if (d >= 2047) return 4095;
+  if (d <= -2047) return 0;
+  double k = (4096 - opt) / (double(1 + exp(-(double(d) / (128 + 15 * 10 + 6)))));
   return int(k);
 }
 
 // Squash - stretch table
 template <typename T, int denom, int minInt, int maxInt, int FP>
 struct ss_table {
-	static const int total = maxInt - minInt;
-	T stretchTable[denom], squashTable[total], *squashPtr;
+  static const int total = maxInt - minInt;
+  T stretchTable[denom], squashTable[total], *squashPtr;
 public:
-	// probability = p / Denom		
-	void build(size_t* opts) {
-		squashPtr = &squashTable[0 - minInt];
-		// From paq9a
-		const size_t num_stems = 32 + 1;
-		int stems[num_stems] = {
+  // probability = p / Denom		
+  void build(size_t* opts) {
+    squashPtr = &squashTable[0 - minInt];
+    // From paq9a
+    const size_t num_stems = 32 + 1;
+    int stems[num_stems] = {
       1,2,4,6,19,25,38,71,82,128,210,323,497,778,1142,1526, // 2022098
       // 15 3 8 0 3 0 0 0 0 0 0 0 0 0 0 0
-			// 1,1,2,2,3,4,5,6,11,19,20,20,27,31,42,53,61,82,93,107,161,196,258,314,426,486,684,810,1048,1246,1521,1724, // 2023116
+      // 1,1,2,2,3,4,5,6,11,19,20,20,27,31,42,53,61,82,93,107,161,196,258,314,426,486,684,810,1048,1246,1521,1724, // 2023116
       // 1,1,2,3,4,5,6,13,19,22,25,32,38,55,71,77,82,105,128,169,210,267,323,410,497,638,778,960,1142,1334,1526,1787, // 2022098
       2047,
-			};
+    };
     // check(stems[num_stems / 2] == 2047);
-		for (int i = num_stems / 2 + 1; i < num_stems; ++i) {
-			stems[i] = 4096 - stems[num_stems - 1 - i];
-		}
-		// Interpolate between stems.
-		const int stem_divisor = total / (num_stems - 1);
-		for (int i = minInt; i < maxInt; ++i) {
-			const int pos = i - minInt;
-			const int stem_idx = pos / stem_divisor;
-			const int stem_frac = pos % stem_divisor;
-			squashTable[pos] = 
-				(stems[stem_idx] * (stem_divisor - stem_frac) + stems[stem_idx + 1] * stem_frac + stem_divisor / 2) / stem_divisor;
-			squashTable[pos] = Clamp(squashTable[pos], 1, 4095);
-		}
-		int pi = 0;
-		// Inverse squash function.
-		for (int x = minInt; x < maxInt; ++x) {
+    for (int i = num_stems / 2 + 1; i < num_stems; ++i) {
+      stems[i] = 4096 - stems[num_stems - 1 - i];
+    }
+    // Interpolate between stems.
+    const int stem_divisor = total / (num_stems - 1);
+    for (int i = minInt; i < maxInt; ++i) {
+      const int pos = i - minInt;
+      const int stem_idx = pos / stem_divisor;
+      const int stem_frac = pos % stem_divisor;
+      squashTable[pos] =
+        (stems[stem_idx] * (stem_divisor - stem_frac) + stems[stem_idx + 1] * stem_frac + stem_divisor / 2) / stem_divisor;
+      squashTable[pos] = Clamp(squashTable[pos], 1, 4095);
+    }
+    int pi = 0;
+    // Inverse squash function.
+    for (int x = minInt; x < maxInt; ++x) {
       // squashPtr[x] = squash_init(x, opts[0]);
       int i = squashPtr[x];
       squashPtr[x] = Clamp(squashPtr[x], 1, 4095);
-			for (int j = pi; j < i; ++j) {
-				stretchTable[j] = x;
-			}
-			pi = i;
-		}
-		for (int x = pi; x < total; ++x) {
-			stretchTable[x] = 2047;
-		}
-	}
+      for (int j = pi; j < i; ++j) {
+        stretchTable[j] = x;
+      }
+      pi = i;
+    }
+    for (int x = pi; x < total; ++x) {
+      stretchTable[x] = 2047;
+    }
+  }
 
-	const T* getStretchPtr() const {
-		return stretchTable;
-	}
+  const T* getStretchPtr() const {
+    return stretchTable;
+  }
 
-	// 0 <= p < denom
-	ALWAYS_INLINE int st(uint32_t p) const {
-		return stretchTable[p];
-	}
+  // 0 <= p < denom
+  ALWAYS_INLINE int st(uint32_t p) const {
+    return stretchTable[p];
+  }
 
-	// minInt <= p < maxInt
-	ALWAYS_INLINE uint32_t sq(int p) const {
-		if (p <= minInt) {
-			return 1;
-		}
-		if (p >= maxInt) {
-			return denom - 1;
-		}
-		return squashPtr[p];
-	}
+  // minInt <= p < maxInt
+  ALWAYS_INLINE uint32_t sq(int p) const {
+    if (p <= minInt) {
+      return 1;
+    }
+    if (p >= maxInt) {
+      return denom - 1;
+    }
+    return squashPtr[p];
+  }
 
-	ALWAYS_INLINE uint32_t squnsafe(int p) const {
-		dcheck(p >= minInt);
-		dcheck(p < maxInt);
-		return squashPtr[p];
-	}
+  ALWAYS_INLINE uint32_t squnsafe(int p) const {
+    dcheck(p >= minInt);
+    dcheck(p < maxInt);
+    return squashPtr[p];
+  }
 };
 
 #endif

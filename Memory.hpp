@@ -1,9 +1,9 @@
 /*	MCM file compressor
 
-	Copyright (C) 2013, Google Inc.
-	Authors: Mathieu Chartier
+  Copyright (C) 2013, Google Inc.
+  Authors: Mathieu Chartier
 
-	LICENSE
+  LICENSE
 
     This file is part of the MCM file compressor.
 
@@ -27,51 +27,51 @@
 #include "Util.hpp"
 
 class MemMap {
-	void* storage;
-	size_t size;
+  void* storage;
+  size_t size;
 public:
-	inline size_t getSize() const {
-		return size;
-	}
+  inline size_t getSize() const {
+    return size;
+  }
 
-	void resize(size_t bytes);
-	void release();
-	void zero();
+  void resize(size_t bytes);
+  void release();
+  void zero();
 
-	inline const void* getData() const {
-		return storage;
-	}
+  inline const void* getData() const {
+    return storage;
+  }
 
-	inline void* getData() {
-		return storage;
-	}
+  inline void* getData() {
+    return storage;
+  }
 
-	MemMap();
-	virtual ~MemMap();
+  MemMap();
+  virtual ~MemMap();
 };
 
 template <typename T, bool kBigEndian>
 T readBytes(uint8_t* ptr, size_t bytes) {
-	T acc = 0;
-	if (!kBigEndian) {
-		ptr += bytes;
-	}
-	for (size_t i = 0; i < bytes; ++i) {
-		acc = (acc << 8) | (kBigEndian ? *ptr++ : *--ptr);
-	}
-	return acc;
+  T acc = 0;
+  if (!kBigEndian) {
+    ptr += bytes;
+  }
+  for (size_t i = 0; i < bytes; ++i) {
+    acc = (acc << 8) | (kBigEndian ? *ptr++ : *--ptr);
+  }
+  return acc;
 }
 
 template <typename T, bool kBigEndian>
 void writeBytes(uint8_t* ptr, size_t bytes, T value) {
-	T acc = 0;
-	if (kBigEndian) {
-		ptr += bytes;
-	}
-	for (size_t i = 0; i < bytes; ++i) {
-		*(kBigEndian ? --ptr : ptr++) = value;
-		value >>= 8;
-	}
+  T acc = 0;
+  if (kBigEndian) {
+    ptr += bytes;
+  }
+  for (size_t i = 0; i < bytes; ++i) {
+    *(kBigEndian ? --ptr : ptr++) = value;
+    value >>= 8;
+  }
 }
 
 #endif

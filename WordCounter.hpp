@@ -1,3 +1,26 @@
+/*	MCM file compressor
+
+  Copyright (C) 2016, Google Inc.
+  Authors: Mathieu Chartier
+
+  LICENSE
+
+    This file is part of the MCM file compressor.
+
+    MCM is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    MCM is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with MCM.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
 #ifndef _WORD_COUNTER_HPP_
 #define _WORD_COUNTER_HPP_
 
@@ -62,20 +85,20 @@ struct WordCount {
   }
 
   class CompareSavings {
-	public:
-		CompareSavings(size_t code_word_len) : code_word_len_(code_word_len) {}
-		bool operator()(const WordCount& a, const WordCount& b) const {
-			return a.SavingsVS(code_word_len_) < b.SavingsVS(code_word_len_);
-		}
+  public:
+    CompareSavings(size_t code_word_len) : code_word_len_(code_word_len) {}
+    bool operator()(const WordCount& a, const WordCount& b) const {
+      return a.SavingsVS(code_word_len_) < b.SavingsVS(code_word_len_);
+    }
 
-	private:
-		const size_t code_word_len_;
-	};
+  private:
+    const size_t code_word_len_;
+  };
 };
 
 // Fast memory efficient word counter that uses a compacting GC.
 class WordCounter {
-public: 
+public:
   static constexpr size_t kMaxLength = 256;
 
   void Init(size_t memory) {
@@ -85,7 +108,7 @@ public:
     ptr_ = begin_;
     end_ = begin_ + memory / 2;
     hash_table_ = reinterpret_cast<uint32_t*>(end_);
-    hash_size_ = ((begin_  + memory) - end_) / sizeof(hash_table_[0]);
+    hash_size_ = ((begin_ + memory) - end_) / sizeof(hash_table_[0]);
     ClearHashTable();
   }
 
@@ -159,7 +182,7 @@ public:
           assert(isLowerCase(string_name[0]));
           string_name[0] = makeUpperCase(string_name[0]);
         }
-        WordCount wc{string_name, normal_count, cc_count};
+        WordCount wc{ string_name, normal_count, cc_count };
         out.push_back(wc);
       }
     });
@@ -169,13 +192,13 @@ private:
   // Memory efficient word counter.
   class Entry {
   public:
-	  static size_t ComputeSize() {
-		  return sizeof(WordCounter);
-	  }
+    static size_t ComputeSize() {
+      return sizeof(WordCounter);
+    }
 
-	  bool Equals(const uint8_t* word, size_t len) const {
-		  return length_ == len && memcmp(word, data_, len) == 0;
-	  }
+    bool Equals(const uint8_t* word, size_t len) const {
+      return length_ == len && memcmp(word, data_, len) == 0;
+    }
 
     size_t SizeOf() const {
       return RoundUp(ComputeSize(length_), sizeof(uint32_t));
@@ -226,10 +249,10 @@ private:
     }
 
   private:
-	  // Count for each modifier.
+    // Count for each modifier.
     uint32_t count_[3] = {};
-	  uint8_t length_ = 0;
-	  uint8_t data_[0];
+    uint8_t length_ = 0;
+    uint8_t data_[0];
   };
 
   size_t Remain() const {
@@ -275,7 +298,7 @@ private:
       }
     }
   }
-  
+
   // Minimum count for keeping.
   size_t min_count_ = 2;
   uint8_t* begin_;

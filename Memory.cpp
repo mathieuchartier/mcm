@@ -1,9 +1,9 @@
 /*	MCM file compressor
 
-	Copyright (C) 2013, Google Inc.
-	Authors: Mathieu Chartier
+  Copyright (C) 2013, Google Inc.
+  Authors: Mathieu Chartier
 
-	LICENSE
+  LICENSE
 
     This file is part of the MCM file compressor.
 
@@ -40,44 +40,44 @@ MemMap::MemMap() : storage(nullptr), size(0) {
 }
 
 MemMap::~MemMap() {
-	release();
+  release();
 }
 
 void MemMap::resize(size_t bytes) {
-	if (bytes == size) {
-		std::fill(reinterpret_cast<uint8_t*>(storage), reinterpret_cast<uint8_t*>(storage) + size, 0);
-		return;
-	}
-	release();
-	size = bytes;
+  if (bytes == size) {
+    std::fill(reinterpret_cast<uint8_t*>(storage), reinterpret_cast<uint8_t*>(storage) + size, 0);
+    return;
+  }
+  release();
+  size = bytes;
 #if USE_MALLOC
-	storage = std::calloc(1, bytes);
+  storage = std::calloc(1, bytes);
 #elif WIN32
-	storage = (void*)VirtualAlloc(nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+  storage = (void*)VirtualAlloc(nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
 #else
 #error UNIMPLEMENTED
 #endif
 }
 
 void MemMap::release() {
-	if (storage != nullptr) {
+  if (storage != nullptr) {
 #if USE_MALLOC
-		std::free(storage);
+    std::free(storage);
 #elif WIN32
-		BOOL result = VirtualFree((LPVOID)storage, size, MEM_DECOMMIT);
+    BOOL result = VirtualFree((LPVOID)storage, size, MEM_DECOMMIT);
 #else
 #error UNIMPLEMENTED
 #endif
-		storage = nullptr;
-	}
+    storage = nullptr;
+  }
 }
 
 void MemMap::zero() {
 #ifdef USE_MALLOC
-	std::memset(storage, 0, size);
+  std::memset(storage, 0, size);
 #elif WIN32
-	storage = (void*)VirtualAlloc(storage, size, MEM_RESET, PAGE_READWRITE);
+  storage = (void*)VirtualAlloc(storage, size, MEM_RESET, PAGE_READWRITE);
 #else
-	madvise(storage, size, MADV_DONTNEED);
+  madvise(storage, size, MADV_DONTNEED);
 #endif
 }
