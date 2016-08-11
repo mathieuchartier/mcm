@@ -161,13 +161,16 @@ public:
   int open(const std::string& fileName, std::ios_base::open_mode mode = std::ios_base::in | std::ios_base::binary) {
     close();
     std::ostringstream oss;
-    if (mode & std::ios_base::out) {
-      oss << "w";
-      if (mode & std::ios_base::in) {
+    if (mode & std::ios_base::in) {
+      oss << "r";
+      if (mode & std::ios_base::out) {
         oss << "+";
       }
-    } else if (mode & std::ios_base::in) {
-      oss << "r";
+    } else if (mode & std::ios_base::out) {
+      oss << "w";
+    }
+    if (mode & std::ios_base::app) {
+      oss << "a";
     }
 
     if (mode & std::ios_base::binary) {

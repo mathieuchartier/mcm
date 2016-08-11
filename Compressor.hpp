@@ -173,28 +173,6 @@ public:
   }
 };
 
-class CompressorFactories {
-public:
-  // Legacy compressors includes non legacy compresors.
-  std::vector<Compressor::Factory*> legacy_factories;
-  // Compressors.
-  std::vector<Compressor::Factory*> factories;
-
-  void addCompressor(bool is_legacy, Compressor::Factory* factory);
-  uint32_t findFactoryIndex(Compressor::Factory* factory) const;
-  CompressorFactories();
-  Compressor::Factory* getLegacyFactory(uint32_t index);
-  Compressor::Factory* getFactory(uint32_t index);
-  ALWAYS_INLINE static CompressorFactories* getInstance() {
-    return instance;
-  }
-  static Compressor* makeCompressor(uint32_t type);
-  static void init();
-
-private:
-  static CompressorFactories* instance;
-};
-
 class Store : public Compressor {
 public:
   virtual void compress(Stream* in, Stream* out, uint64_t count);

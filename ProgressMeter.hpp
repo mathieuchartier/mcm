@@ -1,9 +1,9 @@
 /*	MCM file compressor
 
-	Copyright (C) 2013, Google Inc.
-	Authors: Mathieu Chartier
+  Copyright (C) 2013, Google Inc.
+  Authors: Mathieu Chartier
 
-	LICENSE
+  LICENSE
 
     This file is part of the MCM file compressor.
 
@@ -31,197 +31,197 @@
 #include "Stream.hpp"
 
 class ProgressMeter {
-	uint64_t count;
-	clock_t start;
-	bool encode;
+  uint64_t count;
+  clock_t start;
+  bool encode;
 public:
-	ProgressMeter(bool encode = true)
-		: count(0)
-		, start(clock())
-		, encode(encode) {
-	}
+  ProgressMeter(bool encode = true)
+    : count(0)
+    , start(clock())
+    , encode(encode) {
+  }
 
-	~ProgressMeter() {
-	}
+  ~ProgressMeter() {
+  }
 
-	ALWAYS_INLINE uint64_t getCount() const {
-		return count;
-	}
+  ALWAYS_INLINE uint64_t getCount() const {
+    return count;
+  }
 
-	ALWAYS_INLINE uint64_t addByte() {
-		return ++count;
-	}
+  ALWAYS_INLINE uint64_t addByte() {
+    return ++count;
+  }
 
-	bool isEncode() const {
-		return encode;
-	}
+  bool isEncode() const {
+    return encode;
+  }
 
-	// Surprisingly expensive to call...
-	void printRatio(uint64_t comp_size, const std::string& extra) {
-		printRatio(comp_size, count, extra);
-	}
+  // Surprisingly expensive to call...
+  void printRatio(uint64_t comp_size, const std::string& extra) {
+    printRatio(comp_size, count, extra);
+  }
 
-	// Surprisingly expensive to call...
-	void printRatio(uint64_t comp_size, uint64_t in_size, const std::string& extra) const {
-		const auto ratio = double(comp_size) / in_size;
-		auto cur_time = clock();
-		auto time_delta = cur_time - start;
-		if (!time_delta) {
-			++time_delta;
-		}
-		const uint32_t rate = uint32_t(double(in_size / KB) / (double(time_delta) / double(CLOCKS_PER_SEC)));
-		std::ostringstream oss;
-		oss << in_size / KB << "KB ";
-		if (comp_size > KB) {
-			oss << (encode ? "->" : "<-") << " " << comp_size / KB << "KB ";
-		} else {
-			oss << ", ";
-		}
-		oss << rate << "KB/s";
-		if (comp_size > KB) {
-			oss << " ratio: " << std::setprecision(5) << std::fixed << ratio << extra.c_str();
-		}
-		std::cout << oss.str() << "\t\r" << std::flush;
-	}
+  // Surprisingly expensive to call...
+  void printRatio(uint64_t comp_size, uint64_t in_size, const std::string& extra) const {
+    const auto ratio = double(comp_size) / in_size;
+    auto cur_time = clock();
+    auto time_delta = cur_time - start;
+    if (!time_delta) {
+      ++time_delta;
+    }
+    const uint32_t rate = uint32_t(double(in_size / KB) / (double(time_delta) / double(CLOCKS_PER_SEC)));
+    std::ostringstream oss;
+    oss << in_size / KB << "KB ";
+    if (comp_size > KB) {
+      oss << (encode ? "->" : "<-") << " " << comp_size / KB << "KB ";
+    } else {
+      oss << ", ";
+    }
+    oss << rate << "KB/s";
+    if (comp_size > KB) {
+      oss << " ratio: " << std::setprecision(5) << std::fixed << ratio << extra.c_str();
+    }
+    std::cout << oss.str() << "\t\r" << std::flush;
+  }
 
-	ALWAYS_INLINE void addBytePrint(uint64_t total, const char* extra = "") {
-		if (!(addByte() & 0xFFFF)) {
-			// 4 updates per second.
-			// if (clock() - prev_time > 250) {
-			// 	printRatio(total, extra);
-			// }
-		}
-	}
+  ALWAYS_INLINE void addBytePrint(uint64_t total, const char* extra = "") {
+    if (!(addByte() & 0xFFFF)) {
+      // 4 updates per second.
+      // if (clock() - prev_time > 250) {
+      // 	printRatio(total, extra);
+      // }
+    }
+  }
 };
 
 // DEPRECIATED
 class ProgressStream : public Stream {
-	static const size_t kUpdateInterval = 512 * KB;
+  static const size_t kUpdateInterval = 512 * KB;
 public:
-	ProgressStream(Stream* in_stream, Stream* out_stream, bool encode = true)
-		: in_stream_(in_stream), out_stream_(out_stream), meter_(encode), update_count_(0) {
-	}
-	virtual ~ProgressStream() { }
-	virtual int get() {
-		uint8_t b;
-		if (read(&b, 1) == 0) {
-			return EOF;
-		}
-		return b;
-	}
-	virtual size_t read(uint8_t* buf, size_t n) {
-		size_t ret = in_stream_->read(buf, n);
-		update_count_ += ret;
-		if (update_count_ > kUpdateInterval) {
-			update_count_ -= kUpdateInterval;
-			meter_.printRatio(out_stream_->tell(), in_stream_->tell(), "");
-		}
-		return ret;
-	}
-	virtual void put(int c) {
-		uint8_t b = c;
-		write(&b, 1);
-	}
-	virtual void write(const uint8_t* buf, size_t n) {
-		out_stream_->write(buf, n);
-		addCount(n);
-	}
-	void addCount(size_t delta) {
-		update_count_ += delta;
-		if (update_count_ > kUpdateInterval) {
-			update_count_ -= kUpdateInterval;
-			size_t comp_size = out_stream_->tell(), other_size = in_stream_->tell();
-			if (!meter_.isEncode()) {
-				std::swap(comp_size, other_size);
-			}
-			meter_.printRatio(comp_size, other_size, "");
-		}
-	}
-	virtual uint64_t tell() const {
-		return meter_.isEncode() ? in_stream_->tell() : out_stream_->tell();
-	}
-	virtual void seek(uint64_t pos) {
-		(meter_.isEncode() ? in_stream_ : out_stream_)->seek(pos);
-	}
+  ProgressStream(Stream* in_stream, Stream* out_stream, bool encode = true)
+    : in_stream_(in_stream), out_stream_(out_stream), meter_(encode), update_count_(0) {
+  }
+  virtual ~ProgressStream() {}
+  virtual int get() {
+    uint8_t b;
+    if (read(&b, 1) == 0) {
+      return EOF;
+    }
+    return b;
+  }
+  virtual size_t read(uint8_t* buf, size_t n) {
+    size_t ret = in_stream_->read(buf, n);
+    update_count_ += ret;
+    if (update_count_ > kUpdateInterval) {
+      update_count_ -= kUpdateInterval;
+      meter_.printRatio(out_stream_->tell(), in_stream_->tell(), "");
+    }
+    return ret;
+  }
+  virtual void put(int c) {
+    uint8_t b = c;
+    write(&b, 1);
+  }
+  virtual void write(const uint8_t* buf, size_t n) {
+    out_stream_->write(buf, n);
+    addCount(n);
+  }
+  void addCount(size_t delta) {
+    update_count_ += delta;
+    if (update_count_ > kUpdateInterval) {
+      update_count_ -= kUpdateInterval;
+      size_t comp_size = out_stream_->tell(), other_size = in_stream_->tell();
+      if (!meter_.isEncode()) {
+        std::swap(comp_size, other_size);
+      }
+      meter_.printRatio(comp_size, other_size, "");
+    }
+  }
+  virtual uint64_t tell() const {
+    return meter_.isEncode() ? in_stream_->tell() : out_stream_->tell();
+  }
+  virtual void seek(uint64_t pos) {
+    (meter_.isEncode() ? in_stream_ : out_stream_)->seek(pos);
+  }
 
 private:
-	Stream* const in_stream_;
-	Stream* const out_stream_;
-	ProgressMeter meter_;
-	uint64_t update_count_;
+  Stream* const in_stream_;
+  Stream* const out_stream_;
+  ProgressMeter meter_;
+  uint64_t update_count_;
 };
 
 class AutoUpdater {
 public:
-	AutoUpdater(uintptr_t interval = 250)
-		: done_(false), interval_(interval) {
-		thread_ = new std::thread(Callback, this);
-	}
-	virtual ~AutoUpdater() {
-		done();
-	}
-	void done() {
-		{
-			std::unique_lock<std::mutex> lock(mutex_);
-			if (done_) return;
-			done_ = true;
-			cond_.notify_one();
-		}
-		thread_->join();
-		delete thread_;
-	}
-	virtual void print() = 0;
+  AutoUpdater(uintptr_t interval = 250)
+    : done_(false), interval_(interval) {
+    thread_ = new std::thread(Callback, this);
+  }
+  virtual ~AutoUpdater() {
+    done();
+  }
+  void done() {
+    {
+      std::unique_lock<std::mutex> lock(mutex_);
+      if (done_) return;
+      done_ = true;
+      cond_.notify_one();
+    }
+    thread_->join();
+    delete thread_;
+  }
+  virtual void print() = 0;
 
 protected:
-	bool done_;
-	std::thread* thread_;
-	std::mutex mutex_;
-	std::condition_variable cond_;
-	const uintptr_t interval_;
+  bool done_;
+  std::thread* thread_;
+  std::mutex mutex_;
+  std::condition_variable cond_;
+  const uintptr_t interval_;
 
-	void run() {
-		std::unique_lock<std::mutex> lock(mutex_);
-		while (!done_) {
-			auto cur = std::chrono::high_resolution_clock::now();
-			auto target = cur + std::chrono::milliseconds(interval_);
-			while (true) {
-				cond_.wait_for(lock, std::chrono::milliseconds(interval_));  // target - cur
-				cur = std::chrono::high_resolution_clock::now();
-				if (done_) return;
-				if (cur >= target) break;
-			}
-			if (!done_) {
-				print();
-			}
-		}
-	}
-	static void Callback(AutoUpdater* thr) {
-		thr->run();
-	}
+  void run() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    while (!done_) {
+      auto cur = std::chrono::high_resolution_clock::now();
+      auto target = cur + std::chrono::milliseconds(interval_);
+      while (true) {
+        cond_.wait_for(lock, std::chrono::milliseconds(interval_));  // target - cur
+        cur = std::chrono::high_resolution_clock::now();
+        if (done_) return;
+        if (cur >= target) break;
+      }
+      if (!done_) {
+        print();
+      }
+    }
+  }
+  static void Callback(AutoUpdater* thr) {
+    thr->run();
+  }
 };
 
 
 class ProgressThread : public AutoUpdater {
 public:
-	ProgressThread(Stream* in_stream, Stream* out_stream, bool encode = true, uint64_t sub_out = 0, uintptr_t interval = 250)
-		: AutoUpdater(interval), in_stream_(in_stream), out_stream_(out_stream), sub_out_(sub_out), meter_(encode) {
-	}
-	~ProgressThread() {
-		done();
-	}
-	virtual void print() {
-		auto out_c = out_stream_->tell() - sub_out_;
-		auto in_c = in_stream_->tell();
-		if (in_c != 0 && out_c != 0) {
-			meter_.printRatio(out_c, in_c, "");
-		}
-	}
+  ProgressThread(Stream* in_stream, Stream* out_stream, bool encode = true, uint64_t sub_out = 0, uintptr_t interval = 250)
+    : AutoUpdater(interval), in_stream_(in_stream), out_stream_(out_stream), sub_out_(sub_out), meter_(encode) {
+  }
+  ~ProgressThread() {
+    done();
+  }
+  virtual void print() {
+    auto out_c = out_stream_->tell() - sub_out_;
+    auto in_c = in_stream_->tell();
+    if (in_c != 0 && out_c != 0) {
+      meter_.printRatio(out_c, in_c, "");
+    }
+  }
 
 protected:
-	Stream* const in_stream_;
-	Stream* const out_stream_;
-	const uint64_t sub_out_;
-	ProgressMeter meter_;
+  Stream* const in_stream_;
+  Stream* const out_stream_;
+  const uint64_t sub_out_;
+  ProgressMeter meter_;
 };
 
 #endif

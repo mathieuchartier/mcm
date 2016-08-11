@@ -50,8 +50,6 @@ namespace cm {
       size_t idx = 0;
       text_match_profile_ = CMProfile();
 
-      // 22,22,5,25,3,
-
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder4);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder2);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelBracket);
@@ -62,25 +60,6 @@ namespace cm {
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder2);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder1);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelWord1);
-      // 5,23,2,0,
-
-      if (kInputs > idx++) text_match_profile_.EnableModel(static_cast<ModelType>(opts_[0]));
-      if (kInputs > idx++) text_match_profile_.EnableModel(static_cast<ModelType>(opts_[2]));
-
-      // if (kInputs > idx++) text_match_profile_.EnableModel(static_cast<ModelType>(opts_[0]));
-
-      if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder6);
-      // if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder4);
-
-      if (kInputs > idx++) text_match_profile_.EnableModel(kModelSparse2);
-      if (kInputs > idx++) text_match_profile_.EnableModel(kModelInterval);
-      if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder1);
-      if (kInputs > idx++) text_match_profile_.EnableModel(kModelSparse4);
-      if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder3);
-      if (kInputs > idx++) text_match_profile_.EnableModel(kModelInterval2);
-      if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder0);
-      // 6,4,2,14,22,1,16,3,23,0,
-      // 3,23,1,18,14,2,4,16,22,0,
     }
     // Text model.
     {
@@ -97,40 +76,11 @@ namespace cm {
       if (kInputs > idx++) text_profile_.EnableModel(kModelOrder0);
       if (kInputs > idx++) text_profile_.EnableModel(kModelOrder1);
       if (kInputs > idx++) text_profile_.EnableModel(kModelWord1);
-      if (kInputs > idx++) text_profile_.EnableModel(static_cast<ModelType>(opts_[1]));
-      if (kInputs > idx++) text_profile_.EnableModel(static_cast<ModelType>(opts_[3]));
-      // if (kInputs > idx++) text_profile_.EnableModel(static_cast<ModelType>(opts_[3]));
-      if (kInputs > idx++) text_profile_.EnableModel(static_cast<ModelType>(opts_[7]));
-
-      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder4);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder6);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelBracket);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder2);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelInterval);
-
-      if (kInputs > idx++) text_profile_.EnableModel(kModelWord1);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder3);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder1);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelInterval2);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelSpecialChar);
-      // if (kInputs > idx++) text_profile_.EnableModel(kModelInterval3);
-
-      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder5);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelSparse2);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelSparse3);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder7);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelSparse4);
-      // if (kInputs > idx++) text_profile_.EnableModel(static_cast<ModelType>(opts_[0]));
-      // if (kInputs > idx++) text_profile_.EnableModel(kModelWord12);
-      // if (kInputs > idx++) text_profile_.EnableModel(kModelWord2);
-      // if (kInputs > idx++) text_profile_.EnableModel(kModelOrder5);
-      // if (kInputs > idx++) text_profile_.EnableModel(kModelSparse23);
-      // if (kInputs > idx++) text_profile_.EnableModel(kModelSparse34);
 
 
       text_profile_.SetMatchModelOrder(8);
       miss_fast_path_ = -1;
-      text_profile_.SetMinLZPLen(lzp_enabled_ ? 9 : kMaxMatch + 1);
+      text_profile_.SetMinLZPLen(lzp_enabled_ ? 12 : kMaxMatch + 1);
     }
     // Binary model.
     {
@@ -251,11 +201,11 @@ namespace cm {
     const bool kUseReorder = true;
     for (size_t i = 0; i < 256; ++i) reorder_[i] = i;
     uint8_t binary_reorder[] = { 38,2,3,4,5,15,6,23,7,8,9,10,12,13,14,11,17,18,19,16,20,21,24,22,1,25,26,27,28,29,30,31,33,34,35,36,40,37,39,32,42,41,43,44,45,46,47,64,55,49,54,50,48,51,52,53,56,57,58,59,60,61,62,63,84,65,67,66,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,85,86,87,88,89,90,93,94,95,91,92,96,97,98,99,100,101,116,102,103,104,105,106,107,108,109,110,111,112,113,114,115,117,118,119,121,120,122,123,124,125,126,127,128,129,130,131,143,132,133,134,135,136,137,138,139,140,141,142,144,152,145,146,147,148,149,150,151,153,155,154,156,0,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,175,173,174,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,195,192,193,194,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255, };
-    uint8_t text_reorder[] = { 8,7,5,24,14,12,13,3,1,4,6,9,11,15,16,17,18,19,20,21,22,23,25,26,10,32,35,42,29,37,45,30,31,36,34,33,38,2,39,0,28,41,43,40,44,46,58,59,60,64,61,63,95,62,27,47,94,92,91,124,93,96,123,125,69,65,67,72,68,70,82,81,87,77,73,71,76,74,83,79,66,80,78,84,75,48,49,50,51,52,53,54,55,56,57,86,88,97,98,99,100,85,101,90,103,104,89,105,107,102,108,109,110,111,106,113,112,114,115,116,119,118,120,121,117,122,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,151,144,145,146,147,148,149,150,152,153,155,156,157,154,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,239,227,228,229,230,231,232,233,234,235,236,237,238,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255, };
+    uint8_t text_reorder[] = { 7,24,14,12,3,1,13,4,6,9,11,15,16,2,17,18,19,5,20,21,22,23,8,26,10,32,43,35,42,29,37,25,45,30,31,36,34,33,39,38,0,41,28,40,44,46,58,59,60,64,61,63,95,62,27,47,94,92,91,124,93,96,123,125,69,72,68,65,67,70,82,81,77,73,71,76,87,74,79,66,80,78,83,84,75,48,49,50,51,52,53,54,55,56,57,86,88,97,98,99,100,85,101,90,103,104,89,105,107,102,108,109,110,111,106,113,112,114,115,116,119,118,120,121,117,122,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,151,144,145,146,147,148,149,150,152,153,155,156,157,154,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,239,227,228,229,230,231,232,233,234,235,236,237,238,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255, };
     for (int i = 0; i < 256; ++i) {
       text_reorder_[i] = kUseReorder ? text_reorder[i] : i;
       binary_reorder_[i] = kUseReorder ? binary_reorder[i] : i;
-      // text_reorder_[i] = opts_[i];
+      text_reorder_[i] = opts_[i];
     }
     SetActiveReorder(binary_reorder_);
 
@@ -266,7 +216,7 @@ namespace cm {
     }
 
     uint8_t small_text_mask[] = { 7,7,7,1,4,7,3,7,7,6,7,6,6,6,6,3,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,4,6,5,1,0,2,5,7,2,5,5,7,5,4,3,3,3,3,3,3,3,3,3,3,3,3,5,7,5,4,3,3,2,2,2,2,2,2,2,2,0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,5,6,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,7,7,2,5,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, };
-    uint8_t text_mask[] = { 15,12,0,15,14,0,13,3,2,15,13,1,3,0,7,0,12,0,0,0,0,0,0,2,0,6,0,0,9,0,0,0,12,7,14,15,15,11,6,11,10,10,15,2,9,8,7,6,5,5,5,5,5,5,5,5,5,5,14,9,11,15,13,4,2,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,2,4,4,4,4,4,4,5,4,4,3,3,10,1,3,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,4,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, };
+    uint8_t text_mask[] = { 15,0,0,2,15,0,8,3,2,12,13,1,3,0,7,9,12,0,0,0,0,0,0,2,0,6,0,0,9,0,0,0,12,7,14,9,7,11,4,11,10,4,9,14,9,8,7,6,5,5,5,5,5,5,5,5,5,5,14,9,2,15,13,4,2,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,2,4,4,4,4,4,4,5,4,4,3,3,10,1,3,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,4,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, };
     uint8_t binary_mask_map[] = { 15,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,6,12,12,12,12,12,13,12,12,12,12,12,12,12,12,12,12,12,12,12,12,10,12,12,12,12,12,12,12,12,12,12,12,12,12,9,9,9,12,9,9,9,9,9,9,9,12,9,9,9,9,9,9,9,12,9,9,9,12,9,9,9,12,9,9,9,12,7,7,8,12,7,11,7,7,7,14,7,12,7,7,7,12,7,7,7,7,7,7,7,12,7,7,7,12,7,7,7,1,5,5,14,5,5,5,5,5,4,5,3,1,2,5,5,1,5,1,1,1,5,5,5,1,1,1,1,1,1,1,1,1,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,5,1,1,10,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,7,1,1,10,10,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,0, };
 
     SetActiveReorder(text_reorder_);
@@ -285,6 +235,10 @@ namespace cm {
       text_small_interval_map_[ri] = small_text_mask[i];
       text_interval_map_[ri] = text_mask[i];
       // text_interval_map_[ri] = opts_[i];
+    }
+    for (int i = 0; i < 256; ++i) {
+      check(text_interval_map_[reorder_[i]] == text_mask[i]);
+      check(text_small_interval_map_[reorder_[i]] == small_text_mask[i]);
     }
     word_model_.init(reorder_);
     bracket_.init(reorder_);

@@ -217,7 +217,7 @@ private:
     }
 
     size_t Count() const {
-      return std::accumulate(count_, count_ + kWordCCCount, 0);
+      return std::accumulate(count_, count_ + kWordCCInvalid, 0);
     }
 
     static size_t ComputeSize(uint32_t length) {

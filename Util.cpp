@@ -144,3 +144,25 @@ std::string getFileName(const std::string& str) {
   }
   return str;
 }
+
+bool IsAbsolutePath(const std::string& path) {
+  if (path[0] == '/' || path[0] == '\\') {
+    // Unix absolute path path.
+    return true;
+  }
+  if (path.length() >= 3 && path[1] == ':' && (path[2] == '\\' || path[2] == '/')) {
+    // Windows absolute path.
+    return true;
+  }
+  return false;
+}
+
+void RunUtilTests() {
+  check(IsAbsolutePath("/test/asdf"));
+  check(IsAbsolutePath("\\test.abc"));
+  check(IsAbsolutePath("C:/test/"));
+  check(IsAbsolutePath("C:\\test/"));
+  check(!IsAbsolutePath(""));
+  check(!IsAbsolutePath("test/abc"));
+  check(!IsAbsolutePath("test.txt"));
+}

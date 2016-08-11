@@ -177,11 +177,11 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer, siz
   Filter* ret = nullptr;
   switch (filter_) {
   case kFilterTypeDict:
-    if (analyzer) {
+    if (analyzer != nullptr) {
       auto& builder = analyzer->getDictBuilder();
       Dict::CodeWordGeneratorFast generator;
       Dict::CodeWordSet code_words;
-      generator.generateCodeWords(builder, &code_words, 7, 40);
+      generator.generateCodeWords(builder, &code_words, 3, 40);
       auto dict_filter = new Dict::Filter(stream, 0x3, 0x4, 0x6);
       dict_filter->addCodeWords(code_words.getCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_);
       dict_filter->setOpt(opt_var);
@@ -311,7 +311,7 @@ public:
     if (extract_) {
       std::ios_base::openmode open_mode = std::ios_base::out | std::ios_base::binary;
       if (file_info.previouslyOpened()) {
-        open_mode |= std::ios_base::app;
+        open_mode |= std::ios_base::in;
       }
       file_info.addOpen();
       err = ret->open(full_name.c_str(), open_mode);
@@ -319,7 +319,7 @@ public:
       err = ret->open(full_name.c_str(), std::ios_base::in | std::ios_base::binary);
     }
     if (err != 0) {
-      std::cerr << "Error opening: " << full_name.c_str() << " (" << errstr(err) << ")" << std::endl;
+      std::cerr << "Error opening: " << full_name.c_str() << " " << err << "(" << errstr(err) << ")" << " code " << std::endl;
     }
     return ret.release();
   }
@@ -339,6 +339,9 @@ public:
   }
   void subBytes(size_t idx) {
     auto c = verify_stream_.getCount();
+    if (c == 0) {
+      return;
+    }
     auto& r = remain_bytes_->at(idx);
     if (c > r) {
       std::cerr << "Wrote " << c - r << " extra bytes to " << file_list_->at(idx).getFullName() << std::endl;

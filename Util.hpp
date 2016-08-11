@@ -1,9 +1,9 @@
 /*	MCM file compressor
 
-	Copyright (C) 2013, Google Inc.
-	Authors: Mathieu Chartier
+  Copyright (C) 2013, Google Inc.
+  Authors: Mathieu Chartier
 
-	LICENSE
+  LICENSE
 
     This file is part of the MCM file compressor.
 
@@ -62,7 +62,7 @@ static const bool kIsDebugBuild = false;
 #else
 #define ASSUME(x)
 #endif
-	
+
 typedef uint32_t hash_t;
 
 static const uint64_t KB = 1024;
@@ -74,37 +74,37 @@ static const uint32_t kBitsPerByte = 8;
 
 ALWAYS_INLINE void prefetch(const void* ptr) {
 #ifdef WIN32
-	_mm_prefetch((char*)ptr, _MM_HINT_T0);
+  _mm_prefetch((char*)ptr, _MM_HINT_T0);
 #else
-	__builtin_prefetch(ptr);
+  __builtin_prefetch(ptr);
 #endif
 }
 
 ALWAYS_INLINE static bool isUpperCase(int c) {
-	return c >= 'A' && c <= 'Z';
+  return c >= 'A' && c <= 'Z';
 }
 ALWAYS_INLINE static bool isLowerCase(int c) {
-	return c >= 'a' && c <= 'z';
+  return c >= 'a' && c <= 'z';
 }
 ALWAYS_INLINE static bool isWordChar(int c) {
-	return isLowerCase(c) || isUpperCase(c) || c >= 128;
+  return isLowerCase(c) || isUpperCase(c) || c >= 128;
 }
 ALWAYS_INLINE static int makeLowerCase(int c) {
-	assert(isUpperCase(c));
-	return c - 'A' + 'a';
+  assert(isUpperCase(c));
+  return c - 'A' + 'a';
 }
 ALWAYS_INLINE static int makeUpperCase(int c) {
-	assert(isLowerCase(c));
-	return c - 'a' + 'A';
+  assert(isLowerCase(c));
+  return c - 'a' + 'A';
 }
 
 // Trust in the compiler
 ALWAYS_INLINE uint32_t rotate_left(uint32_t h, uint32_t bits) {
-	return (h << bits) | (h >> (sizeof(h) * 8 - bits));
+  return (h << bits) | (h >> (sizeof(h) * 8 - bits));
 }
 
 ALWAYS_INLINE uint32_t rotate_right(uint32_t h, uint32_t bits) {
-	return (h << (sizeof(h) * 8 - bits)) | (h >> bits);
+  return (h << (sizeof(h) * 8 - bits)) | (h >> bits);
 }
 
 #define check(c) while (!(c)) { std::cerr << "check failed " << #c << std::endl; *reinterpret_cast<int*>(1234) = 4321;}
@@ -112,264 +112,264 @@ ALWAYS_INLINE uint32_t rotate_right(uint32_t h, uint32_t bits) {
 
 template <const uint32_t A, const uint32_t B, const uint32_t C, const uint32_t D>
 struct shuffle {
-	enum {
-		value = (D << 6) | (C << 4) | (B << 2) | A,
-	};
+  enum {
+    value = (D << 6) | (C << 4) | (B << 2) | A,
+  };
 };
 
 ALWAYS_INLINE bool isPowerOf2(uint32_t n) {
-	return (n & (n - 1)) == 0;
+  return (n & (n - 1)) == 0;
 }
 
 ALWAYS_INLINE uint32_t bitSize(uint32_t Value) {
-	uint32_t Total = 0;
-	for (;Value;Value >>= 1, Total++);
-	return Total;
+  uint32_t Total = 0;
+  for (;Value;Value >>= 1, Total++);
+  return Total;
 }
 
 template <typename T>
 void printIndexedArray(const std::string& str, const T& arr) {
-	uint32_t index = 0;
-	std::cout << str << std::endl;
-	for (const auto& it : arr) {
-		if (it) {
-			std::cout << index << ":" << it << std::endl;
-		}
-		index++;
-	}
+  uint32_t index = 0;
+  std::cout << str << std::endl;
+  for (const auto& it : arr) {
+    if (it) {
+      std::cout << index << ":" << it << std::endl;
+    }
+    index++;
+  }
 }
 
 template <const uint64_t n>
-struct _bitSize {static const uint64_t value = 1 + _bitSize<n / 2>::value;};
+struct _bitSize { static const uint64_t value = 1 + _bitSize<n / 2>::value; };
 
 template <>
-struct _bitSize<0> {static const uint64_t value = 0;};
+struct _bitSize<0> { static const uint64_t value = 0; };
 
 inline void fatalError(const std::string& message) {
-	std::cerr << "Fatal error: " << message << std::endl;
-	*reinterpret_cast<uint32_t*>(1234) = 0;
+  std::cerr << "Fatal error: " << message << std::endl;
+  *reinterpret_cast<uint32_t*>(1234) = 0;
 }
 
 inline void unimplementedError(const char* function) {
-	std::ostringstream oss;
-	oss << "Calling implemented function " << function;
-	fatalError(oss.str());
+  std::ostringstream oss;
+  oss << "Calling implemented function " << function;
+  fatalError(oss.str());
 }
 
 inline uint32_t rand32() {
-	return rand() ^ (rand() << 16);
+  return rand() ^ (rand() << 16);
 }
 
 ALWAYS_INLINE int fastAbs(int n) {
-	int mask = n >> 31;
-	return (n ^ mask) - mask;
+  int mask = n >> 31;
+  return (n ^ mask) - mask;
 }
 
 bool fileExists(const char* name);
 
 class Closure {
 public:
-	virtual void run() = 0;
+  virtual void run() = 0;
 };
 
 template <typename Container>
 void deleteValues(Container& container) {
-	for (auto* p : container) {
-		delete p;
-	}
-	container.clear();
+  for (auto* p : container) {
+    delete p;
+  }
+  container.clear();
 }
 
 class ScopedLock {
 public:
-	ScopedLock(std::mutex& mutex) : mutex_(mutex) {
-		mutex_.lock();
-	}
+  ScopedLock(std::mutex& mutex) : mutex_(mutex) {
+    mutex_.lock();
+  }
 
-	~ScopedLock() {
-		mutex_.unlock();
-	}
+  ~ScopedLock() {
+    mutex_.unlock();
+  }
 
 private:
-	std::mutex& mutex_;
+  std::mutex& mutex_;
 };
 
 ALWAYS_INLINE void copy16bytes(uint8_t* no_alias out, const uint8_t* no_alias in) {
-	_mm_storeu_ps(reinterpret_cast<float*>(out), _mm_loadu_ps(reinterpret_cast<const float*>(in)));
+  _mm_storeu_ps(reinterpret_cast<float*>(out), _mm_loadu_ps(reinterpret_cast<const float*>(in)));
 }
 
 ALWAYS_INLINE static void memcpy16(void* dest, const void* src, size_t len) {
-	uint8_t* no_alias dest_ptr = reinterpret_cast<uint8_t* no_alias>(dest);
-	const uint8_t* no_alias src_ptr = reinterpret_cast<const uint8_t* no_alias>(src);
-	const uint8_t* no_alias limit = dest_ptr + len;
-	*dest_ptr++ = *src_ptr++;
-	if (len >= sizeof(__m128)) {
-		const uint8_t* no_alias limit2 = limit - sizeof(__m128);
-		do {
-			copy16bytes(dest_ptr, src_ptr);
-			src_ptr += sizeof(__m128);
-			dest_ptr += sizeof(__m128);
-		} while (dest_ptr < limit2);
-	}
-	while (dest_ptr < limit) {
-		*dest_ptr++ = *src_ptr++;
-	}
+  uint8_t* no_alias dest_ptr = reinterpret_cast<uint8_t* no_alias>(dest);
+  const uint8_t* no_alias src_ptr = reinterpret_cast<const uint8_t* no_alias>(src);
+  const uint8_t* no_alias limit = dest_ptr + len;
+  *dest_ptr++ = *src_ptr++;
+  if (len >= sizeof(__m128)) {
+    const uint8_t* no_alias limit2 = limit - sizeof(__m128);
+    do {
+      copy16bytes(dest_ptr, src_ptr);
+      src_ptr += sizeof(__m128);
+      dest_ptr += sizeof(__m128);
+    } while (dest_ptr < limit2);
+  }
+  while (dest_ptr < limit) {
+    *dest_ptr++ = *src_ptr++;
+  }
 }
 
 template<typename CopyUnit>
 ALWAYS_INLINE void fastcopy(uint8_t* no_alias out, const uint8_t* no_alias in, const uint8_t* limit) {
-	do {
-		*reinterpret_cast<CopyUnit* no_alias>(out) = *reinterpret_cast<const CopyUnit* no_alias>(in);
-		out += sizeof(CopyUnit);
-		in += sizeof(CopyUnit);
-	} while (in < limit);
+  do {
+    *reinterpret_cast<CopyUnit* no_alias>(out) = *reinterpret_cast<const CopyUnit* no_alias>(in);
+    out += sizeof(CopyUnit);
+    in += sizeof(CopyUnit);
+  } while (in < limit);
 }
 
 ALWAYS_INLINE void memcpy16unsafe(uint8_t* no_alias out, const uint8_t* no_alias in, const uint8_t* limit) {
-	do {
-		copy16bytes(out, in);
-		out += 16;
-		in += 16;
-	} while (out < limit);
+  do {
+    copy16bytes(out, in);
+    out += 16;
+    in += 16;
+  } while (out < limit);
 }
 
 template<uint32_t kMaxSize>
 class FixedSizeByteBuffer {
 public:
-	uint32_t getMaxSize() const {
-		return kMaxSize;
-	}
+  uint32_t getMaxSize() const {
+    return kMaxSize;
+  }
 
 protected:
-	uint8_t buffer_[kMaxSize];
+  uint8_t buffer_[kMaxSize];
 };
 
 // Move to front.
 template <typename T>
 class MTF {
-	std::vector<T> data_;
+  std::vector<T> data_;
 public:
-	void init(size_t n) {
-		data_.resize(n);
-		for (size_t i = 0; i < n; ++i) {
-			data_[i] = static_cast<T>(n - 1 - i);
-		}
-	}
-	size_t find(T value) {
-		for (size_t i = 0; i < data_.size(); ++i) {
-			if (data_[i] == value) {
-				return i;
-			}
-		}
-		return data_.size();
-	}
-	ALWAYS_INLINE T back() const {
-		return data_.back();
-	}
-	size_t size() const {
-		return data_.size();
-	}
-	void moveToFront(size_t index) {
-		auto old = data_[index];
-		while (index) {
-			data_[index] = data_[index - 1];
-			--index;
-		}
-		data_[0] = old;
-	}
+  void init(size_t n) {
+    data_.resize(n);
+    for (size_t i = 0; i < n; ++i) {
+      data_[i] = static_cast<T>(n - 1 - i);
+    }
+  }
+  size_t find(T value) {
+    for (size_t i = 0; i < data_.size(); ++i) {
+      if (data_[i] == value) {
+        return i;
+      }
+    }
+    return data_.size();
+  }
+  ALWAYS_INLINE T back() const {
+    return data_.back();
+  }
+  size_t size() const {
+    return data_.size();
+  }
+  void moveToFront(size_t index) {
+    auto old = data_[index];
+    while (index) {
+      data_[index] = data_[index - 1];
+      --index;
+    }
+    data_[0] = old;
+  }
 };
 
 template <class T, size_t kSize>
 class StaticArray {
 public:
-	StaticArray() {
-	}
-	ALWAYS_INLINE const T& operator[](size_t i) const {
-		return data_[i];
-	}
-	ALWAYS_INLINE T& operator[](size_t i) {
-		return data_[i];
-	}
-	ALWAYS_INLINE size_t size() const {
-		return kSize;
-	}
+  StaticArray() {
+  }
+  ALWAYS_INLINE const T& operator[](size_t i) const {
+    return data_[i];
+  }
+  ALWAYS_INLINE T& operator[](size_t i) {
+    return data_[i];
+  }
+  ALWAYS_INLINE size_t size() const {
+    return kSize;
+  }
 
 private:
-	T data_[kSize];
+  T data_[kSize];
 };
 
 template <class T, uint32_t kCapacity>
 class StaticBuffer {
 public:
-	StaticBuffer() : pos_(0), size_(0) {
-	}
-	ALWAYS_INLINE const T& operator[](size_t i) const {
-		return data_[i];
-	}
-	ALWAYS_INLINE T& operator[](size_t i) {
-		return data_[i];
-	}
-	ALWAYS_INLINE size_t pos() const {
-		return pos_;
-	}
-	ALWAYS_INLINE size_t size() const {
-		return size_;
-	}
-	ALWAYS_INLINE size_t capacity() const {
-		return kCapacity;
-	}
-	ALWAYS_INLINE size_t reamainCapacity() const {
-		return capacity() - size();
-	}
-	ALWAYS_INLINE T get() {
-		(pos_ < size_);
-		return data_[pos_++];
-	}
-	ALWAYS_INLINE void read(T* ptr, size_t len) {
-		dcheck(pos_ + len <= size_);
-		std::copy(&data_[pos_], &data_[pos_ + len], &ptr[0]);
-		pos_ += len;
-	}
-	ALWAYS_INLINE void put(T c) {
-		dcheck(pos_ < size_);
-		data_[pos_++] = c;
-	}
-	ALWAYS_INLINE void write(const T* ptr, size_t len) {
-		dcheck(pos_ + len <= size_);
-		std::copy(&ptr[0], &ptr[len], &data_[pos_]);
-		pos_ += len;
-	}
-	ALWAYS_INLINE size_t remain() const {
-		return size_ - pos_;
-	}
-	void erase(size_t chars) {
-		dcheck(chars <= pos());
-		std::move(&data_[chars], &data_[size()], &data_[0]);
-		pos_ -= std::min(pos_, chars);
-		size_ -= std::min(size_, chars);
-	}
-	void addPos(size_t n) {
-		pos_ += n;
-		dcheck(pos_ <= size());
-	}
-	void addSize(size_t n) {
-		size_ += n;
-		dcheck(size_ <= capacity());
-	}
-	T* begin() {
-		return &operator[](0);
-	}
-	T* end() {
-		return &operator[](size_);
-	}
-	T* limit() {
-		return &operator[](capacity());
-	}
+  StaticBuffer() : pos_(0), size_(0) {
+  }
+  ALWAYS_INLINE const T& operator[](size_t i) const {
+    return data_[i];
+  }
+  ALWAYS_INLINE T& operator[](size_t i) {
+    return data_[i];
+  }
+  ALWAYS_INLINE size_t pos() const {
+    return pos_;
+  }
+  ALWAYS_INLINE size_t size() const {
+    return size_;
+  }
+  ALWAYS_INLINE size_t capacity() const {
+    return kCapacity;
+  }
+  ALWAYS_INLINE size_t reamainCapacity() const {
+    return capacity() - size();
+  }
+  ALWAYS_INLINE T get() {
+    (pos_ < size_);
+    return data_[pos_++];
+  }
+  ALWAYS_INLINE void read(T* ptr, size_t len) {
+    dcheck(pos_ + len <= size_);
+    std::copy(&data_[pos_], &data_[pos_ + len], &ptr[0]);
+    pos_ += len;
+  }
+  ALWAYS_INLINE void put(T c) {
+    dcheck(pos_ < size_);
+    data_[pos_++] = c;
+  }
+  ALWAYS_INLINE void write(const T* ptr, size_t len) {
+    dcheck(pos_ + len <= size_);
+    std::copy(&ptr[0], &ptr[len], &data_[pos_]);
+    pos_ += len;
+  }
+  ALWAYS_INLINE size_t remain() const {
+    return size_ - pos_;
+  }
+  void erase(size_t chars) {
+    dcheck(chars <= pos());
+    std::move(&data_[chars], &data_[size()], &data_[0]);
+    pos_ -= std::min(pos_, chars);
+    size_ -= std::min(size_, chars);
+  }
+  void addPos(size_t n) {
+    pos_ += n;
+    dcheck(pos_ <= size());
+  }
+  void addSize(size_t n) {
+    size_ += n;
+    dcheck(size_ <= capacity());
+  }
+  T* begin() {
+    return &operator[](0);
+  }
+  T* end() {
+    return &operator[](size_);
+  }
+  T* limit() {
+    return &operator[](capacity());
+  }
 
 private:
-	size_t pos_;
-	size_t size_;
-	T data_[kCapacity];
+  size_t pos_;
+  size_t size_;
+  T data_[kCapacity];
 };
 
 std::string prettySize(uint64_t size);
@@ -385,35 +385,37 @@ std::string getExt(const std::string& str);
 std::string getFileName(const std::string& str);
 
 static inline int Clamp(int a, int min, int max) {
-	if (a < min) a = min;
-	if (a > max) a = max;
-	return a;
+  if (a < min) a = min;
+  if (a > max) a = max;
+  return a;
 }
 
 static inline const size_t RoundDown(size_t n, size_t r) {
-	return n - n % r;
+  return n - n % r;
 }
 
 static inline const size_t RoundUp(size_t n, size_t r) {
-	return RoundDown(n + r - 1, r);
+  return RoundDown(n + r - 1, r);
 }
 
 template <typename T>
 static void ReplaceSubstring(T* data, size_t old_pos, size_t len, size_t new_pos) {
-	if (old_pos == new_pos) {
-		return;
-	}
-	size_t cur_len = 256;
-	T temp[256];
-	// Delete cur and reinsert.
-	memcpy(temp, &data[old_pos], len * sizeof(T));
-	cur_len -= len;
-	memmove(&data[old_pos], &data[old_pos + len], (cur_len - old_pos) * sizeof(T));
-	// Reinsert.
-	new_pos = new_pos % (cur_len + 1);
-	memmove(&data[new_pos + len], &data[new_pos], (cur_len - new_pos) * sizeof(T));
-	memcpy(&data[new_pos], temp, len * sizeof(T));
+  if (old_pos == new_pos) {
+    return;
+  }
+  size_t cur_len = 256;
+  T temp[256];
+  // Delete cur and reinsert.
+  memcpy(temp, &data[old_pos], len * sizeof(T));
+  cur_len -= len;
+  memmove(&data[old_pos], &data[old_pos + len], (cur_len - old_pos) * sizeof(T));
+  // Reinsert.
+  new_pos = new_pos % (cur_len + 1);
+  memmove(&data[new_pos + len], &data[new_pos], (cur_len - new_pos) * sizeof(T));
+  memcpy(&data[new_pos], temp, len * sizeof(T));
 }
 
+void RunUtilTests();
+bool IsAbsolutePath(const std::string& path);
 
 #endif

@@ -25,13 +25,6 @@
 
 #include <memory>
 
-void CompressorFactories::init() {
-  if (instance == nullptr) {
-    instance = new CompressorFactories;
-    instance->addCompressor(false, new Compressor::FactoryOf<Store>);
-  }
-}
-
 size_t MemCopyCompressor::getMaxExpansion(size_t in_size) {
   return in_size;
 }
@@ -89,40 +82,6 @@ void Store::decompress(Stream* in, Stream* out, uint64_t count) {
     out->write(buffer, read);
     count -= read;
   }
-}
-
-void CompressorFactories::addCompressor(bool is_legacy, Compressor::Factory* factory) {
-  if (!is_legacy) {
-    factories.push_back(factory);
-  }
-  legacy_factories.push_back(factory);
-}
-
-uint32_t CompressorFactories::findFactoryIndex(Compressor::Factory* factory) const {
-  for (uint32_t i = 0; i < legacy_factories.size(); ++i) {
-    if (legacy_factories[i] == factory) {
-      return i;
-    }
-  }
-  assert(!"Can't find compressor");
-  return static_cast<uint32_t>(-1);
-}
-
-CompressorFactories::CompressorFactories() {
-}
-
-Compressor::Factory* CompressorFactories::getLegacyFactory(uint32_t index) {
-  return legacy_factories[index];
-}
-
-Compressor::Factory* CompressorFactories::getFactory(uint32_t index) {
-  return factories[index];
-}
-
-Compressor* CompressorFactories::makeCompressor(uint32_t type) {
-  auto* factory = CompressorFactories::getInstance()->getFactory(type);
-  check(factory != nullptr);
-  return factory->create();
 }
 
 void MemoryCompressor::compress(Stream* in, Stream* out, uint64_t max_count) {

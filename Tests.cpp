@@ -21,9 +21,8 @@
     along with MCM.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#ifndef TESTS_HPP_
-#define TESTS_HPP_
+#include "Compressor.hpp"
 
-void RunAllTests();
-
-#endif
+void RunAllTests() {
+  RunUtilTests();
+}
