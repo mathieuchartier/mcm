@@ -85,6 +85,10 @@ public:
   void setPrefix(const std::string* prefix) {
     prefix_ = prefix;
   }
+  void SetName(const std::string& name) {
+    name_ = name;
+  }
+  static void CreateDir(const std::string& name);
 
 private:
   void convertAttributes(uint32_t attrs);
@@ -540,7 +544,6 @@ inline WriteStream& operator << (WriteStream& stream, float c) {
 inline WriteStream& operator << (WriteStream& stream, double c) {
   return stream << *reinterpret_cast<uint64_t*>(&c);
 }
-
 
 // OS specific, directory.
 

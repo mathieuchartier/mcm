@@ -56,7 +56,9 @@ void FileList::write(Stream* stream) {
     // Find matching chars.
     size_t len = 0;
     for (;last_name != nullptr && len < last_name->length() && len < name.length(); ++len) {
-      if (last_name->operator[](len) != name[len]) break;
+      if (last_name->operator[](len) != name[len]) {
+        break;
+      }
     }
     lens.push_back(len);
     stream->writeString(&name[0] + len, '\0');
@@ -99,6 +101,10 @@ std::string FileInfo::attrToStr(uint16_t attr) {
 #include <Windows.h>
 #pragma comment(lib, "User32.lib")
 
+void FileInfo::CreateDir(const std::string& name) {
+  CreateDirectoryA(name.c_str(), nullptr);
+}
+
 FileInfo::FileInfo(const std::string& name, const std::string* prefix)
   : FileInfo(name, prefix, GetFileAttributesA(name.c_str())) {
 }
@@ -138,7 +144,6 @@ bool FileList::addDirectory(const std::string& dir, const std::string* prefix) {
   do {
     std::string file_name = ffd.cFileName;
     if (file_name != "." && file_name != "..") {
-
       push_back(FileInfo(dir + "/" + file_name, prefix, ffd.dwFileAttributes));
     }
   } while (FindNextFileA(handle, &ffd) != 0);
@@ -149,6 +154,7 @@ bool FileList::addDirectory(const std::string& dir, const std::string* prefix) {
   FindClose(handle);
   return true;
 }
+
 // #else
 
 // #endif

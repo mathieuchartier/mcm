@@ -63,14 +63,12 @@ public:
   static const CompLevel kDefaultLevel = kCompLevelMid;
   static const FilterType kDefaultFilter = kFilterTypeAuto;
   static const LZPType kDefaultLZPType = kLZPTypeAuto;
-  CompressionOptions() : mem_usage_(kDefaultMemUsage), comp_level_(kDefaultLevel), filter_type_(kDefaultFilter), lzp_type_(kDefaultLZPType) {
-  }
 
 public:
-  size_t mem_usage_;
-  CompLevel comp_level_;
-  FilterType filter_type_;
-  LZPType lzp_type_;
+  size_t mem_usage_ = kDefaultMemUsage;
+  CompLevel comp_level_ = kDefaultLevel;
+  FilterType filter_type_ = kDefaultFilter;
+  LZPType lzp_type_ = kDefaultLZPType;
 };
 
 // File headers are stored in a list of blocks spread out through data.

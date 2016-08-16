@@ -27,9 +27,6 @@
 #include <cstring>
 
 #include "CM-inl.hpp"
-#include "LZ-inl.hpp"
-#include "LZW.hpp"
-#include "TurboCM.hpp"
 #include "X86Binary.hpp"
 #include "Wav16.hpp"
 
@@ -296,6 +293,16 @@ public:
     : FileSegmentStream(segments, count), file_list_(file_list), extract_(extract) {
   }
   ~FileSegmentStreamFileList() {
+      // Open remaining streams if zero sized?
+    if (extract_) {
+      size_t index = 0;
+      for (auto& file_info : *file_list_) {
+        if (!file_info.isDir() && !file_info.previouslyOpened()) {
+          openNewStream(index);
+        }
+        ++index;
+      }
+    }
     delete cur_stream_;
   }
   Stream* openNewStream(size_t index) OVERRIDE {
@@ -426,6 +433,12 @@ static inline std::string smartExt(const std::string& ext) {
 class CompareFileInfoName {
 public:
   bool operator()(const FileInfo& a, const FileInfo& b) const {
+    if (a.isDir() != b.isDir()) {
+      return a.isDir() > b.isDir();
+    }
+    if (a.isDir()) {
+      return a.getFullName() < b.getFullName();
+    }
     auto& name1 = a.getName();
     auto& name2 = b.getName();
     auto ext1 = getExt(name1);
@@ -433,8 +446,8 @@ public:
     auto sext1 = smartExt(ext1);
     auto sext2 = smartExt(ext2);
     if (sext1 != sext2) return sext1 < sext2;
-    auto fname1 = getFileName(name1);
-    auto fname2 = getFileName(name2);
+    auto fname1 = GetFileName(name1).second;
+    auto fname2 = GetFileName(name2).second;
     if (false) {
       // Probably buggy.
       if (!ext1.empty()) fname1 = fname1.substr(0, fname1.length() - ext1.length() - 1);
@@ -602,13 +615,31 @@ private:
 };
 
 uint64_t Archive::compress(const std::vector<FileInfo>& in_files) {
+  std::list<std::string> prefixes;
   blocks_.clear();
   // Enumerate files
   auto start = clock();
   std::cout << "Enumerating files" << std::endl;
-  for (auto& f : in_files) {
-    if (f.isDir()) files_.addDirectoryRec(f.getName());
+  for (auto f : in_files) {
+    const std::string cur_name(f.getName());
+    const bool absolute_path = IsAbsolutePath(cur_name);
+    if (absolute_path) {
+      auto pair = GetFileName(cur_name);
+      prefixes.push_back(pair.first);
+      f.setPrefix(&prefixes.back());
+      f.SetName(pair.second);
+    }
     files_.push_back(f);
+    // If abslute, take prefix directory as prefix.
+    if (f.isDir()) {
+      if (absolute_path) {
+        auto pair = GetFileName(cur_name);
+        prefixes.push_back(pair.first);
+        files_.addDirectoryRec(pair.second, &prefixes.back());
+      } else {
+        files_.addDirectoryRec(f.getName());
+      }
+    }
   }
   std::sort(files_.begin(), files_.end(), CompareFileInfoName());
   std::cout << "Enumerating took " << clockToSeconds(clock() - start) << "s" << std::endl;
@@ -630,12 +661,15 @@ uint64_t Archive::compress(const std::vector<FileInfo>& in_files) {
       if (!f.isDir()) {
         File fin;
         int err;
-        if (err = fin.open(f.getName(), std::ios_base::in | std::ios_base::binary)) {
+        if (err = fin.open(f.getFullName(), std::ios_base::in | std::ios_base::binary)) {
           std::cerr << "Error opening: " << f.getName() << " (" << errstr(err) << ")" << std::endl;
         }
         thr.setStream(&fin);
         analyzer.analyze(&fin, file_idx);
         auto& blocks = analyzer.getBlocks();
+        if (blocks.empty()) {
+          blocks.push_back(Detector::DetectedBlock());
+        }
         uint64_t pos = 0;
         for (const auto& block : blocks_) {
           // Compress each stream type.
@@ -646,15 +680,13 @@ uint64_t Archive::compress(const std::vector<FileInfo>& in_files) {
           for (const auto& b : blocks) {
             const auto len = b.length();
             if (b.profile() == block->algorithm_.profile()) {
-              FileSegmentStream::SegmentRange range;
-              range.offset_ = pos;
-              range.length_ = len;
+              FileSegmentStream::SegmentRange range { pos, len };
               seg.ranges_.push_back(range);
             }
             pos += len;
           }
           seg.calculateTotalSize();
-          if (seg.total_size_ > 0) {
+          if (!seg.ranges_.empty()) {
             block->segments_.push_back(seg);
             block->total_size_ += seg.total_size_;
           }
@@ -717,6 +749,7 @@ uint64_t Archive::compress(const std::vector<FileInfo>& in_files) {
     check(segstream.tell() == block->total_size_);
     total += block->total_size_;
   }
+  files_.clear();
   return total;
 }
 
@@ -725,6 +758,10 @@ void Archive::decompress(const std::string& out_dir, bool verify) {
   readBlocks();
   for (auto& f : files_) {
     f.setPrefix(&out_dir);
+    if (f.isDir()) {
+      // Create directories first.
+      FileInfo::CreateDir(f.getFullName());
+    }
   }
   std::vector<uint64_t> remain_bytes;
   if (verify) {
@@ -792,8 +829,7 @@ void Archive::list() {
   for (const auto& f : files_) {
     std::cout << FileInfo::attrToStr(f.getAttributes()) << " " << f.getName() << std::endl;
   }
-  uint64_t total_size = 0;
-  size_t idx = 0;
+  uint64_t total_size = 0, idx = 0;
   for (const auto& b : blocks_) {
     if (b->total_size_ > 0) {
       std::cout << "Solid block " << idx++ << " size " << formatNumber(b->total_size_) << " profile " << Detector::profileToString(b->algorithm_.profile()) << std::endl;
@@ -802,5 +838,4 @@ void Archive::list() {
   }
   // Sum up blocks size
   std::cout << "Files " << files_.size() << " uncompressed size " << formatNumber(total_size) << std::endl;
-  // Done listing files.
 }

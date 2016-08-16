@@ -382,7 +382,7 @@ std::vector<uint8_t> loadFile(const std::string& name, uint32_t max_size = 0xFFF
 std::string trimExt(const std::string& str);
 std::string trimDir(const std::string& str);
 std::string getExt(const std::string& str);
-std::string getFileName(const std::string& str);
+std::pair<std::string, std::string> GetFileName(const std::string& str);
 
 static inline int Clamp(int a, int min, int max) {
   if (a < min) a = min;

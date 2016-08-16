@@ -135,14 +135,15 @@ std::string getExt(const std::string& str) {
   return "";
 }
 
-std::string getFileName(const std::string& str) {
+std::pair<std::string, std::string> GetFileName(const std::string& str) {
   int i = str.length();
   for (; i > 0; --i) {
     if (str[i - 1] == '\\' || str[i - 1] == '/') {
-      return str.substr(i);
+      return std::pair<std::string, std::string>(str.substr(0, i), str.substr(i));
     }
   }
-  return str;
+  // No directory.
+  return std::pair<std::string, std::string>("", str);
 }
 
 bool IsAbsolutePath(const std::string& path) {
