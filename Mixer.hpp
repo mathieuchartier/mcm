@@ -109,7 +109,6 @@ public:
     int prob_shift,
     int p0 = 0, int p1 = 0, int p2 = 0, int p3 = 0, int p4 = 0, int p5 = 0, int p6 = 0, int p7 = 0,
     int p8 = 0, int p9 = 0, int p10 = 0, int p11 = 0, int p12 = 0, int p13 = 0, int p14 = 0, int p15 = 0) const {
-    // int64_t ptotal = skew_;
     int64_t ptotal = skew_;
     if (kWeights > 0) ptotal += p0 * static_cast<int>(w_[0]);
     if (kWeights > 1) ptotal += p1 * static_cast<int>(w_[1]);
@@ -131,13 +130,12 @@ public:
   }
 
   ALWAYS_INLINE bool Update(int pr, uint32_t bit,
-    uint32_t prob_shift = 12, int limit = 24, int delta = 1, int skew_learn = 9,
+    uint32_t prob_shift = 12, int limit = 24, int delta_round = 250, int skew_learn = 9,
     int learn_mult = 31, size_t shift = 16,
     int p0 = 0, int p1 = 0, int p2 = 0, int p3 = 0, int p4 = 0, int p5 = 0, int p6 = 0, int p7 = 0,
     int p8 = 0, int p9 = 0, int p10 = 0, int p11 = 0, int p12 = 0, int p13 = 0, int p14 = 0, int p15 = 0) {
     const int err = ((bit << prob_shift) - pr) * learn_mult;
     // const int delta_round = (1 << shift) >> (prob_shift - delta);
-    const int delta_round = 250;
     const bool ret = err < -delta_round || err > delta_round;
     if (ret) {
       UpdateRec<0>(p0, err, shift);

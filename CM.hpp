@@ -425,7 +425,7 @@ namespace cm {
 
     ALWAYS_INLINE uint8_t NextState(uint32_t index, uint8_t state, uint32_t bit, uint32_t ctx, size_t update = 9) {
       if (!kFixedProbs) {
-        probs_[ctx + prob_ctx_add_].Update(state, bit, 9);
+        probs_[ctx + prob_ctx_add_].Update(state, bit, update);
       }
       if (!std::is_same<VoidHistoryWriter, HistoryType>::value) {
         // Not void implies model out.
@@ -560,7 +560,7 @@ namespace cm {
       // Returns false if we skipped the update due to a low error, should happen moderately frequently on highly compressible files.
       bool ret = m0->Update(
         mixer_p, bit,
-        kShift, kLimit, opt_var_, 1,
+        kShift, kLimit, 100 + 5 * 86, 1,
         mixer_update_rate_[m0->GetLearn()], 16,
         p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15
         );
@@ -571,17 +571,17 @@ namespace cm {
           match_model_.updateCurMdl(1, bit, 6);
         } else if (mm_l == 0) {
           // 18,20,20,20,11,9,8,8,20,8,
-          if (kInputs > 0) *sp0 = NextState(sp0 - hash_table_, s0, bit, 0, kOptP ? opts_[0] : 18);
+          if (kInputs > 0) *sp0 = NextState(sp0 - hash_table_, s0, bit, 0, 10u);
         }
-        if (kInputs > 1) *sp1 = NextState(sp1 - hash_table_, s1, bit, 1, kOptP ? opts_[1] : 20);
-        if (kInputs > 2) *sp2 = NextState(sp2 - hash_table_, s2, bit, 2, kOptP ? opts_[2] : 20);
-        if (kInputs > 3) *sp3 = NextState(sp3 - hash_table_, s3, bit, 3, kOptP ? opts_[3] : 20);
-        if (kInputs > 4) *sp4 = NextState(sp4 - hash_table_, s4, bit, 4, kOptP ? opts_[4] : 11);
+        if (kInputs > 1) *sp1 = NextState(sp1 - hash_table_, s1, bit, 1, kOptP ? opts_[1] : 9);
+        if (kInputs > 2) *sp2 = NextState(sp2 - hash_table_, s2, bit, 2, kOptP ? opts_[2] : 9);
+        if (kInputs > 3) *sp3 = NextState(sp3 - hash_table_, s3, bit, 3, kOptP ? opts_[3] : 9);
+        if (kInputs > 4) *sp4 = NextState(sp4 - hash_table_, s4, bit, 4, kOptP ? opts_[4] : 9);
         if (kInputs > 5) *sp5 = NextState(sp5 - hash_table_, s5, bit, 5, kOptP ? opts_[5] : 9);
-        if (kInputs > 6) *sp6 = NextState(sp6 - hash_table_, s6, bit, 6, kOptP ? opts_[6] : 8);
-        if (kInputs > 7) *sp7 = NextState(sp7 - hash_table_, s7, bit, 7, kOptP ? opts_[7] : 8);
-        if (kInputs > 8) *sp8 = NextState(sp8 - hash_table_, s8, bit, 8, kOptP ? opts_[8] : 20);
-        if (kInputs > 9) *sp9 = NextState(sp9 - hash_table_, s9, bit, 9, kOptP ? opts_[9] : 8);
+        if (kInputs > 6) *sp6 = NextState(sp6 - hash_table_, s6, bit, 6, kOptP ? opts_[6] : 9);
+        if (kInputs > 7) *sp7 = NextState(sp7 - hash_table_, s7, bit, 7, kOptP ? opts_[7] : 9);
+        if (kInputs > 8) *sp8 = NextState(sp8 - hash_table_, s8, bit, 8, kOptP ? opts_[8] : 9);
+        if (kInputs > 9) *sp9 = NextState(sp9 - hash_table_, s9, bit, 9, kOptP ? opts_[9] : 9);
         if (kInputs > 10) *sp10 = NextState(sp10 - hash_table_, s10, bit, 10, kOptP ? opts_[10] : 9);
         if (kInputs > 11) *sp11 = NextState(sp11 - hash_table_, s11, bit, 11, kOptP ? opts_[11] : 9);
         if (kInputs > 12) *sp12 = NextState(sp12 - hash_table_, s12, bit, 12, kOptP ? opts_[12] : 9);
@@ -691,9 +691,8 @@ namespace cm {
       return h;
     }
 
-
     template <const bool decode, typename TStream>
-    ALWAYS_INLINE size_t processByte(TStream& stream, uint32_t c = 0) {
+    size_t processByte(TStream& stream, uint32_t c = 0) {
       size_t base_contexts[kInputs] = {};
       auto* ctx_ptr = base_contexts;
 
@@ -705,20 +704,76 @@ namespace cm {
         p2 = static_cast<uint8_t>(last_bytes_ >> 16),
         p3 = static_cast<uint8_t>(last_bytes_ >> 24);
 
-      // 2014225
-
+      uint32_t h = HashFunc((last_bytes_ & 0xFFFF) * 5, 0x4ec457ce * 3);
       size_t expected_char = 0;
       size_t mm_len = 0;
       size_t mm_order = cur_profile_.MatchModelOrder();
       if (mm_order != 0) {
         match_model_.update(buffer_);
         if (mm_len = match_model_.getLength()) {
+          miss_len_ = 0;
           match_model_.setCtx(interval_model_ & 0xFF);
           match_model_.updateCurMdl();
           expected_char = match_model_.getExpectedChar(buffer_);
           uint32_t expected_bits = use_huffman ? huff.getCode(expected_char).length : 8;
           size_t expected_code = use_huffman ? huff.getCode(expected_char).value : expected_char;
           match_model_.updateExpectedCode(expected_code, expected_bits);
+        }
+      }
+
+      if (mm_len == 0) {
+        ++miss_len_;
+        if (kStatistics) {
+          ++other_count_;
+          ++miss_count_[std::min(kMaxMiss - 1, miss_len_ / 32)];
+        }
+        if (miss_len_ >= 100 * opt_var_) {
+          if (kStatistics) ++fast_bytes_;
+
+          uint32_t order = 3;
+          for (; order <= cur_profile_.MaxOrder(); ++order) {
+            h = HashFunc(buffer_[bpos - order], h);
+          }
+          match_model_.setHash(h);
+
+          if (false) {
+            if (decode) {
+              c = ent.DecodeDirectBits(stream, 8);
+            } else {
+              ent.EncodeBits(stream, c, 8);
+            }
+          } else {
+            // &hash_table_[o2pos + (last_bytes_ & 0xFFFF) * o0size]
+            auto* s0 = &hash_table_[o0pos];
+            auto* s1 = &hash_table_[o1pos + p0 * o0size];
+            size_t ctx = 1;
+            uint32_t ch = c << 24;
+            while (ctx < 256) {
+              auto* st0 = s0 + ctx;
+              auto* st1 = s1 + ctx;
+              auto* pr = &fast_mix_[*st0][*st1];
+              auto p = pr->getP();
+              p += p == 0;
+              p -= p == kMaxValue;
+              size_t bit;
+              if (decode) {
+                bit = ent.getDecodedBit(p, kShift);
+                ent.Normalize(stream);
+              } else {
+                bit = ch >> 31;
+                ent.encode(stream, bit, p, kShift);
+                ch <<= 1;
+              }
+              pr->update(bit, 8);
+              *st0 = state_trans_[*st0][bit];
+              *st1 = state_trans_[*st1][bit];
+              ctx += ctx + bit;
+            }
+            if (decode) {
+              c = ctx & 0xFF;
+            }
+          }
+          return c;
         }
       }
 
@@ -760,8 +815,6 @@ namespace cm {
       if (cur.ModelEnabled(kModelOrder2)) {
         *(ctx_ptr++) = o2pos + (last_bytes_ & 0xFFFF) * o0size;
       }
-      uint32_t h = HashFunc((last_bytes_ & 0xFFFF) * 5, 0x4ec457ce * 3);
-      // uint32_t h = 0x4ec457ce + (last_bytes_ & 0xFFFF) * (1 + 2 * opt_var_);
       uint32_t order = 3;
 
       for (; order <= cur_profile_.MaxOrder(); ++order) {
@@ -785,8 +838,6 @@ namespace cm {
         *(ctx_ptr++) = hash_lookup(hashify(interval_model_ & interval_mask_) + (6 * 0x97654321), kUsePrefetch);
       }
       if (cur.ModelEnabled(kModelInterval2)) {
-        // 28
-        // 8
         *(ctx_ptr++) = hash_lookup(hashify(interval_model_ & interval2_mask_) + (22 * 123456781 + 1), kUsePrefetch);
       }
 
@@ -795,9 +846,6 @@ namespace cm {
         *(ctx_ptr++) = hash_lookup(hashify(hash + 82123123 * 9) + 0x20019412, false);
       }
 
-      //std::swap(base_contexts[0], base_contexts[opts_[0] % kInputs]);
-
-      // match_model_.setHash(h ^ (last_bytes_ >> 37));
       match_model_.setHash(h);
       dcheck(ctx_ptr - base_contexts <= kInputs + 1);
       sse_ctx_ = 0;
@@ -806,7 +854,6 @@ namespace cm {
 
       CalcMixerBase();
       if (mm_len > 0) {
-        miss_len_ = 0;
         if (kStatistics) {
           if (!decode) {
             ++(expected_char == c ? match_count_ : non_match_count_);
@@ -830,51 +877,7 @@ namespace cm {
           }
         }
       } else {
-        ++miss_len_;
-        if (kStatistics) {
-          ++other_count_;
-          ++miss_count_[std::min(kMaxMiss - 1, miss_len_ / 32)];
-        }
-        if (false && miss_len_ > miss_fast_path_) {
-          if (kStatistics) ++fast_bytes_;
-
-          if (false) {
-            if (decode) {
-              c = ent.DecodeDirectBits(stream, 8);
-            } else {
-              ent.EncodeBits(stream, c, 8);
-            }
-          } else {
-            auto* s0 = &hash_table_[o1pos + p0 * o0size];
-            auto* s1 = &hash_table_[o2pos + (last_bytes_ & 0xFFFF) * o0size];
-            size_t ctx = 1;
-            uint32_t ch = c << 24;
-            while (ctx < 256) {
-              auto* st0 = s0 + ctx;
-              auto* st1 = s1 + ctx;
-              auto* pr = &fast_mix_[*st0][*st1];
-              auto p = pr->getP();
-              p += p == 0;
-              size_t bit;
-              if (decode) {
-                bit = ent.getDecodedBit(p, kShift);
-                ent.Normalize(stream);
-              } else {
-                bit = ch >> 31;
-                ent.encode(stream, bit, p, kShift);
-                ch <<= 1;
-              }
-              pr->update(bit);
-              *st0 = state_trans_[*st0][bit];
-              *st1 = state_trans_[*st1][bit];
-              ctx += ctx + bit;
-            }
-            if (decode) {
-              c = ctx & 0xFF;
-            }
-          }
-          return c;
-        }
+        
       }
       if (false) {
         match_model_.resetMatch();
