@@ -101,6 +101,10 @@ class WordCounter {
 public:
   static constexpr size_t kMaxLength = 256;
 
+  ~WordCounter() {
+    std::cerr << std::endl << "Word counter used " << Used() << std::endl;
+  }
+
   void Init(size_t memory) {
     assert(memory % 8 == 0);
     mem_map_.resize(memory);
@@ -236,7 +240,7 @@ private:
       return ret;
     }
 
-    bool Equals(const Entry* other) const {
+    ALWAYS_INLINE bool Equals(const Entry* other) const {
       return length_ == other->length_ && memcmp(data_, other->data_, length_) == 0;
     }
 
@@ -248,11 +252,18 @@ private:
       ++count_[static_cast<uint32_t>(type)];
     }
 
+    class ContextList {
+    public:
+      uint32_t context_;
+      uint32_t next_;
+    };
+
   private:
     // Count for each modifier.
     uint32_t count_[3] = {};
     uint8_t length_ = 0;
     uint8_t data_[0];
+    // Linked list context list.
   };
 
   size_t Remain() const {

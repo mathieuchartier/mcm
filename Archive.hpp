@@ -69,6 +69,8 @@ public:
   CompLevel comp_level_ = kDefaultLevel;
   FilterType filter_type_ = kDefaultFilter;
   LZPType lzp_type_ = kDefaultLZPType;
+  std::string dict_file_;
+  std::string out_dict_file_;
 };
 
 // File headers are stored in a list of blocks spread out through data.
@@ -109,7 +111,7 @@ public:
     Compressor* createCompressor();
     void read(Stream* stream);
     void write(Stream* stream);
-    Filter* createFilter(Stream* stream, Analyzer* analyzer, size_t opt_var = 0);
+    Filter* createFilter(Stream* stream, Analyzer* analyzer, Archive& archive, size_t opt_var = 0);
     Detector::Profile profile() const {
       return profile_;
     }
@@ -154,6 +156,10 @@ public:
     return header_;
   }
 
+  CompressionOptions& Options() {
+    return options_;
+  }
+
   bool setOpt(size_t var) {
     opt_var_ = var;
     return true;
@@ -177,12 +183,12 @@ public:
   // List files and info.
   void list();
 
+  size_t* opt_vars_ = nullptr;
 private:
   Stream* stream_;
   Header header_;
   CompressionOptions options_;
-  size_t opt_var_;
-  size_t* opt_vars_ = nullptr;
+  size_t opt_var_;  
   FileList files_;  // File list.
   Blocks blocks_;  // Solid blocks.
 

@@ -28,6 +28,7 @@
 #include <cassert>
 #include <ctime>
 #include <emmintrin.h>
+#include <fstream>
 #include <iostream>
 #include <mmintrin.h>
 #include <ostream>
@@ -316,7 +317,7 @@ public:
     return size_;
   }
   ALWAYS_INLINE size_t capacity() const {
-    return kCapacity;
+return kCapacity;
   }
   ALWAYS_INLINE size_t reamainCapacity() const {
     return capacity() - size();
@@ -399,23 +400,59 @@ static inline const size_t RoundUp(size_t n, size_t r) {
 }
 
 template <typename T>
-static void ReplaceSubstring(T* data, size_t old_pos, size_t len, size_t new_pos) {
+static void ReplaceSubstring(T* data, size_t old_pos, size_t len, size_t new_pos, size_t cur_len) {
   if (old_pos == new_pos) {
     return;
   }
-  size_t cur_len = 256;
-  T temp[256];
+  std::vector<T> temp(len);
   // Delete cur and reinsert.
-  memcpy(temp, &data[old_pos], len * sizeof(T));
+  memcpy(&temp[0], &data[old_pos], len * sizeof(T));
   cur_len -= len;
   memmove(&data[old_pos], &data[old_pos + len], (cur_len - old_pos) * sizeof(T));
   // Reinsert.
   new_pos = new_pos % (cur_len + 1);
   memmove(&data[new_pos + len], &data[new_pos], (cur_len - new_pos) * sizeof(T));
-  memcpy(&data[new_pos], temp, len * sizeof(T));
+  memcpy(&data[new_pos], &temp[0], len * sizeof(T));
+}
+
+template <typename T>
+static void Inverse(T* out, const T* in, size_t count) {
+  check(in != out);
+  for (size_t i = 0; i < count; ++i) {
+    out[in[i]] = i;
+  }
+}
+
+template <typename Data, typename Perm>
+static void Permute(Data* out, const Data* in, const Perm* perm, size_t count) {
+  for (size_t i = 0; i < count; ++i) {
+    out[i] = in[perm[i]];
+  }
+}
+
+template <typename Data, typename Perm>
+static void InversePermute(Data* out, const Data* in, const Perm* perm, size_t count) {
+  for (size_t i = 0; i < count; ++i) {
+    out[perm[i]] = in[i];
+  }
 }
 
 void RunUtilTests();
 bool IsAbsolutePath(const std::string& path);
+
+template <typename T>
+std::vector<T> ReadCSI(const std::string& file) {
+  std::ifstream fin(file.c_str());
+  std::vector<T> ret;
+  for (;;) {
+    T temp;
+    if (!(fin >> temp)) break;
+    char separator;
+    fin >> separator;
+    if (separator != ',') break;
+    ret.push_back(temp);
+  }
+  return ret;
+}
 
 #endif

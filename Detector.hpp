@@ -36,6 +36,7 @@
 // Detects blocks and data type from input data
 class Detector {
   bool is_forbidden[256]; // Chars which don't appear in text often.
+  uint8_t is_space[256];
 
   // MZ pattern, todo replace with better detection.
   typedef std::vector<uint8_t> Pattern;
@@ -164,6 +165,9 @@ public:
   uint64_t overhead_bytes_;
   uint64_t small_len_;
 
+  // Spaces.
+  size_t no_spaces_;
+
   // Last things.
   uint32_t last_word_;
 public:
@@ -193,6 +197,8 @@ public:
       29, 30, 31
     };
     for (auto c : forbidden_arr) is_forbidden[c] = true;
+    for (size_t i = 0; i < 256; ++i) is_space[i] = isspace(i) ? 1u : 0u;
+    no_spaces_ = 0;
 
     buffer_.resize(256 * KB);
     // Exe pattern
@@ -207,10 +213,8 @@ public:
     for (;;) {
       const size_t remain = buffer_.capacity() - buffer_.size();
       const size_t n = stream_->read(buffer, std::min(kBufferSize, remain));
-      for (size_t i = 0; i < n; ++i) {
-        buffer_.push_back(buffer[i]);
-      }
       if (n == 0 || remain == 0) break;
+      buffer_.push_n(buffer, n);
     }
   }
 
@@ -334,6 +338,10 @@ public:
     }
   }
 
+  static bool IsWordOrAsciiArtChar(uint8_t c) {
+    return isWordChar(c) || c == '|' || c == '_' || c == '-';
+  }
+
   DetectedBlock detectBlock() {
     if (!saved_blocks_.empty()) {
       auto ret = saved_blocks_.front();
@@ -353,6 +361,11 @@ public:
     while (binary_len < buffer_size) {
       UTF8Decoder<true> decoder;
       size_t text_len = 0;
+      size_t space_count = 0;
+      size_t word_chars = 0;
+      size_t word_len = 0;
+      size_t number_len = 0;
+      int text_score = 0;
       while (binary_len + text_len < buffer_size) {
         size_t pos = binary_len + text_len;
         if (true && last_word_ == 0x52494646) {
@@ -396,27 +409,71 @@ public:
             }
           }
         }
-        auto c = buffer_[pos];
+        const uint8_t c = buffer_[pos];
         last_word_ = (last_word_ << 8) | c;
         decoder.update(c);
-        if (decoder.err() || is_forbidden[static_cast<uint8_t>(c)]) {
+        if (decoder.err() || is_forbidden[c]) {
           break; // Error state?
         }
         ++text_len;
-      }
-      if (text_len > 16 * 8) {
-        if (binary_len == 0) {
-          return DetectedBlock(kProfileText, static_cast<uint32_t>(text_len));
+        const uint8_t last_c = (last_word_ >> 8) & 0xFF;
+        text_score += is_space[c];
+        if (last_c != c) {
+          if (IsWordOrAsciiArtChar(c)) {
+            ++word_len;
+            text_score += is_space[last_c] * 10;
+          } else if (word_len != 0) {
+            if (word_len >= 3 && word_len < 32) {
+              text_score += word_len * 3;
+            }
+            text_score += is_space[c] * 10;
+            word_len = 0;
+          }
+          if (c >= '0' && c <= '9') {
+            ++number_len;
+          } else {
+            number_len = 0;
+          }
+          text_score += number_len >= 1 && number_len <= 12;
+          space_count += is_space[c];
         } else {
-          break;
+          if (!is_space[c] && !isdigit(c)) {
+            // Only expect adjacent spaces really.
+            --text_score;
+          }
         }
-      } else {
-        binary_len += text_len;
-        if (binary_len >= buffer_size) {
-          break;
-        }
-        ++binary_len;
       }
+      if (text_len > 64) {
+        uint8_t buf[512];
+        char* bptr = reinterpret_cast<char*>(buf);
+        for (size_t i = 0; i < sizeof(buf) && i < text_len; ++i) {
+          buf[i] = buffer_[binary_len + i];
+        }
+        if (space_count * 100 > text_len && text_score > static_cast<int>(text_len)) {
+          if (binary_len == 0) {
+            return DetectedBlock(kProfileText, static_cast<uint32_t>(text_len));
+          } else {
+            break;
+          }
+        } else if (false) {
+          std::cerr << space_count << " " << text_score << "/" << text_len << " " << double(text_len) / double(text_score) << std::endl;
+          if (true) {
+            uint8_t buf[512];
+            char* bptr = reinterpret_cast<char*>(buf);
+            std::ofstream oft("binary.txt", std::ios_base::out | std::ios_base::binary);
+            for (size_t i = 0; i < text_len; ++i) {
+              char c = buffer_[binary_len + i];
+              oft.write(&c, 1);
+            }
+          }
+          int x = 2;
+        }
+      } 
+      binary_len += text_len;
+      if (binary_len >= buffer_size) {
+        break;
+      }
+      ++binary_len;
     }
     return DetectedBlock(kProfileBinary, static_cast<uint32_t>(binary_len));
   }

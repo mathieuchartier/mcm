@@ -44,9 +44,14 @@ public:
   uint32_t transform[transform_table_size];
 
   uint32_t opt_var_ = 0;
+  size_t* opts_ = nullptr;
 
   void setOpt(uint32_t n) {
     opt_var_ = n;
+  }
+
+  void SetOpts(size_t* opts) {
+    opts_ = opts;
   }
 
   ALWAYS_INLINE uint32_t& trans(char c) {
@@ -66,6 +71,14 @@ public:
     for (uint32_t i = 'A'; i <= 'Z'; ++i) {
       transform[reorder[i]] = transform[reorder[makeLowerCase(static_cast<int>(i))]];
     }
+    for (uint32_t i = 0; i < 32; ++i) {
+      // if (opts_[i]) trans(reorder[opts_[i]]) = index++;
+    }
+    // 6,38,92,3
+    trans(reorder[6]) = index++;
+    trans(reorder[38]) = index++;
+    trans(reorder[92]) = index++;
+    trans(reorder[3]) = index++;
     // trans('"') = index++;
     // trans('&') = index++;
     // trans('<') = index++;
@@ -196,6 +209,57 @@ public:
     */
     return (h * 43) + c;
   }
+};
+
+class DictXMLModel : public WordModel {
+  
+  // 40 82 6
+public:
+  void init(uint8_t* reorder) {
+    last_char_ = 0;
+    dict_remain_ = 0;
+    escape_ = reorder[0x3];
+    upper1_ = reorder[0x4];
+    upper2_ = reorder[0x6];
+    WordModel::init(reorder);
+  }
+
+  void update(uint8_t c) {
+    if (c >= 128) {
+      if (last_char_ == escape_) {
+        WordModel::update(c);
+      } else if (dict_remain_ == 0) {
+        if (c < 128 + 40) {
+          dict_remain_ = 1;
+        } else if (c < 128 + 40 + 82) {
+          dict_remain_ = 2;
+        } else {
+          dict_remain_ = 3;
+        }
+      } else {
+        --dict_remain_;
+      }
+    } else {
+      dict_remain_ = 0;
+    }
+    last_char_ = c;
+    WordModel::update(c);
+  }
+
+  uint32_t getMixedHash() {
+    auto ret = WordModel::getHash();
+    /* if (dict_remain_) {
+      ret ^= dict_remain_ * 12931991;
+    } */
+    return ret;
+  }
+
+private:
+  size_t dict_remain_;
+  uint8_t last_char_;
+  uint8_t escape_ = 0;
+  uint8_t upper1_ = 0;
+  uint8_t upper2_ = 0;
 };
 
 class XMLWordModel : public WordModel {

@@ -174,9 +174,14 @@ public:
 };
 
 class Store : public Compressor {
+  static constexpr bool kReorder = true;
 public:
+  Store();
   virtual void compress(Stream* in, Stream* out, uint64_t count);
   virtual void decompress(Stream* in, Stream* out, uint64_t count);
+private:
+  uint8_t transform_[256];
+  uint8_t reverse_[256];
 };
 
 class MemCopyCompressor : public MemoryCompressor {

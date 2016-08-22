@@ -38,7 +38,10 @@ public:
   void Init(uint8_t* reorder) {
     last_important_char_ = 0;
     std::fill_n(important_map_, 256, false);
-    important_map_[reorder[113]] = true;
+    // important_map_[reorder[113]] = true;
+    // important_map_[reorder[64]] = true;
+    // important_map_[reorder[81]] = true;
+    // important_map_[reorder[opts_[0]]] = true;
     // for (size_t i = 0; i < 10; ++i) if (opts_[i]) important_map_[reorder[opts_[i]]] = true;
   }
 
@@ -142,7 +145,7 @@ public:
     last_notable_ = 0;
     reorder_ = reorder;
     std::fill_n(special_map_, 256, false);
-    uint8_t chars[] = { 42,62,36,92,34,72, };
+    uint8_t chars[] = { 42,62,36,92,34,72,10 };
     for (auto c : chars) special_map_[reorder[c]] = true;
     // for (size_t i = 0; i < 10; ++i) if (opts_[i]) special_map_[reorder[opts_[i]]] = true;
   }

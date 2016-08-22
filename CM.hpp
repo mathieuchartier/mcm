@@ -103,6 +103,13 @@ namespace cm {
       CalculateMaxOrder();
     }
 
+    template <typename T>
+    void EnableModels(const T* models, size_t count) {
+      for (size_t i = 0; i < count; ++i) {
+        EnableModel(static_cast<ModelType>(models[i]));
+      }
+    }
+
     void CalculateMaxOrder() {
       max_order_ = 0;
       for (size_t order = 0; order <= kMaxOrder; ++order) {
@@ -205,7 +212,8 @@ namespace cm {
 
     // Word model
     // XMLWordModel word_model_;
-    WordModel word_model_;
+    // WordModel word_model_;
+    DictXMLModel word_model_;
     size_t word_model_ctx_map_[WordModel::kMaxLen + 1];
 
     // Bracket model
@@ -389,6 +397,7 @@ namespace cm {
       opts_ = opts;
       special_char_model_.SetOpts(opts);
       bracket_.SetOpts(opts);
+      word_model_.SetOpts(opts);
       return true;
     }
 
@@ -410,10 +419,8 @@ namespace cm {
       } else {
         const size_t current_interval = small_interval_model_ & interval_mixer_mask_; // 0xF
         mixer_ctx = current_interval;
-        mixer_ctx = (mixer_ctx << 1);
-        if (mm_len > 0 || word_model_.getLength() > 6) {
-          mixer_ctx |= 1;
-        }
+        mixer_ctx = (mixer_ctx << 1) | (mm_len > 0 || word_model_.getLength() > 6);
+        // mixer_ctx = (mixer_ctx << 1) | ();
       }
       mix1_.SetContext(mixer_ctx << 8);
       if (kUsePrefetch) {
@@ -558,9 +565,10 @@ namespace cm {
       const size_t kLimit = kMaxLearn - 1;
       const size_t kDelta = 5;
       // Returns false if we skipped the update due to a low error, should happen moderately frequently on highly compressible files.
+      // 100 + 5 * 86
       bool ret = m0->Update(
         mixer_p, bit,
-        kShift, kLimit, 100 + 5 * 86, 1,
+        kShift, kLimit, 600, 1,
         mixer_update_rate_[m0->GetLearn()], 16,
         p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15
         );
@@ -727,7 +735,7 @@ namespace cm {
           ++other_count_;
           ++miss_count_[std::min(kMaxMiss - 1, miss_len_ / 32)];
         }
-        if (miss_len_ >= 100 * opt_var_) {
+        if (miss_len_ >= 100000 && false) {
           if (kStatistics) ++fast_bytes_;
 
           uint32_t order = 3;
@@ -743,8 +751,9 @@ namespace cm {
               ent.EncodeBits(stream, c, 8);
             }
           } else {
-            // &hash_table_[o2pos + (last_bytes_ & 0xFFFF) * o0size]
-            auto* s0 = &hash_table_[o0pos];
+            // 6
+            auto* s0 = &hash_table_[o2pos + (last_bytes_ & 0xFFFF) * o0size];
+            // auto* s0 = &hash_table_[o0pos];
             auto* s1 = &hash_table_[o1pos + p0 * o0size];
             size_t ctx = 1;
             uint32_t ch = c << 24;
@@ -956,7 +965,8 @@ namespace cm {
     void update(uint32_t c) {
       if (cur_profile_.ModelEnabled(kModelWord1) ||
         cur_profile_.ModelEnabled(kModelWord2) ||
-        cur_profile_.ModelEnabled(kModelWord12)) {
+        cur_profile_.ModelEnabled(kModelWord12) ||
+        true) {
         word_model_.update(c);
         if (word_model_.getLength() > 2) {
           if (kPrefetchWordModel) {

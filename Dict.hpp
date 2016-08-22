@@ -48,6 +48,7 @@ public:
   static const size_t kMinWordLen = 3;
   static const size_t kMaxWordLen = 256;
   static const size_t kInvalidChar = 256;
+  static const bool kOverlapCodewords = true;
   typedef std::pair<uint32_t, std::string> WCPair;
 
   struct ReverseCompareString {
@@ -247,7 +248,7 @@ public:
   class CodeWordGeneratorFast {
     static const bool kVerbose = true;
   public:
-    void generateCodeWords(Builder& builder, CodeWordSet* words, size_t min_occurrences, size_t num_1 = 32) {
+    void generateCodeWords(Builder& builder, CodeWordSet* words, size_t min_occurrences, size_t num_1 = 32, size_t num_2 = 32) {
       auto start_time = clock();
       auto* cw = words->getCodeWords();
       cw->clear();
@@ -281,18 +282,20 @@ public:
       std::sort(cw->begin(), cw->end());
       word_pairs.erase(word_pairs.begin(), word_pairs.begin() + count1);
       std::sort(word_pairs.rbegin(), word_pairs.rend(), WordCount::CompareSavings(2));
-
       // 2 byte codes.
-      for (num3 = 0; num3 < 32 && num3 + num1 < 128; ++num3) {
-        const size_t count3 = num3 * 128 * 128;
-        const size_t count2 = (128u - num3 - num1) * 128;
+      for (num3 = 0; num3 + num1 < 128 - num_2; ++num3) {
+        const size_t count3 = num3 * (kOverlapCodewords ? 128u * 128u : num3 * num3);
+        auto num2 = (128u - num3 - num1);
+        const size_t count2 = num2 * (kOverlapCodewords ? 128u : num2);
         if (count2 + count3 >= word_pairs.size()) break;
       }
       words->num3_ = num3;
       const size_t end2 = 256 - words->num3_;
       words->num2_ = end2 - std::min(static_cast<size_t>(128 + num1), end2);
+      auto start_other2 = kOverlapCodewords ? 128u : 128u + num1;
+      auto end_other2 = kOverlapCodewords ? 256u : end2;
       for (size_t b1 = 128u + num1; b1 < end2; ++b1) {
-        for (size_t b2 = 128u; b2 < 256; ++b2) {
+        for (size_t b2 = start_other2; b2 < end_other2; ++b2) {
           if (count2 < word_pairs.size()) {
             const auto& p = word_pairs[count2++];
             cw->push_back(p.word);
@@ -312,10 +315,12 @@ public:
         }
       }
 
+      std::cerr << std::endl << "end2 " << (256 - end2) << " " << word_pairs.size() << std::endl;
       // 3 byte codes.
+      auto start_other3 = kOverlapCodewords ? 128u : end2;
       for (size_t b1 = end2; b1 < 256; ++b1) {
-        for (size_t b2 = 128u; b2 < 256; ++b2) {
-          for (size_t b3 = 128u; b3 < 256; ++b3) {
+        for (size_t b2 = start_other3; b2 < 256; ++b2) {
+          for (size_t b3 = start_other3; b3 < 256; ++b3) {
             if (count3 < word_pairs.size()) {
               const auto& p = word_pairs[count3++];
               cw->push_back(p.word);
@@ -617,7 +622,7 @@ public:
         }
       }
       for (size_t b1 = end1; b1 < end2; ++b1) {
-        for (size_t b2 = start; b2 < 256; ++b2) {
+        for (size_t b2 = (kOverlapCodewords ? start : end1); b2 < (kOverlapCodewords ? 256u : end2); ++b2) {
           if (idx < words.size()) {
             if (encode) {
               encode_map_.Add(words[idx++], CodeWord(2, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2)));
@@ -628,8 +633,8 @@ public:
         }
       }
       for (size_t b1 = end2; b1 < end3; ++b1) {
-        for (size_t b2 = start; b2 < 256; ++b2) {
-          for (size_t b3 = start; b3 < 256; ++b3) {
+        for (size_t b2 = (kOverlapCodewords ? start : end2); b2 < (kOverlapCodewords ? 256u : end3); ++b2) {
+          for (size_t b3 = (kOverlapCodewords ? start : end2); b3 < (kOverlapCodewords ? 256u : end3); ++b3) {
             if (idx < words.size()) {
               if (encode) {
                 encode_map_.Add(words[idx++], CodeWord(3, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2), static_cast<uint8_t>(b3)));

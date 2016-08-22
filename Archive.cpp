@@ -135,7 +135,7 @@ Compressor* Archive::Algorithm::createCompressor() {
   case Compressor::kTypeCMFast: return new cm::CM<4, false>(mem_usage_, lzp_enabled_, profile_);
   case Compressor::kTypeCMMid: return new cm::CM<6, false>(mem_usage_, lzp_enabled_, profile_);
   case Compressor::kTypeCMHigh: return new cm::CM<10, false>(mem_usage_, lzp_enabled_, profile_);
-  case Compressor::kTypeCMMax: return new cm::CM<16, /*sse*/true>(mem_usage_, lzp_enabled_, profile_);
+  case Compressor::kTypeCMMax: return new cm::CM<10, /*sse*/false>(mem_usage_, lzp_enabled_, profile_);
   case Compressor::kTypeCMSimple: return new cm::CM<6, false>(mem_usage_, lzp_enabled_, Detector::kProfileSimple);
   }
   return nullptr;
@@ -170,7 +170,7 @@ std::ostream& operator<<(std::ostream& os, CompLevel comp_level) {
   return os << "unknown";
 }
 
-Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer, size_t opt_var) {
+Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer, Archive& archive, size_t opt_var) {
   Filter* ret = nullptr;
   switch (filter_) {
   case kFilterTypeDict:
@@ -178,8 +178,62 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer, siz
       auto& builder = analyzer->getDictBuilder();
       Dict::CodeWordGeneratorFast generator;
       Dict::CodeWordSet code_words;
-      generator.generateCodeWords(builder, &code_words, 3, 40);
       auto dict_filter = new Dict::Filter(stream, 0x3, 0x4, 0x6);
+      const auto& dict_file = archive.Options().dict_file_;
+      if (!dict_file.empty()) {
+        std::ifstream fin(dict_file.c_str(), std::ios_base::in);
+        int count = 0;
+        fin >> count >> code_words.num1_ >> code_words.num2_ >> code_words.num3_;
+        if (count > 0 && count < 10000000) {
+          std::string line;
+          while (std::getline(fin, line)) {
+            if (!line.empty()) {
+              code_words.getCodeWords()->push_back(line);
+            }
+          }
+          auto temp = code_words.codewords_;
+          if (true) {
+            Permute(&code_words.codewords_[0], &temp[0], archive.opt_vars_, code_words.num1_);
+          } else {
+            uint8_t perm0[] = {2,3,29,4,22,10,8,7,9,11,12,18,13,14,1,5,17,23,21,0,24,25,26,20,19,6,27,16,15,28,30,31,32,33,35,34,37,36,38,39,};
+            Permute(&code_words.codewords_[0], &temp[0], perm0, code_words.num1_);
+          }
+          auto count2 = code_words.num2_ * 128;
+          if (false) if (false) {
+            Permute(&code_words.codewords_[code_words.num1_], &temp[code_words.num1_], archive.opt_vars_, count2);
+          } else {
+            auto opts = ReadCSI<size_t>("optin.txt");
+            check(opts.size() == count2);
+            Permute(&code_words.codewords_[code_words.num1_], &temp[code_words.num1_], &opts[0], count2);
+          }
+          if (code_words.num1_ == 0 && code_words.num2_ == 0 && code_words.num3_ == 0) {
+            code_words.num1_ = 32 + 5;
+            code_words.num2_ = 128 - code_words.num1_;
+            code_words.num3_ = 128 - code_words.num1_ - code_words.num2_;
+            auto remain = count - code_words.num1_;
+            while (code_words.num2_ > 0 &&
+                   code_words.num3_ < 128 - code_words.num1_ &&
+                   code_words.num2_ * 128 + code_words.num3_ * 128 * 128 < remain) {
+              code_words.num2_--;
+              code_words.num3_++;
+            }
+          }
+          std::cerr << "Number of words for dictionary " << count << " " << code_words.num1_ << " " << code_words.num2_ << " " << code_words.num3_ << std::endl;
+        } else {
+          std::cerr << "Invalid number of words for dictionary " << count << std::endl;
+        }
+      }
+      if (code_words.getCodeWords()->empty()) {
+        generator.generateCodeWords(builder, &code_words, 3, 40, 32);
+      }
+      const auto& out_dict_file = archive.Options().out_dict_file_;
+      if (!out_dict_file.empty()) {
+        std::ofstream fout(out_dict_file.c_str());
+        fout << code_words.codewords_.size() << " " << code_words.num1_ << " " << code_words.num2_ << " " << code_words.num3_ << std::endl;
+        for (const auto& s : code_words.codewords_) {
+          fout << s << std::endl;
+        }
+      }
       dict_filter->addCodeWords(code_words.getCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_);
       dict_filter->setOpt(opt_var);
       ret = dict_filter;
@@ -721,7 +775,7 @@ uint64_t Archive::compress(const std::vector<FileInfo>& in_files) {
     Algorithm* algo = &block->algorithm_;
     std::cout << "Compressing " << Detector::profileToString(algo->profile())
       << " block size=" << formatNumber(block->total_size_) << "\t" << std::endl;
-    std::unique_ptr<Filter> filter(algo->createFilter(&segstream, &analyzer, opt_var_));
+    std::unique_ptr<Filter> filter(algo->createFilter(&segstream, &analyzer, *this, opt_var_));
     Stream* in_stream = &segstream;
     if (filter.get() != nullptr) {
       in_stream = filter.get();
@@ -796,7 +850,7 @@ void Archive::decompress(const std::string& out_dir, bool verify) {
       << " stream size=" << formatNumber(block->total_size_) << "\t" << std::endl;
     Stream* out_stream = verify ? static_cast<Stream*>(&verify_segstream) : static_cast<Stream*>(&segstream);
     Stream* filter_out_stream = out_stream;
-    std::unique_ptr<Filter> filter(algo->createFilter(filter_out_stream, nullptr));
+    std::unique_ptr<Filter> filter(algo->createFilter(filter_out_stream, nullptr, *this));
     if (filter.get() != nullptr) filter_out_stream = filter.get();
     std::unique_ptr<Compressor> comp(algo->createCompressor());
     comp->setOpt(opt_var_);

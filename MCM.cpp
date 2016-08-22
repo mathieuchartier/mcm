@@ -87,6 +87,9 @@ public:
   uint64_t block_size = kDefaultBlockSize;
   FileInfo archive_file;
   std::vector<FileInfo> files;
+  const std::string kDictArg = "-dict=";
+  const std::string kOutDictArg = "-out-dict=";
+  std::string dict_file;
 
   int usage(const std::string& name) {
     printHeader();
@@ -133,24 +136,28 @@ public:
         }
         mode = parsed_mode;
         switch (mode) {
-        case kModeAdd:
-        case kModeExtract:
-        case kModeExtractAll: {
-          if (++i >= argc) {
-            std::cerr << "Expected archive" << std::endl;
-            return 3;
+          case kModeAdd:
+          case kModeExtract:
+          case kModeExtractAll: {
+            if (++i >= argc) {
+              std::cerr << "Expected archive" << std::endl;
+              return 3;
+            }
+            // Archive is next.
+            archive_file = FileInfo(argv[i]);
+            break;
           }
-          // Archive is next.
-          archive_file = FileInfo(argv[i]);
-          break;
-        }
         }
       } else if (arg == "-opt") opt_mode = true;
       else if (arg == "-filter=none") options_.filter_type_ = kFilterTypeNone;
       else if (arg == "-filter=dict") options_.filter_type_ = kFilterTypeDict;
       else if (arg == "-filter=x86") options_.filter_type_ = kFilterTypeX86;
       else if (arg == "-filter=auto") options_.filter_type_ = kFilterTypeAuto;
-      else if (arg == "-lzp=auto") options_.lzp_type_ = kLZPTypeAuto;
+      else if (arg.substr(0, std::min(kDictArg.length(), arg.length())) == kDictArg) {
+        options_.dict_file_ = arg.substr(kDictArg.length());
+      } else if (arg.substr(0, std::min(kOutDictArg.length(), arg.length())) == kOutDictArg) {
+        options_.out_dict_file_ = arg.substr(kOutDictArg.length());
+      } else if (arg == "-lzp=auto") options_.lzp_type_ = kLZPTypeAuto;
       else if (arg == "-lzp=true") options_.lzp_type_ = kLZPTypeEnable;
       else if (arg == "-lzp=false") options_.lzp_type_ = kLZPTypeDisable;
       else if (arg == "-b") {
@@ -373,9 +380,17 @@ int main(int argc, char* argv[]) {
       uint64_t best_size = std::numeric_limits<uint64_t>::max();
       size_t best_var = 0;
       std::ofstream opt_file("opt_result.txt");
+      // static const size_t kOpts = 10624;
       static const size_t kOpts = 256;
-      // size_t opts[kOpts] = { 7,24,14,12,3,1,13,4,6,9,11,15,16,2,17,18,19,5,20,21,22,23,8,26,10,32,36,43,35,42,29,37,25,45,30,31,34,33,39,38,0,41,28,40,44,46,58,59,60,61,91,63,95,27,47,94,64,92,124,62,93,96,123,125,69,68,72,65,66,67,82,73,71,70,76,81,77,87,74,79,80,78,83,84,75,48,49,50,51,52,53,54,55,56,57,86,88,97,98,99,100,85,101,90,103,104,89,105,107,102,108,109,110,111,106,113,112,114,115,116,119,118,120,121,117,122,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,151,144,145,146,147,148,149,150,152,153,155,156,157,154,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,239,227,228,229,230,231,232,233,234,235,236,237,238,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255, };
-      size_t opts[kOpts] = {};
+      // size_t opts[kOpts] = {0,1,2,3,15,14,4,6,7,8,9,17,12,11,13,5,10,18,20,19,21,26,22,28,23,24,16,25,27,29,31,32,36,33,34,35,37,30,38,39,};
+      // size_t opts[kOpts] = {}; for (size_t i = 0; i < kOpts; ++i) opts[i] = i;
+      // size_t opts[kOpts] = {};
+      size_t opts[kOpts] = {7,14,12,3,1,4,6,9,11,15,16,17,18,13,19,5,45,20,21,22,23,8,2,26,10,32,36,35,30,42,29,34,24,37,25,31,33,43,39,38,0,41,28,40,44,46,58,59,27,60,61,91,63,95,47,94,64,92,124,62,93,96,123,125,72,69,68,65,66,67,83,82,73,71,70,80,76,81,77,87,78,74,79,84,75,48,49,50,51,52,53,54,55,56,57,86,88,97,98,99,100,85,101,90,103,104,89,105,107,102,108,109,110,111,106,113,112,114,115,116,119,118,120,121,117,122,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,151,144,145,146,147,148,149,150,152,153,155,156,157,154,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,239,227,228,229,230,231,232,233,234,235,236,237,238,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255,};
+      if (false) {
+        auto temp = ReadCSI<size_t>("optin.txt");
+        check(temp.size() == kOpts);
+        std::copy(temp.begin(), temp.end(), &opts[0]);
+      }
       size_t best_opts[kOpts] = {};
       srand(clock());
       size_t cur_index = 0;
@@ -385,7 +400,7 @@ int main(int argc, char* argv[]) {
       size_t best_cur = 0;
       double total = 0;
       size_t count = 0;
-      const bool kPerm = false;
+      const bool kPerm = true;
       if (kPerm) {
         for (size_t i = 0;; ++i) {
           auto a = i % kMaxIndex;
@@ -393,7 +408,7 @@ int main(int argc, char* argv[]) {
           VoidWriteStream fout;
           Archive archive(&fout, options.options_);
           if (i != 0) {
-            ReplaceSubstring(opts, a, 1, b);
+            ReplaceSubstring(opts, a, 1, b, kOpts);
           }
           if (!archive.setOpts(opts)) {
             std::cerr << "Failed to set opts" << std::endl;

@@ -25,6 +25,7 @@
 #define _SLIDING_WINDOW_HPP_
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include "Util.hpp"
 
@@ -66,6 +67,20 @@ public:
 
   ALWAYS_INLINE void push(T val) {
     data_[pos_++ & mask_] = val;
+  }
+  
+  void push_n(const T* elements, size_t count) {
+    auto masked_pos = pos_ & mask_;
+    size_t max_c = 1 + mask_ - masked_pos;
+    size_t cur = std::min(max_c, count);
+    std::copy_n(elements, cur, &data_[masked_pos]);
+    pos_ += count;
+    count -= cur;
+    if (count > 0) {
+      elements += cur;
+      // Copy remaining ones.
+      std::copy_n(elements, count, &data_[0]);
+    }
   }
 
   ALWAYS_INLINE T& operator [] (size_t offset) {
@@ -131,6 +146,11 @@ public:
     dcheck(size_ >= count);
     front_pos_ += count;
     size_ -= count;
+  }
+  void push_n(T* elements, size_t count) {
+    assert(size_ + count <= capacity());
+    CyclicBuffer<T>::push_n(elements, count);
+    size_ += count;
   }
   void push_back(T c) {
     assert(size_ < capacity());
