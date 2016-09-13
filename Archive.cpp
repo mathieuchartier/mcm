@@ -131,11 +131,11 @@ Compressor* Archive::Algorithm::createCompressor() {
   switch (algorithm_) {
   case Compressor::kTypeStore: return new Store;
   case Compressor::kTypeWav16: return new Wav16;
-  case Compressor::kTypeCMTurbo: return new cm::CM<3, false>(mem_usage_, lzp_enabled_, profile_);
-  case Compressor::kTypeCMFast: return new cm::CM<4, false>(mem_usage_, lzp_enabled_, profile_);
-  case Compressor::kTypeCMMid: return new cm::CM<6, false>(mem_usage_, lzp_enabled_, profile_);
-  case Compressor::kTypeCMHigh: return new cm::CM<10, false>(mem_usage_, lzp_enabled_, profile_);
-  case Compressor::kTypeCMMax: return new cm::CM<10, /*sse*/false>(mem_usage_, lzp_enabled_, profile_);
+  case Compressor::kTypeCMTurbo: return new cm::CM<3, /*sse*/false>(mem_usage_, lzp_enabled_, profile_);
+  case Compressor::kTypeCMFast: return new cm::CM<4, /*sse*/false>(mem_usage_, lzp_enabled_, profile_);
+  case Compressor::kTypeCMMid: return new cm::CM<6, /*sse*/false>(mem_usage_, lzp_enabled_, profile_);
+  case Compressor::kTypeCMHigh: return new cm::CM<10, /*sse*/false>(mem_usage_, lzp_enabled_, profile_);
+  case Compressor::kTypeCMMax: return new cm::CM<13, /*sse*/true>(mem_usage_, lzp_enabled_, profile_);
   case Compressor::kTypeCMSimple: return new cm::CM<6, false>(mem_usage_, lzp_enabled_, Detector::kProfileSimple);
   }
   return nullptr;
@@ -224,7 +224,7 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer, Arc
         }
       }
       if (code_words.getCodeWords()->empty()) {
-        generator.generateCodeWords(builder, &code_words, 3, 40, 32);
+        generator.generateCodeWords(builder, &code_words, 5, 40, 32);
       }
       const auto& out_dict_file = archive.Options().out_dict_file_;
       if (!out_dict_file.empty()) {

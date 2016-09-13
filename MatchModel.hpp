@@ -181,10 +181,12 @@ public:
     cur_mdl[expected_bit].update(bit, learn_rate);
   }
 
-  ALWAYS_INLINE void updateBit(uint32_t bit, uint32_t learn_rate = 9) {
+  ALWAYS_INLINE void updateBit(uint32_t bit, bool update_mdl = true, uint32_t learn_rate = 9) {
     if (len) {
       uint32_t diff = (expected_code >> kCodeBitShift) ^ bit;
-      cur_mdl[getExpectedBit()].update(bit, learn_rate);
+      if (update_mdl) {
+        cur_mdl[getExpectedBit()].update(bit, learn_rate);
+      }
       len &= -(1 ^ diff);
       expected_code <<= 1;
     }

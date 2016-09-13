@@ -244,13 +244,8 @@ public:
     return buffer_count - buffer_pos;
   }
   ALWAYS_INLINE int get() {
-    if (UNLIKELY(remain() == 0)) {
-      buffer_pos = 0;
-      buffer_count = stream->read(buffer, buffer_size);
-      if (UNLIKELY(buffer_count == 0)) {
-        done_ = true;
-        return EOF;
-      }
+    if (UNLIKELY(remain() == 0 && Refill() == false)) {
+      return EOF;
     }
     return buffer[buffer_pos++];
   }
@@ -259,6 +254,16 @@ public:
   }
   uint64_t tell() const {
     return stream->tell() + buffer_pos;
+  }
+private:
+  NO_INLINE bool Refill() {
+    buffer_pos = 0;
+    buffer_count = stream->read(buffer, buffer_size);
+    if (UNLIKELY(buffer_count == 0)) {
+      done_ = true;
+      return false;
+    }
+    return true;
   }
 };
 
@@ -277,7 +282,7 @@ public:
     stream_ = new_stream;
     ptr_ = buffer_;
   }
-  void flush() {
+  NO_INLINE void flush() {
     stream_->write(buffer_, ptr_ - buffer_);
     ptr_ = buffer_;
   }

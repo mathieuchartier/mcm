@@ -170,7 +170,7 @@ public:
 
   ALWAYS_INLINE uint32_t getMixedHash() const {
     auto ret = getHash();
-    if (len < 3) {
+    if (len < 2) {
       ret ^= getPrevHash();
     }
     return ret;
@@ -192,7 +192,7 @@ public:
       h2 = h1 * 24;
       len += len < 16;
     } else if (len) {
-      prev = rotate_left(getHash(), 14);
+      prev = rotate_left(getHash() * 21, 14);
       reset();
       return true;
     }
@@ -247,7 +247,7 @@ public:
   }
 
   uint32_t getMixedHash() {
-    auto ret = WordModel::getHash();
+    auto ret = WordModel::getMixedHash();
     /* if (dict_remain_) {
       ret ^= dict_remain_ * 12931991;
     } */

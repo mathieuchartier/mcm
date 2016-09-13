@@ -102,17 +102,20 @@ public:
   static constexpr size_t kMaxLength = 256;
 
   ~WordCounter() {
-    std::cerr << std::endl << "Word counter used " << Used() << std::endl;
+    std::cerr << std::endl << "Word counter used " << Used() << " hash size " << hash_mask_ << std::endl;
   }
 
   void Init(size_t memory) {
     assert(memory % 8 == 0);
     mem_map_.resize(memory);
-    begin_ = reinterpret_cast<uint8_t*>(mem_map_.getData());
-    ptr_ = begin_;
-    end_ = begin_ + memory / 2;
-    hash_table_ = reinterpret_cast<uint32_t*>(end_);
-    hash_size_ = ((begin_ + memory) - end_) / sizeof(hash_table_[0]);
+    hash_table_ = reinterpret_cast<uint32_t*>(mem_map_.getData());
+    hash_mask_ = memory / 2 / sizeof(hash_table_[0]);
+    while ((hash_mask_ & (hash_mask_ + 1)) != 0) --hash_mask_;
+    ptr_ = begin_ = reinterpret_cast<uint8_t*>(hash_table_ + hash_mask_ + 1);
+    end_ = reinterpret_cast<uint8_t*>(mem_map_.getData()) + memory;
+    // Hash | pos is stored in the hash table.
+    pos_mask_ = Remain();
+    while ((pos_mask_ & (pos_mask_ + 1)) != 0) ++pos_mask_;
     ClearHashTable();
   }
 
@@ -130,6 +133,7 @@ public:
     }
   }
 
+  // Mark compact.
   void GC(size_t min_count) {
     auto start_size = Used();
     auto start = clock();
@@ -157,19 +161,20 @@ public:
   void AddWord(const uint8_t* begin, const uint8_t* end, WordCC cc_type) {
     size_t len = end - begin;
     auto index = Lookup(begin, len);
+    Entry* entry;
     if (hash_table_[index] == kInvalidPos) {
       auto required = Entry::ComputeSize(len);
       while (Remain() < required) {
         GC(min_count_);
         ++min_count_;
       }
-      Entry* entry = new (ptr_) Entry(begin, end);
-      hash_table_[index] = GetOffset(entry);
+      entry = new (ptr_) Entry(begin, end);
+      hash_table_[index] = GetOffset(entry) | (entry->Hash() & ~pos_mask_);
       ptr_ += required;
-      entry->Add(cc_type);
     } else {
-      reinterpret_cast<Entry*>(begin_ + hash_table_[index])->Add(cc_type);
+      entry = reinterpret_cast<Entry*>(begin_ + (hash_table_[index] & pos_mask_));
     }
+    entry->Add(cc_type);
   }
 
   void GetWords(std::vector<WordCount>& out, size_t min_occurences) {
@@ -205,7 +210,7 @@ private:
     }
 
     size_t SizeOf() const {
-      return RoundUp(ComputeSize(length_), sizeof(uint32_t));
+      return ComputeSize(length_);
     }
 
     const char* Begin() const {
@@ -252,17 +257,16 @@ private:
       ++count_[static_cast<uint32_t>(type)];
     }
 
-    class ContextList {
-    public:
-      uint32_t context_;
-      uint32_t next_;
-    };
-
   private:
     // Count for each modifier.
     uint32_t count_[3] = {};
-    uint8_t length_ = 0;
-    uint8_t data_[0];
+    union {
+      struct {
+        uint8_t length_;
+        uint8_t data_[3];
+      };
+      uint32_t next_;
+    };
     // Linked list context list.
   };
 
@@ -279,16 +283,23 @@ private:
   }
 
   void ClearHashTable() {
-    std::fill(hash_table_, hash_table_ + hash_size_, kInvalidPos);
+    std::fill(hash_table_, hash_table_ + hash_mask_ + 1, kInvalidPos);
   }
 
   // Return hash table index.
   uint32_t Lookup(const uint8_t* word, size_t len) {
     auto h = Entry::ComputeHash(word, len);
-    auto index = h % hash_size_;
-    while (hash_table_[index] != kInvalidPos &&
-      !reinterpret_cast<Entry*>(begin_ + hash_table_[index])->Equals(word, len)) {
-      if (++index >= hash_size_) {
+    auto index = h % hash_mask_;
+    for (;;) {
+      auto slot = hash_table_[index];
+      if (slot == kInvalidPos) break;
+      if ((slot & ~pos_mask_) == (h & ~pos_mask_)) {
+        auto* entry = reinterpret_cast<Entry*>(begin_ + (slot & pos_mask_));
+        if (entry->Equals(word, len)) {
+          break;
+        }
+      }
+      if (++index > hash_mask_) {
         index = 0;
       }
     }
@@ -298,13 +309,14 @@ private:
   void HashEntry(Entry* entry) {
     auto offset = GetOffset(entry);
     auto h = entry->Hash();
-    auto index = h % hash_size_;
+    auto index = h & hash_mask_;
     for (;;) {
       if (hash_table_[index] == kInvalidPos) {
-        hash_table_[index] = offset;
+        dcheck(offset <= pos_mask_);
+        hash_table_[index] = offset | (h & ~pos_mask_);
         break;
       }
-      if (++index >= hash_size_) {
+      if (++index > hash_mask_) {
         index = 0;
       }
     }
@@ -317,7 +329,8 @@ private:
   uint8_t* end_;
   MemMap mem_map_;
   uint32_t* hash_table_;
-  size_t hash_size_;
+  size_t hash_mask_;
+  uint32_t pos_mask_;
   static constexpr uint32_t kInvalidPos = 0xFFFFFFFF;
 };
 

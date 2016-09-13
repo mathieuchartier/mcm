@@ -45,6 +45,39 @@ namespace cm {
       miss_fast_path_ = -1;
       simple_profile_.SetMinLZPLen(lzp_enabled_ ? 10 : kMaxMatch + 1);
     }
+    // Text model.
+    const size_t text_mm_order = 7;
+    {
+      size_t idx = 0;
+      text_profile_ = CMProfile();
+
+      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder4);
+      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder2);
+      if (kInputs > idx++) text_profile_.EnableModel(kModelBracket);
+      if (kInputs > idx++) text_profile_.EnableModel(kModelInterval);
+      /*
+      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder3);
+      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder5);
+      if (kInputs > idx++) text_profile_.EnableModel(kModelInterval2);
+      if (kInputs > idx++) text_profile_.EnableModel(kModelSpecialChar);
+      if (kInputs > idx++) text_profile_.EnableModel(static_cast<ModelType>(opts_[0]));
+      if (kInputs > idx++) text_profile_.EnableModel(static_cast<ModelType>(opts_[2]));
+      */
+      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder5);
+      if (kInputs > idx++) text_profile_.EnableModel(kModelWord1);
+      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder3);
+      if (kInputs > idx++) text_profile_.EnableModel(kModelInterval2);
+      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder0);
+      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder1);
+      if (kInputs > idx++) text_profile_.EnableModel(kModelSparse2);
+      if (kInputs > idx++) text_profile_.EnableModel(kModelSparse3);
+      if (kInputs > idx++) text_profile_.EnableModel(kModelSparse4);
+      if (kInputs > idx++) text_profile_.EnableModel(kModelSparse34);
+      // text_profile_ = CMProfile();
+      text_profile_.SetMatchModelOrder(text_mm_order);
+      miss_fast_path_ = -1;
+      text_profile_.SetMinLZPLen(lzp_enabled_ ? 14 : kMaxMatch + 1);
+    }
     {
       // Text model for match.
       size_t idx = 0;
@@ -54,138 +87,123 @@ namespace cm {
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder2);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelBracket);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder7);
+      /*
+      if (kInputs > idx++) text_match_profile_.EnableModel(kModelInterval);
+      if (kInputs > idx++) text_match_profile_.EnableModel(kModelSpecialChar);
+      if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder5);
+      if (kInputs > idx++) text_match_profile_.EnableModel(kModelInterval2);
+      if (kInputs > idx++) text_match_profile_.EnableModel(static_cast<ModelType>(opts_[1]));
+      if (kInputs > idx++) text_match_profile_.EnableModel(static_cast<ModelType>(opts_[3]));
+      */
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelInterval);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelWord1);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelSpecialChar);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder5);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder2);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder1);
-      // if (kInputs > idx++) text_match_profile_.EnableModel(kModelWord1);
+      if (kInputs > idx++) text_match_profile_.EnableModel(kModelSparse2);
+      if (kInputs > idx++) text_match_profile_.EnableModel(kModelSparse3);
+      if (kInputs > idx++) text_match_profile_.EnableModel(kModelSparse4);
+      if (kInputs > idx++) text_match_profile_.EnableModel(kModelSparse34);
+      // text_match_profile_ = CMProfile();
+      text_match_profile_.SetMatchModelOrder(text_mm_order);
     }
-    // Text model.
-    {
-      size_t idx = 0;
-      text_profile_ = CMProfile();
-
-      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder4);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder2);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelBracket);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelInterval);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder5);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelWord1);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder3);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelInterval2);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder0);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelOrder1);
-
-      text_profile_.SetMatchModelOrder(8);
-      miss_fast_path_ = -1;
-      text_profile_.SetMinLZPLen(lzp_enabled_ ? 12 : kMaxMatch + 1);
-    }
+    // 4,9,16,16,13,0,0,0,
     // Binary model.
+    size_t binary_mm_order = 7;
     {
       size_t idx = 0;
       binary_profile_ = CMProfile();
-#if 0
-      if (kInputs > idx++) binary_profile_.EnableModel(kModelOrder2);
       if (kInputs > idx++) binary_profile_.EnableModel(kModelOrder1);
-      if (kInputs > idx++) binary_profile_.EnableModel(kModelSparse34);
-      if (kInputs > idx++) binary_profile_.EnableModel(kModelSparse23);
       if (kInputs > idx++) binary_profile_.EnableModel(kModelOrder3);
-      if (kInputs > idx++) binary_profile_.EnableModel(kModelSparse3);
-      if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[0]));
-      if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[1]));
-      if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[2]));
-      // if (kInputs > idx++) binary_profile_.EnableModel(kModelOrder0);
-      if (kInputs > idx++) binary_profile_.EnableModel(kModelSparse34);
-      if (kInputs > idx++) binary_profile_.EnableModel(kModelBracket);
-      if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[0]));
-      if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[2]));
-      // binary_profile_.EnableModels(opts_, 1); idx += 3;
-#elif 1
-      // if (kInputs > idx++) binary_profile_.EnableModel(kModelOrder2);
-      // if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[1]));
-
-      if (kInputs > idx++) binary_profile_.EnableModel(kModelOrder3);
-      if (kInputs > idx++) binary_profile_.EnableModel(kModelInterval2);
-      if (kInputs > idx++) binary_profile_.EnableModel(kModelOrder1);
       if (kInputs > idx++) binary_profile_.EnableModel(kModelSparse34);
       if (kInputs > idx++) binary_profile_.EnableModel(kModelSparse2);
+      if (kInputs > idx++) binary_profile_.EnableModel(kModelInterval2);
       if (kInputs > idx++) binary_profile_.EnableModel(kModelOrder2);
       if (kInputs > idx++) binary_profile_.EnableModel(kModelOrder4);
+      if (kInputs > idx++) binary_profile_.EnableModel(kModelSparse3);
       if (kInputs > idx++) binary_profile_.EnableModel(kModelSparse4);
-      if (kInputs > idx++) binary_profile_.EnableModel(kModelInterval);
       if (kInputs > idx++) binary_profile_.EnableModel(kModelOrder0);
-      // 3, 23, 1, 18, 14, 2, 4, 16, 22, 0,
-#else
-      // 6,22,17,1,4,
-      // 2,14,18,0,25,
-      // 2,22,18,3,1,
-      // 17,16,4,14,25,
-      if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[10]));
-      if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[11]));
-      if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[12]));
-      if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[13]));
-      if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[14]));
-
-      if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[15]));
-      if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[16]));
-      if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[17]));
-      if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[18]));
-      if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[19]));
-#endif
-      binary_profile_.SetMatchModelOrder(7);
+      if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[0]));
+      binary_profile_.SetMatchModelOrder(binary_mm_order);
       binary_profile_.SetMinLZPLen(lzp_enabled_ ? 0 : kMaxMatch + 1);
-      // miss_fast_path_ = -1;
-      // miss_fast_path_ = 100000;
     }
     {
       // Binary model for match.
       size_t idx = 0;
       binary_match_profile_ = CMProfile();
-      /*
-      // if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder4);
-      // if (kInputs > idx++) binary_match_profile_.EnableModel(static_cast<ModelType>(opts_[0]));
-      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder2);
       if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder1);
+      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder2);
       if (kInputs > idx++) binary_match_profile_.EnableModel(kModelSparse34);
-      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelSparse23);
-      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder3);
-      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelSparse3);
-      if (kInputs > idx++) binary_match_profile_.EnableModel(static_cast<ModelType>(opts_[0]));
-      if (kInputs > idx++) binary_match_profile_.EnableModel(static_cast<ModelType>(opts_[1]));
-      if (kInputs > idx++) binary_match_profile_.EnableModel(static_cast<ModelType>(opts_[2]));
-      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder0);
-      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelSparse34);
-      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelInterval);
-      if (kInputs > idx++) binary_match_profile_.EnableModel(static_cast<ModelType>(opts_[1]));
-      if (kInputs > idx++) binary_match_profile_.EnableModel(static_cast<ModelType>(opts_[3]));
-      */
-      // binary_match_profile_.EnableModels(opts_ + 1, 1); idx += 3;
-      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder6);
       if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder4);
-      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder2);
-      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelSparse2);
-      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelInterval);
-      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder1);
-      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelSparse4);
-      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder3);
       if (kInputs > idx++) binary_match_profile_.EnableModel(kModelInterval2);
+      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelSparse2);
+      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelSparse3);
+      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelSparse4);
       if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder0);
+      if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder9);
+      // if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder3);
+      // if (kInputs > idx++) binary_match_profile_.EnableModel(static_cast<ModelType>(opts_[0]));
+      binary_match_profile_.SetMatchModelOrder(binary_mm_order);
     }
     current_interval_map_ = binary_interval_map_;
 
     table_.build(opts_);
 
-    // const size_t extra_mixer_bits = 4 + mem_level_;
     const size_t extra_mixer_bits = 4 + mem_level_;
-    mix1_.Init(0x100 << extra_mixer_bits, 18);
-    std::cout << std::endl << "Mixers " << mix1_.Size() << " size=" << mix1_.Size() * sizeof(CMMixer) << std::endl;
+    // const size_t extra_mixer_bits = std::min(opt_var_, static_cast<size_t>(4u)) + mem_level_;
+    mixers_[0].Init(0x100 << extra_mixer_bits, 18);
+    std::cout << std::endl;
+    for (auto& m : mixers_) {
+      std::cout << "Mixers " << m.Size() << " RAM=" << m.Size() * sizeof(CMMixer) << " bytes" << std::endl;
+    }
 
-    mix1_mask_.Init(256, kShift);
-    mix1_len_.Init(256, kShift);
-    mix2_.Init(256, kShift);
-
+    for (auto& c : mixer_text_learn_) c = 9;
+    for (auto& c : mixer_binary_learn_) c = 7;
+    size_t zero[12] = {};
+    if (true) {
+      size_t* tl = zero;
+      mixer_text_learn_[kModelOrder4] = 12 + tl[0];
+      mixer_text_learn_[kModelOrder2] = 24 + tl[1];
+      mixer_text_learn_[kModelBracket] = 15 + tl[2];
+      mixer_text_learn_[kModelOrder7] = 9 + tl[3];
+      mixer_text_learn_[kModelInterval] = 9 + tl[4];
+      mixer_text_learn_[kModelWord1] = 20 + tl[5];
+      mixer_text_learn_[kModelOrder3] = 11 + tl[6];
+      mixer_text_learn_[kModelOrder5] = 9 + tl[7];
+      mixer_text_learn_[kModelSpecialChar] = 13 + tl[8];
+      mixer_text_learn_[kModelOrder1] = 24 + tl[9];
+      mixer_text_learn_[kModelInterval2] = 24 + tl[10];
+      mixer_text_learn_[kModelOrder0] = 17 + tl[11];
+    }
+#if 1
+    if (true) {
+      size_t tl[] = {4,2,2,1,0,2,2,3,0,1,0,0,};
+      // 4,3,4,3,2,3,2,3,1,0,0,0,
+      mixer_binary_learn_[kModelOrder0] = 6 + tl[0];
+      mixer_binary_learn_[kModelOrder1] = 6 + tl[1];
+      mixer_binary_learn_[kModelOrder2] = 6 + tl[2];
+      mixer_binary_learn_[kModelOrder3] = 6 + tl[3];
+      mixer_binary_learn_[kModelOrder4] = 6 + tl[4];
+      mixer_binary_learn_[kModelSparse34] = 6 + tl[5];
+      mixer_binary_learn_[kModelSparse2] = 6 + tl[6];
+      mixer_binary_learn_[kModelSparse3] = 6 + tl[7];
+      mixer_binary_learn_[kModelSparse4] = 6 + tl[8];
+      mixer_binary_learn_[kModelInterval2] = 6 + tl[9];
+    } else {
+      size_t* tl = zero;
+      mixer_binary_learn_[kModelOrder0] = 10 + tl[0];
+      mixer_binary_learn_[kModelOrder1] = 9 + tl[1];
+      mixer_binary_learn_[kModelOrder2] = 10 + tl[2];
+      mixer_binary_learn_[kModelOrder3] = 9 + tl[3];
+      mixer_binary_learn_[kModelOrder4] = 8 + tl[4];
+      mixer_binary_learn_[kModelSparse34] = 9 + tl[5];
+      mixer_binary_learn_[kModelSparse2] = 8 + tl[6];
+      mixer_binary_learn_[kModelSparse3] = 9 + tl[7];
+      mixer_binary_learn_[kModelSparse4] = 7 + tl[8];
+      mixer_binary_learn_[kModelInterval2] = 6 + tl[9];
+    }
+#endif
     for (auto& s : mixer_skip_) s = 0;
 
     NSStateMap<kShift> sm;
@@ -207,11 +225,11 @@ namespace cm {
     // Match model.
     match_model_.resize(buffer_.getSize() >> 1);
     match_model_.init(MatchModelType::kMinMatch, 80U);
-    fixed_match_probs_.resize(81 * 2);
+    fixed_match_probs_.resize(81U * 2);
     int magic_array[100];
     for (size_t i = 1; i < 100; ++i) magic_array[i] = (kMaxValue / 2) / i;
     for (size_t i = 2; i < fixed_match_probs_.size(); ++i) {
-      const size_t len = 6 + i / 2;
+      const size_t len = 4 + i / 2;
       auto delta = magic_array[len];
       if ((i & 1) != 0) {
         fixed_match_probs_[i] = table_.st(kMaxValue - 1 - delta);
@@ -223,11 +241,12 @@ namespace cm {
     const bool kUseReorder = true;
     for (size_t i = 0; i < 256; ++i) reorder_[i] = i;
     uint8_t binary_reorder[] = { 38,2,3,4,5,15,6,23,7,8,9,10,12,13,14,11,17,18,19,16,20,21,24,22,1,25,26,27,28,29,30,31,33,34,35,36,40,37,39,32,42,41,43,44,45,46,47,64,55,49,54,50,48,51,52,53,56,57,58,59,60,61,62,63,84,65,67,66,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,85,86,87,88,89,90,93,94,95,91,92,96,97,98,99,100,101,116,102,103,104,105,106,107,108,109,110,111,112,113,114,115,117,118,119,121,120,122,123,124,125,126,127,128,129,130,131,143,132,133,134,135,136,137,138,139,140,141,142,144,152,145,146,147,148,149,150,151,153,155,154,156,0,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,175,173,174,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,195,192,193,194,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255, };
-    uint8_t text_reorder[] = {7,14,12,3,1,4,6,9,11,15,16,17,18,13,19,5,45,20,21,22,23,8,2,26,10,32,36,35,30,42,29,34,24,37,25,31,33,43,39,38,0,41,28,40,44,46,58,59,27,60,61,91,63,95,47,94,64,92,124,62,93,96,123,125,72,69,68,65,66,67,83,82,73,71,70,80,76,81,77,87,78,74,79,84,75,48,49,50,51,52,53,54,55,56,57,86,88,97,98,99,100,85,101,90,103,104,89,105,107,102,108,109,110,111,106,113,112,114,115,116,119,118,120,121,117,122,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,151,144,145,146,147,148,149,150,152,153,155,156,157,154,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,239,227,228,229,230,231,232,233,234,235,236,237,238,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255,};
+    uint8_t text_reorder[] = { 7,14,1,12,3,4,11,15,9,16,5,6,18,13,19,30,45,20,21,22,23,17,8,2,26,10,32,43,36,35,42,29,34,24,25,37,31,33,39,38,0,41,28,40,44,58,46,59,92,27,60,61,91,63,95,47,64,124,94,62,93,96,123,125,72,69,65,67,83,68,66,73,82,70,80,76,71,81,77,87,78,74,79,84,75,48,49,50,51,52,53,54,55,56,57,86,88,97,98,99,100,85,101,90,103,104,89,105,107,102,108,109,110,111,106,113,112,114,115,116,119,118,120,121,117,122,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,151,144,145,146,147,148,149,150,152,153,155,156,157,154,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,198,199,200,201,202,203,204,205,206,207,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,224,225,226,239,227,228,229,230,231,232,233,234,235,236,237,238,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255, };
+
     for (int i = 0; i < 256; ++i) {
+      if (opts_) text_reorder[i] = opts_[i];
       text_reorder_[i] = kUseReorder ? text_reorder[i] : i;
       binary_reorder_[i] = kUseReorder ? binary_reorder[i] : i;
-      if (opts_) text_reorder_[i] = opts_[i];
     }
     SetActiveReorder(binary_reorder_);
 
@@ -237,10 +256,10 @@ namespace cm {
       mixer_update_rate_[i] = base_stem + max_stem / (3 + i);
     }
 
-    uint8_t small_text_mask[] = { 7,7,7,1,4,7,3,7,7,6,7,6,6,6,6,3,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,4,6,5,1,0,2,5,7,2,5,5,7,5,4,3,3,3,3,3,3,3,3,3,3,3,3,5,7,5,4,3,3,2,2,2,2,2,2,2,2,0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,5,6,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,7,7,2,5,0,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, };
-    uint8_t text_mask[] = { 15,0,0,2,15,0,8,3,2,12,13,1,3,0,7,9,12,0,0,0,0,0,0,2,0,6,0,0,9,0,0,0,12,7,14,9,7,11,4,11,10,4,9,14,9,8,7,6,5,5,5,5,5,5,5,5,5,5,14,9,2,15,13,4,2,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,2,4,4,4,4,4,4,5,4,4,3,3,10,1,3,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,4,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, };
     uint8_t binary_mask_map[] = { 15,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,6,12,12,12,12,12,13,12,12,12,12,12,12,12,12,12,12,12,12,12,12,10,12,12,12,12,12,12,12,12,12,12,12,12,12,9,9,9,12,9,9,9,9,9,9,9,12,9,9,9,9,9,9,9,12,9,9,9,12,9,9,9,12,9,9,9,12,7,7,8,12,7,11,7,7,7,14,7,12,7,7,7,12,7,7,7,7,7,7,7,12,7,7,7,12,7,7,7,1,5,5,14,5,5,5,5,5,4,5,3,1,2,5,5,1,5,1,1,1,5,5,5,1,1,1,1,1,1,1,1,1,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,5,1,1,10,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,7,1,1,10,10,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,0, };
-
+    uint8_t small_text_mask[] = { 7,7,7,1,4,7,3,7,7,6,7,6,6,6,6,3,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,4,6,5,5,0,2,5,7,2,5,5,7,5,4,3,3,3,3,3,3,3,3,3,3,3,3,5,7,4,1,4,0,2,2,2,2,2,2,2,2,2,2,0,2,2,2,2,2,2,2,2,2,2,2,2,1,2,2,2,2,2,2,5,6,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,7,7,7,5,7,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, };
+    uint8_t text_mask[] = { 15,0,0,2,15,0,8,3,2,12,13,1,3,0,7,9,12,0,0,0,0,0,0,2,0,6,0,0,9,0,0,0,12,7,14,9,7,11,4,11,10,4,9,14,9,8,7,6,5,5,5,5,5,5,5,5,5,5,14,9,2,15,13,4,2,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,2,4,4,4,4,4,4,5,4,4,3,3,10,1,3,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1,1,4,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, };
+    uint8_t text_mask2[] = { 4,2,0,7,2,0,13,0,0,5,4,0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,11,2,10,8,5,6,3,9,14,7,7,3,1,5,15,10,0,0,0,0,0,0,0,0,0,0,1,13,13,8,7,7,14,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,15,6,12,14,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,12,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, };
     SetActiveReorder(text_reorder_);
     if (true) {
       std::ofstream of("of.txt");
@@ -253,10 +272,11 @@ namespace cm {
       }
     }
     for (size_t i = 0; i < 256; ++i) {
+      // if (opts_) small_text_mask[i] = opts_[i];
       int ri = reorder_[i];
       text_small_interval_map_[ri] = small_text_mask[i];
       text_interval_map_[ri] = text_mask[i];
-      // text_interval_map_[ri] = opts_[i];
+      text_interval_map2_[ri] = text_mask2[i];
     }
     for (int i = 0; i < 256; ++i) {
       check(text_interval_map_[reorder_[i]] == text_mask[i]);
@@ -317,7 +337,6 @@ namespace cm {
     }
     SetDataProfile(data_profile_);
     last_bytes_ = 0;
-    last_nibbles_ = 0;
 
     // Statistics
     if (kStatistics) {
@@ -350,13 +369,6 @@ namespace cm {
       const clock_t start = clock();
       size_t freqs[256] = { 1 };
       std::cout << "Building huffman tree" << std::endl;
-      /*
-      for (;;) {
-        int c = sin.get();
-        if (c == EOF) break;
-        ++freqs[c];
-      }
-      */
       Huffman::HuffTree* tree = Huffman::buildTreePackageMerge(freqs, 256, static_cast<size_t>(huffman_len_limit));
       tree->printRatio("LL");
       Huffman::writeTree(ent, sout, tree, 256, huffman_len_limit);
@@ -384,16 +396,6 @@ namespace cm {
     }
     ent.flush(sout);
 
-    // TODO: Put in statistics??
-    uint64_t total = 0;
-    if (use_huffman) {
-      Huffman h2;
-      // auto* tree = h2.buildTreePackageMerge(freqs[i]);
-      // tree->printRatio("Tree");
-      // total += tree->getCost() / 8;
-      // std::cout << "Total huffman: " << total << std::endl;
-    }
-
     if (kStatistics) {
       if (!kFastStats) {
         std::ofstream fout("probs.txt");
@@ -405,7 +407,7 @@ namespace cm {
         // Print average weights so that we find out which contexts are good and which are not.
         for (size_t cur_p = 0; cur_p < static_cast<uint32_t>(kProfileCount); ++cur_p) {
           auto cur_profile = static_cast<DataProfile>(cur_p);
-          CMMixer* mixers = mix1_.GetMixer();
+          CMMixer* mixers = mixers_[0].GetMixer();
           std::cout << "Mixer weights for profile " << cur_profile << std::endl;
           for (size_t i = 0; i < 256; ++i) {
             double weights[kInputs + 2] = { 0 };
