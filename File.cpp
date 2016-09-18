@@ -97,7 +97,7 @@ std::string FileInfo::attrToStr(uint16_t attr) {
   return oss.str();
 }
 
-// #ifdef WIN32
+#ifdef WIN32
 #include <Windows.h>
 #pragma comment(lib, "User32.lib")
 
@@ -155,6 +155,60 @@ bool FileList::addDirectory(const std::string& dir, const std::string* prefix) {
   return true;
 }
 
-// #else
+#else
+#include <sys/stat.h>
+#include <dirent.h>
 
-// #endif
+static inline uint32_t stat_mode(const char *fname) {
+  struct stat st;
+  if (stat(fname, &st) == 0)
+    return st.st_mode;
+  return 0;
+}
+
+void FileInfo::CreateDir(const std::string& name) {
+  mkdir(name.c_str(), 0777);
+}
+
+FileInfo::FileInfo(const std::string& name, const std::string* prefix)
+  : FileInfo(name, prefix, stat_mode(name.c_str())) {
+}
+
+FileInfo::FileInfo(const std::string& name, const std::string* prefix, uint32_t attributes)
+  : name_(name), prefix_(prefix) {
+  convertAttributes(attributes);
+}
+
+void FileInfo::convertAttributes(uint32_t attrs) {
+  attributes_ = 0;
+  if (S_ISDIR(attrs)) {
+    attributes_ |= FileInfo::kAttrDirectory;
+  } else {
+    if (attrs & 0111) {
+      attributes_ |= FileInfo::kAttrExecutePermission;
+    }
+  }
+}
+
+bool FileList::addDirectory(const std::string& dir, const std::string* prefix) {
+  std::string name;
+  if (prefix != nullptr) {
+    name = *prefix;
+    if (!dir.empty()) name += "/";
+  }
+  name += dir;
+  DIR *dirp = opendir(name.c_str());
+  if (dirp == nullptr) {
+    return false;
+  }
+  struct dirent *dent;
+  while ((dent = readdir(dirp)) != nullptr) {
+    std::string file_name = dent->d_name;
+    if (file_name != "." && file_name != "..") {
+      push_back(FileInfo(dir + "/" + file_name, prefix));
+    }
+  }
+  return true;
+}
+
+#endif
