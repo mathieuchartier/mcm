@@ -343,12 +343,11 @@ void Archive::SolidBlock::read(Stream* stream) {
 
 class FileSegmentStreamFileList : public FileSegmentStream {
 public:
-  FileSegmentStreamFileList(std::vector<FileSegments>* segments, uint64_t count, FileList* file_list, bool extract)
-    : FileSegmentStream(segments, count), file_list_(file_list), extract_(extract) {
-  }
+  FileSegmentStreamFileList(std::vector<FileSegments>* segments, uint64_t count, FileList* file_list, bool extract, bool verify)
+    : FileSegmentStream(segments, count), file_list_(file_list), extract_(extract), verify_(verify) {}
   ~FileSegmentStreamFileList() {
       // Open remaining streams if zero sized?
-    if (extract_) {
+    if (extract_ && !verify_) {
       size_t index = 0;
       for (auto& file_info : *file_list_) {
         if (!file_info.isDir() && !file_info.previouslyOpened()) {
@@ -388,6 +387,7 @@ public:
 private:
   FileList* const file_list_;
   const bool extract_;
+  const bool verify_;
 };
 
 class VerifyFileSegmentStreamFileList : public FileSegmentStream {
@@ -771,7 +771,7 @@ uint64_t Archive::compress(const std::vector<FileInfo>& in_files) {
     auto start = clock();
     auto out_start = stream_->tell();
     for (size_t i = 0; i < kSizePad; ++i) stream_->put(0);
-    FileSegmentStreamFileList segstream(&block->segments_, 0, &files_, false);
+    FileSegmentStreamFileList segstream(&block->segments_, 0, &files_, false, false);
     Algorithm* algo = &block->algorithm_;
     std::cout << "Compressing " << Detector::profileToString(algo->profile())
       << " block size=" << formatNumber(block->total_size_) << "\t" << std::endl;
@@ -842,7 +842,7 @@ void Archive::decompress(const std::string& out_dir, bool verify) {
     }
 
     auto start = clock();
-    FileSegmentStreamFileList segstream(&block->segments_, 0u, &files_, true);
+    FileSegmentStreamFileList segstream(&block->segments_, 0u, &files_, true, verify);
     VerifyFileSegmentStreamFileList verify_segstream(&block->segments_, &files_, &remain_bytes);
 
     Algorithm* algo = &block->algorithm_;
