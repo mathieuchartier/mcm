@@ -253,6 +253,7 @@ namespace cm {
 
     // Maps from uint8_t to 4 bit identifier.
     uint8_t* current_interval_map_;
+    uint8_t* current_interval_map2_;
     uint8_t* current_small_interval_map_;
     uint8_t binary_interval_map_[256];
     uint8_t binary_small_interval_map_[256];
@@ -975,6 +976,7 @@ namespace cm {
       word_model_.reset();
       miss_fast_path_ = 0xFFFFFFFF;
       current_interval_map_ = binary_interval_map_;
+      current_interval_map2_ = binary_interval_map_;
       current_small_interval_map_ = binary_small_interval_map_;
       interval_mask_ = (static_cast<uint64_t>(1) << static_cast<uint64_t>(32)) - 1;
       interval2_mask_ = (static_cast<uint64_t>(1) << static_cast<uint64_t>(28)) - 1;
@@ -991,6 +993,7 @@ namespace cm {
         cur_profile_ = text_profile_;
         cur_match_profile_ = text_match_profile_;
         current_interval_map_ = text_interval_map_;
+        current_interval_map2_ = text_interval_map2_;
         current_small_interval_map_ = text_small_interval_map_;
         interval_mask_ = (static_cast<uint64_t>(1) << static_cast<uint64_t>(49)) - 1;
         break;
@@ -1022,7 +1025,7 @@ namespace cm {
       }
       buffer_.push(c);
       interval_model_ = (interval_model_ << 4) | current_interval_map_[c];
-      interval_model2_ = (interval_model2_ << 4) | text_interval_map2_[c];
+      interval_model2_ = (interval_model2_ << 4) | current_interval_map2_[c];
       small_interval_model_ = (small_interval_model_ * 8) + current_small_interval_map_[c];
       last_bytes_ = (last_bytes_ << 8) | static_cast<uint8_t>(c);
       bracket_.Update(c);

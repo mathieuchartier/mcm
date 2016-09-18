@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <fstream>
 #include <sstream>
+#include <string.h>
 #include <iomanip>
 
 bool fileExists(const char* name) {
@@ -59,14 +60,9 @@ double clockToSeconds(clock_t c) {
 }
 
 std::string errstr(int err) {
-#ifdef WIN32
-  char buffer[1024];
-  strerror_s(buffer, sizeof(buffer), err);
-  return buffer;
-#else
-  // return strerror(err);
-  return "UNIMPLEMENTED";
-#endif
+  // char buffer[1024];
+  // strerror_s(buffer, sizeof(buffer), err);
+  return strerror(err);
 }
 
 std::vector<uint8_t> randomArray(uint32_t size) {
