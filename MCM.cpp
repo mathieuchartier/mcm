@@ -236,12 +236,10 @@ public:
     const bool single_file_mode =
       mode == kModeCompress || mode == kModeDecompress || mode == kModeSingleTest ||
       mode == kModeMemTest || mode == kModeOpt || kModeList;
-    if (single_file_mode) {
+    if (single_file_mode && i < argc) {
       std::string in_file, out_file;
       // Read in file and outfile.
-      if (i < argc) {
-        in_file = argv[i++];
-      }
+      in_file = argv[i++];
       if (i < argc) {
         out_file = argv[i++];
       } else {
