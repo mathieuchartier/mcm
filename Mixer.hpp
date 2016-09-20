@@ -110,22 +110,22 @@ public:
     int p0 = 0, int p1 = 0, int p2 = 0, int p3 = 0, int p4 = 0, int p5 = 0, int p6 = 0, int p7 = 0,
     int p8 = 0, int p9 = 0, int p10 = 0, int p11 = 0, int p12 = 0, int p13 = 0, int p14 = 0, int p15 = 0) const {
     int64_t ptotal = skew_;
-    if (kWeights > 0) ptotal += p0 * static_cast<int>(w_[0]);
-    if (kWeights > 1) ptotal += p1 * static_cast<int>(w_[1]);
-    if (kWeights > 2) ptotal += p2 * static_cast<int>(w_[2]);
-    if (kWeights > 3) ptotal += p3 * static_cast<int>(w_[3]);
-    if (kWeights > 4) ptotal += p4 * static_cast<int>(w_[4]);
-    if (kWeights > 5) ptotal += p5 * static_cast<int>(w_[5]);
-    if (kWeights > 6) ptotal += p6 * static_cast<int>(w_[6]);
-    if (kWeights > 7) ptotal += p7 * static_cast<int>(w_[7]);
-    if (kWeights > 8) ptotal += p8 * static_cast<int>(w_[8]);
-    if (kWeights > 9) ptotal += p9 * static_cast<int>(w_[9]);
-    if (kWeights > 10) ptotal += p10 * static_cast<int>(w_[10]);
-    if (kWeights > 11) ptotal += p11 * static_cast<int>(w_[11]);
-    if (kWeights > 12) ptotal += p12 * static_cast<int>(w_[12]);
-    if (kWeights > 13) ptotal += p13 * static_cast<int>(w_[13]);
-    if (kWeights > 14) ptotal += p14 * static_cast<int>(w_[14]);
-    if (kWeights > 15) ptotal += p15 * static_cast<int>(w_[15]);
+    if (kWeights > 0) ptotal += p0 * static_cast<int>(GetWeight(0));
+    if (kWeights > 1) ptotal += p1 * static_cast<int>(GetWeight(1));
+    if (kWeights > 2) ptotal += p2 * static_cast<int>(GetWeight(2));
+    if (kWeights > 3) ptotal += p3 * static_cast<int>(GetWeight(3));
+    if (kWeights > 4) ptotal += p4 * static_cast<int>(GetWeight(4));
+    if (kWeights > 5) ptotal += p5 * static_cast<int>(GetWeight(5));
+    if (kWeights > 6) ptotal += p6 * static_cast<int>(GetWeight(6));
+    if (kWeights > 7) ptotal += p7 * static_cast<int>(GetWeight(7));
+    if (kWeights > 8) ptotal += p8 * static_cast<int>(GetWeight(8));
+    if (kWeights > 9) ptotal += p9 * static_cast<int>(GetWeight(9));
+    if (kWeights > 10) ptotal += p10 * static_cast<int>(GetWeight(10));
+    if (kWeights > 11) ptotal += p11 * static_cast<int>(GetWeight(11));
+    if (kWeights > 12) ptotal += p12 * static_cast<int>(GetWeight(12));
+    if (kWeights > 13) ptotal += p13 * static_cast<int>(GetWeight(13));
+    if (kWeights > 14) ptotal += p14 * static_cast<int>(GetWeight(14));
+    if (kWeights > 15) ptotal += p15 * static_cast<int>(GetWeight(15));
     return ptotal >> prob_shift;
   }
 

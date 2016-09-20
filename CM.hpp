@@ -145,6 +145,14 @@ namespace cm {
       return max_order_;
     }
 
+    void SetMissFastPath(size_t len) {
+      miss_fast_path_ = len;
+    }
+
+    size_t MissFastPath() {
+      return miss_fast_path_;
+    }
+
     static CMProfile CreateSimple(size_t inputs, size_t min_lzp_len = 10) {
       CMProfile base;
       base.EnableModel(kModelOrder0);
@@ -167,6 +175,7 @@ namespace cm {
     // Parameters.
     uint64_t enabled_models_ = 0;
     size_t min_lzp_len_ = 0xFFFFFFFF;
+    size_t miss_fast_path_ = 0xFFFFFFFF;
 
     // Calculated.
     size_t max_model_order_ = 0;
@@ -409,22 +418,29 @@ namespace cm {
 
     ALWAYS_INLINE uint32_t HashFunc(uint64_t a, uint64_t b) const {
       b += a;
-      b += rotate_left(b, 18);
-      return b ^ (b >> 10);
+      b += rotate_left(b * 7, 11);
+      return b ^ (b >> 13);
     }
 
     void CalcMixerBase() {
       uint32_t mixer_ctx = 0;
       auto mm_len = match_model_.getLength();
       if (current_interval_map_ == binary_interval_map_) {
-        mixer_ctx = interval_model_ & interval_mixer_mask_;
-        mixer_ctx = (mixer_ctx << 2);
-        mixer_ctx |= (mm_len >= 0) + (mm_len >= match_model_.kMinMatch - 1 + opt_var_);
+        // mixer_ctx = interval_model_ & interval_mixer_mask_;
+        mixer_ctx = last_bytes_ & 0xFF;
+        if (false) {
+          mixer_ctx = (mixer_ctx << 2);
+          // mixer_ctx |= (mm_len >= 0) + (mm_len >= match_model_.kMinMatch);
+          mixer_ctx |= (mm_len > 0) +
+            (mm_len >= match_model_.kMinMatch + 1) + 
+					  (mm_len >= match_model_.kMinMatch + 4);
+        } else {
+          mixer_ctx = (mixer_ctx << 1) + (mm_len > 0);
+        }
       } else {
-        const size_t current_interval = small_interval_model_ & interval_mixer_mask_; // 0xF
+        const size_t current_interval = small_interval_model_ & interval_mixer_mask_;
         mixer_ctx = current_interval;
         mixer_ctx = (mixer_ctx << 1) | (mm_len > 0 || word_model_.getLength() > 6);
-        // mixer_ctx = (mixer_ctx << 1) | ();
       }
       mixers_[0].SetContext(mixer_ctx << 8);
     }
@@ -811,14 +827,14 @@ namespace cm {
         }
       }
 
-      uint32_t h = HashFunc((last_bytes_ & 0xFFFF) * 5, 0x4ec457ce * 3);
+      uint32_t h = HashFunc((last_bytes_ & 0xFFFF) * 3, 0x4ec457c1 * 19);
       if (mm_len == 0) {
         ++miss_len_;
         if (kStatistics) {
           ++other_count_;
           ++miss_count_[std::min(kMaxMiss - 1, miss_len_ / 32)];
         }
-        if (miss_len_ >= 100000 && false) {
+        if (miss_len_ >= cur_profile_.MissFastPath()) {
           if (kStatistics) ++fast_bytes_;
 
           uint32_t mm_hash = h;
@@ -834,13 +850,13 @@ namespace cm {
               ent.EncodeBits(stream, c, 8);
             }
           } else {
-            // 6
             auto* s0 = &hash_table_[o2pos + (last_bytes_ & 0xFFFF) * o0size];
             // auto* s0 = &hash_table_[o0pos];
             auto* s1 = &hash_table_[o1pos + p0 * o0size];
             size_t ctx = 1;
             uint32_t ch = c << 24;
-            while (ctx < 256) {
+            bool second_nibble = false;
+            for (;;) {
               auto* st0 = s0 + ctx;
               auto* st1 = s1 + ctx;
               auto* pr = &fast_mix_[*st0][*st1];
@@ -856,10 +872,20 @@ namespace cm {
                 ent.encode(stream, bit, p, kShift);
                 ch <<= 1;
               }
-              pr->update(bit, 8);
+              pr->update(bit, 10);
               *st0 = state_trans_[*st0][bit];
               *st1 = state_trans_[*st1][bit];
               ctx += ctx + bit;
+              if (ctx & 0x10) {
+                if (second_nibble) {
+                  break;
+                }
+                const size_t base_ctx = 15 + (ctx ^ 0x10) * 15;
+                st0 += base_ctx;
+                st1 += base_ctx;
+                ctx = 1;
+                second_nibble = true;
+              }
             }
             if (decode) {
               c = ctx & 0xFF;
@@ -979,7 +1005,7 @@ namespace cm {
       current_interval_map2_ = binary_interval_map_;
       current_small_interval_map_ = binary_small_interval_map_;
       interval_mask_ = (static_cast<uint64_t>(1) << static_cast<uint64_t>(32)) - 1;
-      interval2_mask_ = (static_cast<uint64_t>(1) << static_cast<uint64_t>(28)) - 1;
+      interval2_mask_ = (static_cast<uint64_t>(1) << static_cast<uint64_t>(4 * 8)) - 1;
       const size_t mixer_n_ctx = mixers_[0].Size() / 256;
       interval_mixer_mask_ = (mixer_n_ctx / 4) - 1;
       uint8_t* reorder = text_reorder_;
