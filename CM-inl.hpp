@@ -57,12 +57,6 @@ namespace cm {
       if (kInputs > idx++) text_profile_.EnableModel(kModelInterval);
       if (kInputs > idx++) text_profile_.EnableModel(kModelOrder3);
       if (kInputs > idx++) text_profile_.EnableModel(kModelOrder5);
-      /*
-      if (kInputs > idx++) text_profile_.EnableModel(kModelInterval2);
-      if (kInputs > idx++) text_profile_.EnableModel(kModelSpecialChar);
-      if (kInputs > idx++) text_profile_.EnableModel(static_cast<ModelType>(opts_[0]));
-      if (kInputs > idx++) text_profile_.EnableModel(static_cast<ModelType>(opts_[2]));
-      */
       if (kInputs > idx++) text_profile_.EnableModel(kModelWord1);
       if (kInputs > idx++) text_profile_.EnableModel(kModelInterval2);
       if (kInputs > idx++) text_profile_.EnableModel(kModelOrder0);
@@ -71,7 +65,6 @@ namespace cm {
       if (kInputs > idx++) text_profile_.EnableModel(kModelSparse3);
       if (kInputs > idx++) text_profile_.EnableModel(kModelSparse4);
       if (kInputs > idx++) text_profile_.EnableModel(kModelSparse34);
-      // text_profile_ = CMProfile();
       text_profile_.SetMatchModelOrder(text_mm_order);
       miss_fast_path_ = -1;
       text_profile_.SetMinLZPLen(lzp_enabled_ ? 14 : kMaxMatch + 1);
@@ -87,12 +80,6 @@ namespace cm {
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder7);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelInterval);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelSpecialChar);
-      /*
-      if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder5);
-      if (kInputs > idx++) text_match_profile_.EnableModel(kModelInterval2);
-      if (kInputs > idx++) text_match_profile_.EnableModel(static_cast<ModelType>(opts_[1]));
-      if (kInputs > idx++) text_match_profile_.EnableModel(static_cast<ModelType>(opts_[3]));
-      */
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelWord1);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder5);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelOrder2);
@@ -101,12 +88,10 @@ namespace cm {
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelSparse3);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelSparse4);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelSparse34);
-      // text_match_profile_ = CMProfile();
       text_match_profile_.SetMatchModelOrder(text_mm_order);
     }
-    // 4,9,16,16,13,0,0,0,
     // Binary model.
-    size_t binary_mm_order = 7;
+    size_t binary_mm_order = 6;
     {
       size_t idx = 0;
       binary_profile_ = CMProfile();
@@ -123,6 +108,7 @@ namespace cm {
       if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[0]));
       binary_profile_.SetMatchModelOrder(binary_mm_order);
       binary_profile_.SetMinLZPLen(lzp_enabled_ ? 0 : kMaxMatch + 1);
+      binary_profile_.SetMissFastPath(50000);
     }
     {
       // Binary model for match.
@@ -159,18 +145,18 @@ namespace cm {
     size_t zero[12] = {};
     if (true) {
       size_t* tl = zero;
-      mixer_text_learn_[kModelOrder4] = 12 + tl[0];
-      mixer_text_learn_[kModelOrder2] = 24 + tl[1];
-      mixer_text_learn_[kModelBracket] = 15 + tl[2];
-      mixer_text_learn_[kModelOrder7] = 9 + tl[3];
-      mixer_text_learn_[kModelInterval] = 9 + tl[4];
-      mixer_text_learn_[kModelWord1] = 20 + tl[5];
-      mixer_text_learn_[kModelOrder3] = 11 + tl[6];
-      mixer_text_learn_[kModelOrder5] = 9 + tl[7];
-      mixer_text_learn_[kModelSpecialChar] = 13 + tl[8];
+      mixer_text_learn_[kModelOrder0] = 24 + tl[11];
       mixer_text_learn_[kModelOrder1] = 24 + tl[9];
+      mixer_text_learn_[kModelOrder2] = 24 + tl[1];
+      mixer_text_learn_[kModelOrder3] = 11 + tl[6];
+      mixer_text_learn_[kModelOrder4] = 12 + tl[0];
+      mixer_text_learn_[kModelOrder5] = 9 + tl[7];
+      mixer_text_learn_[kModelOrder7] = 9 + tl[3];
+      mixer_text_learn_[kModelBracket] = 15 + tl[2];
+      mixer_text_learn_[kModelInterval] = 9 + tl[4];
       mixer_text_learn_[kModelInterval2] = 24 + tl[10];
-      mixer_text_learn_[kModelOrder0] = 17 + tl[11];
+      mixer_text_learn_[kModelWord1] = 20 + tl[5];
+      mixer_text_learn_[kModelSpecialChar] = 13 + tl[8];
     }
 #if 1
     if (true) {
