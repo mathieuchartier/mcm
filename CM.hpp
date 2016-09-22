@@ -442,6 +442,7 @@ namespace cm {
         mixer_ctx = current_interval;
         mixer_ctx = (mixer_ctx << 1) | (mm_len > 0 || word_model_.getLength() > 6);
       }
+      mixer_ctx = 0;
       mixers_[0].SetContext(mixer_ctx << 8);
     }
 

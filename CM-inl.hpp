@@ -106,6 +106,7 @@ namespace cm {
       if (kInputs > idx++) binary_profile_.EnableModel(kModelSparse4);
       if (kInputs > idx++) binary_profile_.EnableModel(kModelOrder0);
       if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[0]));
+      binary_profile_ = CMProfile();
       binary_profile_.SetMatchModelOrder(binary_mm_order);
       binary_profile_.SetMinLZPLen(lzp_enabled_ ? 0 : kMaxMatch + 1);
       binary_profile_.SetMissFastPath(50000);
@@ -126,6 +127,7 @@ namespace cm {
       if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder9);
       // if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder3);
       // if (kInputs > idx++) binary_match_profile_.EnableModel(static_cast<ModelType>(opts_[0]));
+      binary_match_profile_ = CMProfile();
       binary_match_profile_.SetMatchModelOrder(binary_mm_order);
     }
     current_interval_map_ = binary_interval_map_;
