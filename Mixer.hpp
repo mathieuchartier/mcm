@@ -95,9 +95,9 @@ public:
     w_[index] = weight;
   }
 
-  void Init(int prob_shift) {
+  void Init(int prob_shift, int extra = 0) {
     for (auto& cw : w_) {
-      cw = static_cast<T>((1 << prob_shift) / kWeights);
+      cw = static_cast<T>(((16 + extra) << prob_shift) / kWeights / 16);
     }
     // Last weight is skew.
     skew_ = 0;

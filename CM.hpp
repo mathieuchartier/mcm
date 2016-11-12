@@ -275,6 +275,9 @@ namespace cm {
     // Mixers
     typedef Mixer<int, kInputs> CMMixer;
     static constexpr size_t kNumMixers = 1;
+    static constexpr size_t kMixerBits16 = 15;
+    static constexpr size_t kMixerBits32 = 17;
+    static constexpr size_t kMixerBits = kMixerBits32;
     MixerArray<CMMixer> mixers_[kNumMixers];
     size_t interval_mixer_mask_;
     uint8_t mixer_text_learn_[kModelCount];
@@ -299,8 +302,8 @@ namespace cm {
     size_t* opts_;
 
     // CM state table.
-    static const uint32_t num_states = 256;
-    uint8_t state_trans_[num_states][2];
+    static const uint32_t kNumStates = 256;
+    uint8_t state_trans_[kNumStates][2];
 
     // Huffman preprocessing.
     static const bool use_huffman = false;
@@ -337,6 +340,7 @@ namespace cm {
     //FastProbMap<StationaryModel, 256> probs_[kProbCtx];
     // DynamicProbMap<StationaryModel, 256> probs_[kProbCtx];
     FastAdaptiveProbMap<256> probs_[kProbCtx];
+    int16_t fast_probs_[kProbCtx][256];
     uint32_t prob_ctx_add_ = 0;
 
     // SSE
@@ -360,7 +364,7 @@ namespace cm {
 
     // Fast mode. TODO split this in another compressor?
     // Quickly create a probability from a 2d array.
-    HPStationaryModel fast_mix_[256][256];
+    HPStationaryModel fast_mix_[256 * 256];
 
     static_assert(kModelCount <= 32, "no room in word");
 
@@ -374,7 +378,6 @@ namespace cm {
     uint64_t miss_len_;
     uint64_t miss_count_[kMaxMiss];
     uint64_t fast_bytes_;
-    uint64_t miss_fast_path_;
 
     size_t mem_level_ = 0;
 
@@ -426,8 +429,8 @@ namespace cm {
       uint32_t mixer_ctx = 0;
       auto mm_len = match_model_.getLength();
       if (current_interval_map_ == binary_interval_map_) {
-        // mixer_ctx = interval_model_ & interval_mixer_mask_;
-        mixer_ctx = last_bytes_ & 0xFF;
+        mixer_ctx = interval_model_ & interval_mixer_mask_;
+        // mixer_ctx = last_bytes_ & 0xFF;
         if (false) {
           mixer_ctx = (mixer_ctx << 2);
           // mixer_ctx |= (mm_len >= 0) + (mm_len >= match_model_.kMinMatch);
@@ -442,7 +445,7 @@ namespace cm {
         mixer_ctx = current_interval;
         mixer_ctx = (mixer_ctx << 1) | (mm_len > 0 || word_model_.getLength() > 6);
       }
-      mixer_ctx = 0;
+      // mixer_ctx = 0;
       mixers_[0].SetContext(mixer_ctx << 8);
     }
 
@@ -454,12 +457,15 @@ namespace cm {
     }
 
     ALWAYS_INLINE int getP(uint8_t state, uint32_t ctx) const {
-      return probs_[ctx + prob_ctx_add_].GetSTP(state, table_);
+      return probs_[ctx + kProbCtxPer].GetP(state);
+    }
+
+    ALWAYS_INLINE int getSTP(uint8_t state, uint32_t ctx) const {
+      return kFixedProbs ? fast_probs_[0][state] : probs_[ctx + prob_ctx_add_].GetSTP(state, table_);
     }
 
     enum BitType {
       kBitTypeLZP,
-      kBitTypeMatch,
       kBitTypeNormal,
       kBitTypeNormalSSE,
     };
@@ -519,7 +525,7 @@ namespace cm {
         s8 = 0, s9 = 0, s10 = 0, s11 = 0, s12 = 0, s13 = 0, s14 = 0, s15 = 0;
 
       uint32_t p;
-      int
+      int32_t
         p0 = 0, p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0,
         p8 = 0, p9 = 0, p10 = 0, p11 = 0, p12 = 0, p13 = 0, p14 = 0, p15 = 0;
       if (kBitType == kBitTypeLZP) {
@@ -534,7 +540,7 @@ namespace cm {
         if (kInputs > 0) {
           sp0 = &hash_table_[base_contexts[0] ^ ctx];
           s0 = *sp0;
-          p0 = getP(s0, 0);
+          p0 = getSTP(s0, 0);
         }
       } else {
         if (kInputs > 0) {
@@ -545,24 +551,24 @@ namespace cm {
           }
         }
       }
-      if (kInputs > 1) p1 = getP(s1 = *(sp1 = &hash_table_[base_contexts[1] ^ ctx]), 1);
-      if (kInputs > 2) p2 = getP(s2 = *(sp2 = &hash_table_[base_contexts[2] ^ ctx]), 2);
-      if (kInputs > 3) p3 = getP(s3 = *(sp3 = &hash_table_[base_contexts[3] ^ ctx]), 3);
-      if (kInputs > 4) p4 = getP(s4 = *(sp4 = &hash_table_[base_contexts[4] ^ ctx]), 4);
-      if (kInputs > 5) p5 = getP(s5 = *(sp5 = &hash_table_[base_contexts[5] ^ ctx]), 5);
-      if (kInputs > 6) p6 = getP(s6 = *(sp6 = &hash_table_[base_contexts[6] ^ ctx]), 6);
-      if (kInputs > 7) p7 = getP(s7 = *(sp7 = &hash_table_[base_contexts[7] ^ ctx]), 7);
-      if (kInputs > 8) p8 = getP(s8 = *(sp8 = &hash_table_[base_contexts[8] ^ ctx]), 8);
-      if (kInputs > 9) p9 = getP(s9 = *(sp9 = &hash_table_[base_contexts[9] ^ ctx]), 9);
-      if (kInputs > 10) p10 = getP(s10 = *(sp10 = &hash_table_[base_contexts[10] ^ ctx]), 10);
-      if (kInputs > 11) p11 = getP(s11 = *(sp11 = &hash_table_[base_contexts[11] ^ ctx]), 11);
-      if (kInputs > 12) p12 = getP(s12 = *(sp12 = &hash_table_[base_contexts[12] ^ ctx]), 12);
-      if (kInputs > 13) p13 = getP(s13 = *(sp13 = &hash_table_[base_contexts[13] ^ ctx]), 13);
-      if (kInputs > 14) p14 = getP(s14 = *(sp14 = &hash_table_[base_contexts[14] ^ ctx]), 14);
-      if (kInputs > 15) p15 = getP(s15 = *(sp15 = &hash_table_[base_contexts[15] ^ ctx]), 15);
+      if (kInputs > 1) p1 = getSTP(s1 = *(sp1 = &hash_table_[base_contexts[1] ^ ctx]), 1);
+      if (kInputs > 2) p2 = getSTP(s2 = *(sp2 = &hash_table_[base_contexts[2] ^ ctx]), 2);
+      if (kInputs > 3) p3 = getSTP(s3 = *(sp3 = &hash_table_[base_contexts[3] ^ ctx]), 3);
+      if (kInputs > 4) p4 = getSTP(s4 = *(sp4 = &hash_table_[base_contexts[4] ^ ctx]), 4);
+      if (kInputs > 5) p5 = getSTP(s5 = *(sp5 = &hash_table_[base_contexts[5] ^ ctx]), 5);
+      if (kInputs > 6) p6 = getSTP(s6 = *(sp6 = &hash_table_[base_contexts[6] ^ ctx]), 6);
+      if (kInputs > 7) p7 = getSTP(s7 = *(sp7 = &hash_table_[base_contexts[7] ^ ctx]), 7);
+      if (kInputs > 8) p8 = getSTP(s8 = *(sp8 = &hash_table_[base_contexts[8] ^ ctx]), 8);
+      if (kInputs > 9) p9 = getSTP(s9 = *(sp9 = &hash_table_[base_contexts[9] ^ ctx]), 9);
+      if (kInputs > 10) p10 = getSTP(s10 = *(sp10 = &hash_table_[base_contexts[10] ^ ctx]), 10);
+      if (kInputs > 11) p11 = getSTP(s11 = *(sp11 = &hash_table_[base_contexts[11] ^ ctx]), 11);
+      if (kInputs > 12) p12 = getSTP(s12 = *(sp12 = &hash_table_[base_contexts[12] ^ ctx]), 12);
+      if (kInputs > 13) p13 = getSTP(s13 = *(sp13 = &hash_table_[base_contexts[13] ^ ctx]), 13);
+      if (kInputs > 14) p14 = getSTP(s14 = *(sp14 = &hash_table_[base_contexts[14] ^ ctx]), 14);
+      if (kInputs > 15) p15 = getSTP(s15 = *(sp15 = &hash_table_[base_contexts[15] ^ ctx]), 15);
       int m0p, m1p, m2p, stage2p;
       CMMixer* m0 = mixers_[0].GetMixer() + mixer_ctx;
-      m0p = Clamp(m0->P(17, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15), kMinST, kMaxST - 1);
+      m0p = Clamp(m0->P(kMixerBits, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15), kMinST, kMaxST - 1);
       int stp = m0p;
       int mixer_p = table_.squnsafe(stp); // Mix probabilities.
       p = mixer_p;
@@ -734,6 +740,12 @@ namespace cm {
       return h;
     }
 
+    void SetMixerUpdateRates(size_t max_stem, size_t base_stem) {
+      for (size_t i = 0; i < kMaxLearn; ++i) {
+        mixer_update_rate_[i] = base_stem + max_stem / (3 + i);
+      }
+    }
+
     ALWAYS_INLINE void GetHashes(uint32_t& h, const CMProfile& cur, size_t* ctx_ptr, ModelType* enabled) {
       const size_t
         p0 = static_cast<uint8_t>(last_bytes_ >> 0),
@@ -770,7 +782,7 @@ namespace cm {
       }
       uint32_t order = 3;
       for (; order <= cur.MaxOrder(); ++order) {
-        h = HashFunc(buffer_[buffer_.getPos() - order], h);
+        h = HashFunc(buffer_[buffer_.Pos() - order], h);
         if (cur.ModelEnabled(static_cast<ModelType>(kModelOrder0 + order), enabled)) {
           *(ctx_ptr++) = hash_lookup(h, kUsePrefetch);
         }
@@ -804,7 +816,7 @@ namespace cm {
       size_t base_contexts[kInputs] = {};
       auto* ctx_ptr = base_contexts;
 
-      const size_t bpos = buffer_.getPos();
+      const size_t bpos = buffer_.Pos();
       const size_t blast = bpos - 1; // Last seen char
       const size_t
         p0 = static_cast<uint8_t>(last_bytes_ >> 0),
@@ -852,15 +864,25 @@ namespace cm {
             }
           } else {
             auto* s0 = &hash_table_[o2pos + (last_bytes_ & 0xFFFF) * o0size];
-            // auto* s0 = &hash_table_[o0pos];
             auto* s1 = &hash_table_[o1pos + p0 * o0size];
+            auto* s2 = &hash_table_[o0pos];
             size_t ctx = 1;
             uint32_t ch = c << 24;
             bool second_nibble = false;
+            size_t base_ctx = 0;
             for (;;) {
               auto* st0 = s0 + ctx;
               auto* st1 = s1 + ctx;
-              auto* pr = &fast_mix_[*st0][*st1];
+              auto* st2 = s2 + ctx;
+              uint32_t idx0 = (fast_probs_[0][*st0] + 2048) >> (4 + 4);
+              uint32_t idx1 = (fast_probs_[0][*st1] + 2048) >> (4 + 4);
+              uint32_t idx2 = (fast_probs_[0][*st2] + 2048) >> (4 + 4);
+              size_t cur = idx0;
+              cur = (cur << 4) | idx1;
+              cur = (cur << 4) | idx2;
+              // if (opt_var_ == 0) cur = (cur << 8) | (base_ctx + ctx);
+              // else if (opt_var_ == 1) cur = (cur << 8) | idx2;
+              auto* pr = &fast_mix_[cur];
               auto p = pr->getP();
               p += p == 0;
               p -= p == kMaxValue;
@@ -876,14 +898,16 @@ namespace cm {
               pr->update(bit, 10);
               *st0 = state_trans_[*st0][bit];
               *st1 = state_trans_[*st1][bit];
+              *st2 = state_trans_[*st2][bit];
               ctx += ctx + bit;
               if (ctx & 0x10) {
                 if (second_nibble) {
                   break;
                 }
-                const size_t base_ctx = 15 + (ctx ^ 0x10) * 15;
-                st0 += base_ctx;
-                st1 += base_ctx;
+                base_ctx = 15 + (ctx ^ 0x10) * 15;
+                s0 += base_ctx;
+                s1 += base_ctx;
+                s2 += base_ctx;
                 ctx = 1;
                 second_nibble = true;
               }
@@ -1001,7 +1025,6 @@ namespace cm {
       interval_model_ = 0;
       small_interval_model_ = 0;
       word_model_.reset();
-      miss_fast_path_ = 0xFFFFFFFF;
       current_interval_map_ = binary_interval_map_;
       current_interval_map2_ = binary_interval_map_;
       current_small_interval_map_ = binary_small_interval_map_;
@@ -1010,6 +1033,7 @@ namespace cm {
       const size_t mixer_n_ctx = mixers_[0].Size() / 256;
       interval_mixer_mask_ = (mixer_n_ctx / 4) - 1;
       uint8_t* reorder = text_reorder_;
+      SetMixerUpdateRates(31 * 100, 60);
       switch (data_profile_) {
       case kProfileSimple:
         cur_match_profile_ = cur_profile_ = simple_profile_;
@@ -1023,11 +1047,11 @@ namespace cm {
         current_interval_map2_ = text_interval_map2_;
         current_small_interval_map_ = text_small_interval_map_;
         interval_mask_ = (static_cast<uint64_t>(1) << static_cast<uint64_t>(49)) - 1;
+        SetMixerUpdateRates(25 * 100, 31);
         break;
       default:  // Binary.
         cur_profile_ = binary_profile_;
         cur_match_profile_ = binary_match_profile_;
-        miss_fast_path_ = 1000000;
         reorder = binary_reorder_;
         break;
       }
@@ -1050,7 +1074,7 @@ namespace cm {
           hash_lookup(word_model_.get01Hash(), true);
         }
       }
-      buffer_.push(c);
+      buffer_.Push(c);
       interval_model_ = (interval_model_ << 4) | current_interval_map_[c];
       interval_model2_ = (interval_model2_ << 4) | current_interval_map2_[c];
       small_interval_model_ = (small_interval_model_ * 8) + current_small_interval_map_[c];

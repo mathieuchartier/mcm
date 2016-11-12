@@ -198,8 +198,8 @@ void VRolz::decompressBytes(uint8_t* in, uint8_t* out, size_t count) {
 }
 
 void CMRolz::init() {
-  lookahead_.resize(4 * KB);
-  buffer_.resize(16 * MB);
+  lookahead_.Resize(4 * KB);
+  buffer_.Resize(16 * MB);
   for (size_t i = 0; i < 256; ++i) {
     for (size_t j = 0; j < kNumberRolzEntries; ++j)
       entries_[i][j].set(0, 0);
@@ -240,17 +240,17 @@ void CMRolz::compress(Stream* in_stream, Stream* out_stream) {
   ent_ = Range7();
   size_t num_match = 0;
   for (;;) {
-    while (!lookahead_.full()) {
+    while (!lookahead_.Full()) {
       auto c = sin.get();
       if (c == EOF) break;
-      lookahead_.push_back(static_cast<uint8_t>(c));
+      lookahead_.PushBack(static_cast<uint8_t>(c));
     }
-    if (lookahead_.size() >= kMinMatch) {
+    if (lookahead_.Size() >= kMinMatch) {
       uint32_t h = 0x97654321;
       for (size_t order = 0; order < kMinMatch; ++order) {
         h = hashFunc(lookahead_[order], h);
       }
-      size_t ctx = buffer_[buffer_.getPos() - 1];
+      size_t ctx = buffer_[buffer_.Pos() - 1];
       size_t best_len = 0;
       size_t best_idx = 0;
       for (size_t i = 0; i < kNumberRolzEntries; ++i) {
@@ -259,7 +259,7 @@ void CMRolz::compress(Stream* in_stream, Stream* out_stream) {
           uint32_t pos = e.pos_;
           // Check the match.
           size_t match_len = 0;
-          while (match_len < lookahead_.size() && match_len < kMaxMatch) {
+          while (match_len < lookahead_.Size() && match_len < kMaxMatch) {
             if (buffer_[pos + match_len] != lookahead_[match_len]) break;
             ++match_len;
           }
@@ -273,12 +273,12 @@ void CMRolz::compress(Stream* in_stream, Stream* out_stream) {
         processBit<false>(sout, 0, 0, order1_ + (owhash_ & 0xFF) * 256, order2_ + (owhash_ & 0xFFFF) * 256);
         processByte<false>(sout, order1p_ + (owhash_ & 0xFF) * 256, order2p_ + (owhash_ & 0xFFFF) * 256, best_idx);
         processByte<false>(sout, order1l_ + (owhash_ & 0xFF) * 256, order2l_ + (owhash_ & 0xFFFF) * 256, best_len - kMinMatch);
-        entries_[ctx][best_idx].pos_ = buffer_.getPos();
+        entries_[ctx][best_idx].pos_ = buffer_.Pos();
         size_t mtf_idx = mtf_[ctx].find(static_cast<uint8_t>(best_idx));
         mtf_[ctx].moveToFront(mtf_idx);
         for (size_t i = 0; i < best_len; ++i) {
-          buffer_.push(lookahead_.front());
-          lookahead_.pop_front();
+          buffer_.Push(lookahead_.Front());
+          lookahead_.PopFront();
         }
         ++num_match;
         // Encode match, update pos.
@@ -286,17 +286,17 @@ void CMRolz::compress(Stream* in_stream, Stream* out_stream) {
       }
       // No match, update oldest.
       // mtf_.
-      entries_[ctx][mtf_[ctx].back()].set(buffer_.getPos(), h);
+      entries_[ctx][mtf_[ctx].back()].set(buffer_.Pos(), h);
       mtf_[ctx].moveToFront(mtf_[ctx].size() - 1);
-    } else if (lookahead_.size() == 0) {
+    } else if (lookahead_.Empty()) {
       break;
     }
-    auto c = lookahead_.front();
+    auto c = lookahead_.Front();
     processBit<false>(sout, 1, 0, order1_ + (owhash_ & 0xFF) * 256, order2_ + (owhash_ & 0xFFFF) * 256);
     processByte<false>(sout, order1_ + (owhash_ & 0xFF) * 256, order2_ + (owhash_ & 0xFFFF) * 256, c);
-    buffer_.push(c);
+    buffer_.Push(c);
     owhash_ = (owhash_ << 8) | c;
-    lookahead_.pop_front();
+    lookahead_.PopFront();
   }
   ent_.flush(sout);
   std::cout << std::endl << "Num match= " << num_match << std::endl;

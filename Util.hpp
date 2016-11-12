@@ -457,4 +457,19 @@ std::vector<T> ReadCSI(const std::string& file) {
   return ret;
 }
 
+static inline constexpr uint32_t MakeWord(uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
+  return (a << 24) | (b << 16) | (c << 8) | (d << 0);
+}
+
+
+enum Endian {
+  kEndianLittle,
+  kEndianBig,
+};
+
+struct OffsetBlock {
+  size_t offset;
+  size_t len;
+};
+
 #endif

@@ -67,27 +67,13 @@ Archive::Algorithm::Algorithm(const CompressionOptions& options, Detector::Profi
     // algorithm_ = Compressor::kTypeStore;
   } else {
     switch (options.comp_level_) {
-    case kCompLevelStore:
-      algorithm_ = Compressor::kTypeStore;
-      break;
-    case kCompLevelTurbo:
-      algorithm_ = Compressor::kTypeCMTurbo;
-      break;
-    case kCompLevelFast:
-      algorithm_ = Compressor::kTypeCMFast;
-      break;
-    case kCompLevelMid:
-      algorithm_ = Compressor::kTypeCMMid;
-      break;
-    case kCompLevelHigh:
-      algorithm_ = Compressor::kTypeCMHigh;
-      break;
-    case kCompLevelMax:
-      algorithm_ = Compressor::kTypeCMMax;
-      break;
-    case kCompLevelSimple:
-      algorithm_ = Compressor::kTypeCMSimple;
-      break;
+    case kCompLevelStore: algorithm_ = Compressor::kTypeStore; break;
+    case kCompLevelTurbo: algorithm_ = Compressor::kTypeCMTurbo; break;
+    case kCompLevelFast: algorithm_ = Compressor::kTypeCMFast; break;
+    case kCompLevelMid: algorithm_ = Compressor::kTypeCMMid; break;
+    case kCompLevelHigh: algorithm_ = Compressor::kTypeCMHigh; break;
+    case kCompLevelMax: algorithm_ = Compressor::kTypeCMMax; break;
+    case kCompLevelSimple: algorithm_ = Compressor::kTypeCMSimple; break;
     }
   }
   switch (profile) {

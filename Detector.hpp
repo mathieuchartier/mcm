@@ -29,9 +29,11 @@
 
 #include "CyclicBuffer.hpp"
 #include "Dict.hpp"
+#include "JPEG.hpp"
 #include "Stream.hpp"
 #include "UTF8.hpp"
 #include "Util.hpp"
+#include "Wav16.hpp"
 
 // Detects blocks and data type from input data
 class Detector {
@@ -43,7 +45,8 @@ class Detector {
   Pattern exe_pattern;
 
   // Lookahed.
-  CyclicDeque<uint8_t> buffer_;
+  using BufferType = CyclicDeque<uint8_t>;
+  BufferType buffer_;
 
   // Out buffer, only used to store headers (for now).
   StaticArray<uint8_t, 16 * KB> out_buffer_;
@@ -200,7 +203,7 @@ public:
     for (size_t i = 0; i < 256; ++i) is_space[i] = isspace(i) ? 1u : 0u;
     no_spaces_ = 0;
 
-    buffer_.resize(256 * KB);
+    buffer_.Resize(256 * KB);
     // Exe pattern
     uint8_t p[] = { 0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0xFF, 0xFF, };
     exe_pattern.clear();
@@ -211,10 +214,10 @@ public:
     const size_t kBufferSize = 4 * KB;
     uint8_t buffer[kBufferSize];
     for (;;) {
-      const size_t remain = buffer_.capacity() - buffer_.size();
+      const size_t remain = buffer_.Remain();
       const size_t n = stream_->read(buffer, std::min(kBufferSize, remain));
       if (n == 0 || remain == 0) break;
-      buffer_.push_n(buffer, n);
+      buffer_.PushBackCount(buffer, n);
     }
   }
 
@@ -223,17 +226,17 @@ public:
   }
 
   ALWAYS_INLINE size_t size() const {
-    return buffer_.size();
+    return buffer_.Size();
   }
 
   void put(int c) {
     // Profile can't extend past the end of the buffer.
     if (current_block_.length() > 0) {
       current_block_.pop();
-      if (buffer_.size() >= buffer_.capacity()) {
+      if (buffer_.Full()) {
         flush();
       }
-      buffer_.push_back(c);
+      buffer_.PushBack(c);
     } else {
       out_buffer_[out_buffer_pos_++] = static_cast<uint8_t>(c);
       auto num_bytes = DetectedBlock::getSizeFromHeaderByte(out_buffer_[0]);
@@ -260,15 +263,15 @@ public:
   void flush() {
     // TODO: Optimize
     BufferedStreamWriter<4 * KB> sout(stream_);
-    while (buffer_.size() != 0) {
-      sout.put(buffer_.front());
-      buffer_.pop_front();
+    while (!buffer_.Empty()) {
+      sout.put(buffer_.Front());
+      buffer_.PopFront();
     }
     sout.flush();
   }
 
   ALWAYS_INLINE uint32_t at(uint32_t index) const {
-    assert(index < buffer_.size());
+    assert(index < buffer_.Size());
     return buffer_[index];
   }
 
@@ -310,22 +313,22 @@ public:
     return popChar();
   }
   int popChar() {
-    if (buffer_.empty()) {
+    if (buffer_.Empty()) {
       refillRead();
-      if (buffer_.empty()) {
+      if (buffer_.Empty()) {
         return EOF;
       }
     }
-    auto ret = buffer_.front();
-    buffer_.pop_front();
+    auto ret = buffer_.Front();
+    buffer_.PopFront();
     return ret;
   }
   size_t read(uint8_t* out, size_t count) {
-    const auto n = std::min(count, buffer_.size());
+    const auto n = std::min(count, buffer_.Size());
     for (size_t i = 0; i < n; ++i) {
       out[i] = buffer_[i];
     }
-    buffer_.pop_front(n);
+    buffer_.PopFront(n);
     current_block_.pop(n);
     return n;
   }
@@ -349,12 +352,12 @@ public:
       return ret;
     }
     refillRead();
-    const size_t buffer_size = buffer_.size();
+    const size_t buffer_size = buffer_.Size();
     if (buffer_size == 0) {
       return DetectedBlock(kProfileEOF, 0);
     }
     if (false) {
-      return DetectedBlock(kProfileText, static_cast<uint32_t>(buffer_.size()));
+      return DetectedBlock(kProfileText, static_cast<uint32_t>(buffer_.Size()));
     }
 
     size_t binary_len = 0;
@@ -368,46 +371,14 @@ public:
       int text_score = 0;
       while (binary_len + text_len < buffer_size) {
         size_t pos = binary_len + text_len;
-        if (true && last_word_ == 0x52494646) {
-          refillRead();
-          // This is pretty bad, need a clean way to do it.
-          uint32_t fpos = static_cast<uint32_t>(pos);
-          uint32_t chunk_size = readBytes(fpos, 4, false); fpos += 4;
-          uint32_t format = readBytes(fpos); fpos += 4;
-          // Format subchunk.
-          uint32_t subchunk_id = readBytes(fpos); fpos += 4;
-          if (format == 0x57415645 && subchunk_id == 0x666d7420) {
-            uint32_t subchunk_size = readBytes(fpos, 4, false); fpos += 4;
-            if (subchunk_size == 16 || subchunk_size == 18) {
-              uint32_t audio_format = readBytes(fpos, 2, false); fpos += 2;
-              uint32_t num_channels = readBytes(fpos, 2, false); fpos += 2;
-              if (audio_format == 1 && num_channels == 2) {
-                fpos += subchunk_size - 6;
-                // fpos += 4; // Skip: Sample rate
-                // fpos += 4; // Skip: Byte rate
-                // fpos += 2; // Skip: Block align
-                uint32_t bits_per_sample = readBytes(fpos, 2, false); fpos += 2;
-                for (size_t i = 0; i < 5; ++i) {
-                  uint32_t subchunk2_id = readBytes(fpos, 4); fpos += 4;
-                  uint32_t subchunk2_size = readBytes(fpos, 4, false); fpos += 4;
-                  if (subchunk2_id == 0x64617461) {
-                    if (subchunk2_size >= chunk_size) {
-                      break;
-                    }
-                    saved_blocks_.push_back(DetectedBlock(kProfileWave16, chunk_size));
-                    return DetectedBlock(kProfileBinary, fpos);
-                    // Read wave header, TODO binary block as big as fpos?? Need to be able to queue subblocks then.
-                    // profile_length = fpos + subchunk2_size;
-                    // profile = kWave;
-                    // return profile;
-                  } else {
-                    fpos += subchunk2_size;
-                    if (fpos >= buffer_.size()) break;
-                  }
-                }
-              }
-            }
-          }
+        Window<BufferType> window(buffer_, static_cast<uint32_t>(pos));
+        OffsetBlock b;
+        if ((b = Wav16::Detect(last_word_, window)).len > 0) {
+          saved_blocks_.push_back(DetectedBlock(kProfileWave16, b.len));
+          return DetectedBlock(kProfileBinary, b.offset);
+        } else if ((b = JPEGCompressor::Detect(last_word_, window)).len > 0) {
+          saved_blocks_.push_back(DetectedBlock(kProfileBinary, b.len));
+          return DetectedBlock(kProfileBinary, b.offset);
         }
         const uint8_t c = buffer_[pos];
         last_word_ = (last_word_ << 8) | c;
@@ -479,7 +450,7 @@ public:
   }
 
   ALWAYS_INLINE size_t readBytes(size_t pos, size_t bytes = 4, bool big_endian = true) {
-    if (pos + bytes > buffer_.size()) {
+    if (pos + bytes > buffer_.Size()) {
       return 0;
     }
     uint32_t w = 0;

@@ -379,7 +379,7 @@ int main(int argc, char* argv[]) {
       size_t best_var = 0;
       std::ofstream opt_file("opt_result.txt");
       // static const size_t kOpts = 10624;
-      static const size_t kOpts = 2;
+      static const size_t kOpts = 3;
       // size_t opts[kOpts] = {0,1,2,3,15,14,4,6,7,8,9,17,12,11,13,5,10,18,20,19,21,26,22,28,23,24,16,25,27,29,31,32,36,33,34,35,37,30,38,39,};
       // size_t opts[kOpts] = {}; for (size_t i = 0; i < kOpts; ++i) opts[i] = i;
       size_t opts[kOpts] = {};

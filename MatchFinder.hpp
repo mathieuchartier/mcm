@@ -118,19 +118,19 @@ public:
 
   // Interface for template inheritance.
   size_t lookaheadMove() {
-    const uint8_t c = lookahead_.front();
-    lookahead_.pop_front();
-    buffer_.push(c);
+    const uint8_t c = lookahead_.Front();
+    lookahead_.PopFront();
+    buffer_.Push(c);
     return c;
   }
   size_t LookaheadSize() const {
-    return lookahead_.size();
+    return lookahead_.Size();
   }
   size_t Lookahead(size_t idx) {
     return lookahead_[idx];
   }
   size_t BufferPos() const {
-    return buffer_.getPos();
+    return buffer_.Pos();
   }
   bool NonmatchPush(size_t c) {
     if (nonmatch_len_ >= nonmatch_.size()) {

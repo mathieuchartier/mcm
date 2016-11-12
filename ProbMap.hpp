@@ -90,7 +90,8 @@ public:
   }
 
   ALWAYS_INLINE int GetP(size_t index) const {
-    return static_cast<uint32_t>(probs_[index]) >> (16 + kPShift - kProbBits);
+    uint32_t p = probs_[index] >> 16;
+    return p >> (kPShift - kProbBits);
   }
 
   template <typename Table>

@@ -109,7 +109,7 @@ public:
 
   void search(Buffer& buffer, size_t spos) {
     // Reverse match.
-    size_t blast = buffer.getPos() - 1;
+    size_t blast = buffer.Pos() - 1;
     size_t len = sizeof(uint32_t);
     if (*reinterpret_cast<uint32_t*>(&buffer[spos - len]) ==
       *reinterpret_cast<uint32_t*>(&buffer[blast - len])) {
@@ -124,7 +124,7 @@ public:
         for (;buffer[spos - len] == buffer[blast - len] && len < cur_max_match; ++len);
       }
       // Update our match.
-      const size_t bmask = buffer.getMask();
+      const size_t bmask = buffer.Mask();
       dist = (blast & bmask) - (spos & bmask);
       this->pos = spos + 1;
       this->len = len;
@@ -136,8 +136,8 @@ public:
   }
 
   void update(Buffer& buffer) {
-    const auto blast = buffer.getPos() - 1;
-    const auto bmask = buffer.getMask();
+    const auto blast = buffer.Pos() - 1;
+    const auto bmask = buffer.Mask();
     hash_ = hash_ ^ buffer[blast];
     const auto last_pos = blast & bmask;
     const auto hmask = hash_ & ~bmask;

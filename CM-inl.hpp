@@ -42,7 +42,6 @@ namespace cm {
       if (kInputs > idx++) simple_profile_.EnableModel(kModelOrder8);
       if (kInputs > idx++) simple_profile_.EnableModel(kModelOrder9);
       simple_profile_.SetMatchModelOrder(8);
-      miss_fast_path_ = -1;
       simple_profile_.SetMinLZPLen(lzp_enabled_ ? 10 : kMaxMatch + 1);
     }
     // Text model.
@@ -65,8 +64,8 @@ namespace cm {
       if (kInputs > idx++) text_profile_.EnableModel(kModelSparse3);
       if (kInputs > idx++) text_profile_.EnableModel(kModelSparse4);
       if (kInputs > idx++) text_profile_.EnableModel(kModelSparse34);
+      // text_profile_ = CMProfile();
       text_profile_.SetMatchModelOrder(text_mm_order);
-      miss_fast_path_ = -1;
       text_profile_.SetMinLZPLen(lzp_enabled_ ? 14 : kMaxMatch + 1);
     }
     {
@@ -88,6 +87,7 @@ namespace cm {
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelSparse3);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelSparse4);
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelSparse34);
+      // text_match_profile_ = CMProfile();
       text_match_profile_.SetMatchModelOrder(text_mm_order);
     }
     // Binary model.
@@ -106,10 +106,10 @@ namespace cm {
       if (kInputs > idx++) binary_profile_.EnableModel(kModelSparse4);
       if (kInputs > idx++) binary_profile_.EnableModel(kModelOrder0);
       if (kInputs > idx++) binary_profile_.EnableModel(static_cast<ModelType>(opts_[0]));
-      binary_profile_ = CMProfile();
+      // binary_profile_ = CMProfile();
       binary_profile_.SetMatchModelOrder(binary_mm_order);
       binary_profile_.SetMinLZPLen(lzp_enabled_ ? 0 : kMaxMatch + 1);
-      binary_profile_.SetMissFastPath(50000);
+      binary_profile_.SetMissFastPath(25000);
     }
     {
       // Binary model for match.
@@ -127,7 +127,7 @@ namespace cm {
       if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder9);
       // if (kInputs > idx++) binary_match_profile_.EnableModel(kModelOrder3);
       // if (kInputs > idx++) binary_match_profile_.EnableModel(static_cast<ModelType>(opts_[0]));
-      binary_match_profile_ = CMProfile();
+      // binary_match_profile_ = CMProfile();
       binary_match_profile_.SetMatchModelOrder(binary_mm_order);
     }
     current_interval_map_ = binary_interval_map_;
@@ -136,7 +136,10 @@ namespace cm {
 
     const size_t extra_mixer_bits = 4 + mem_level_;
     // const size_t extra_mixer_bits = std::min(opt_var_, static_cast<size_t>(4u)) + mem_level_;
-    mixers_[0].Init(0x100 << extra_mixer_bits, 18);
+    const size_t mixer_bits = kMixerBits;
+    const size_t mixer_shift_bits = (kMixerBits - 15);
+    mixers_[0].Init(0x100 << extra_mixer_bits, mixer_bits, 25);
+
     std::cout << std::endl;
     for (auto& m : mixers_) {
       std::cout << "Mixers " << m.Size() << " RAM=" << m.Size() * sizeof(CMMixer) << " bytes" << std::endl;
@@ -204,10 +207,10 @@ namespace cm {
     hash_storage_.resize(hash_alloc_size_); // Add extra space for ctx.
     hash_table_ = reinterpret_cast<uint8_t*>(hash_storage_.getData()); // Here is where the real hash table starts
 
-    buffer_.resize((MB / 4) << mem_level_, sizeof(uint32_t));
+    buffer_.Resize((MB / 4) << mem_level_, sizeof(uint32_t));
 
     // Match model.
-    match_model_.resize(buffer_.getSize() >> 1);
+    match_model_.resize(buffer_.Size() >> 1);
     match_model_.init(MatchModelType::kMinMatch, 80U);
     fixed_match_probs_.resize(81U * 2);
     int magic_array[100];
@@ -233,12 +236,6 @@ namespace cm {
       binary_reorder_[i] = kUseReorder ? binary_reorder[i] : i;
     }
     SetActiveReorder(binary_reorder_);
-
-    const size_t base_stem = 38;
-    const size_t max_stem = 2500;
-    for (size_t i = 0; i < kMaxLearn; ++i) {
-      mixer_update_rate_[i] = base_stem + max_stem / (3 + i);
-    }
 
     uint8_t binary_mask_map[] = { 15,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,6,12,12,12,12,12,13,12,12,12,12,12,12,12,12,12,12,12,12,12,12,10,12,12,12,12,12,12,12,12,12,12,12,12,12,9,9,9,12,9,9,9,9,9,9,9,12,9,9,9,9,9,9,9,12,9,9,9,12,9,9,9,12,9,9,9,12,7,7,8,12,7,11,7,7,7,14,7,12,7,7,7,12,7,7,7,7,7,7,7,12,7,7,7,12,7,7,7,1,5,5,14,5,5,5,5,5,4,5,3,1,2,5,5,1,5,1,1,1,5,5,5,1,1,1,1,1,1,1,1,1,7,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,5,1,1,10,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,7,1,1,10,10,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,0, };
     uint8_t small_text_mask[] = { 7,7,7,1,4,7,3,7,7,6,7,6,6,6,6,3,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,4,6,5,5,0,2,5,7,2,5,5,7,5,4,3,3,3,3,3,3,3,3,3,3,3,3,5,7,4,1,4,0,2,2,2,2,2,2,2,2,2,2,0,2,2,2,2,2,2,2,2,2,2,2,2,1,2,2,2,2,2,2,5,6,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,7,7,7,5,7,0,0,0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0, };
@@ -289,7 +286,7 @@ namespace cm {
     }
 
     // Optimization
-    for (uint32_t i = 0; i < num_states; ++i) {
+    for (uint32_t i = 0; i < kNumStates; ++i) {
       for (uint32_t j = 0; j < 2; ++j) {
         state_trans_[i][j] = sm.getTransition(i, j);
       }
@@ -309,15 +306,21 @@ namespace cm {
     };
 
     for (uint32_t j = 0; j < kProbCtx;++j) {
-      for (uint32_t k = 0; k < num_states; ++k) {
-        probs_[j].SetP(k, initial_probs[std::min(j, 9U)][k], table_);
+      for (uint32_t k = 0; k < kNumStates; ++k) {
+        int p = initial_probs[std::min(j, 9U)][k];
+        probs_[j].SetP(k, p, table_);
+        fast_probs_[j][k] = table_.st(p);
       }
     }
 
+    /*
     for (size_t i = 0; i < 256; ++i) {
       for (size_t j = 0; j < 256; ++j) {
         fast_mix_[i][j].setP(table_.sq((table_.st(initial_probs[0][i]) + table_.st(initial_probs[1][i])) / 2));
       }
+    }*/
+    for (size_t i = 0; i < 256 * 256; ++i) {
+      fast_mix_[i].setP(2048);
     }
     SetDataProfile(data_profile_);
     last_bytes_ = 0;
