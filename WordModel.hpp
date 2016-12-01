@@ -24,6 +24,7 @@
 #ifndef _WORD_MODEL_HPP_
 #define _WORD_MODEL_HPP_
 
+#include "Reorder.hpp"
 #include "UTF8.hpp"
 
 class WordModel {
@@ -62,7 +63,7 @@ public:
 
   WordModel() {}
 
-  void init(uint8_t* reorder) {
+  void Init(const ReorderMap<uint8_t, 256>& reorder) {
     uint32_t index = 0;
     for (auto& t : transform) t = transform_table_size;
     for (uint32_t i = 'a'; i <= 'z'; ++i) {
@@ -70,9 +71,6 @@ public:
     }
     for (uint32_t i = 'A'; i <= 'Z'; ++i) {
       transform[reorder[i]] = transform[reorder[makeLowerCase(static_cast<int>(i))]];
-    }
-    for (uint32_t i = 0; i < 32; ++i) {
-      // if (opts_[i]) trans(reorder[opts_[i]]) = index++;
     }
     // 6,38,92,3
     trans(reorder[6]) = index++;
@@ -138,13 +136,11 @@ public:
     trans('Û') = trans('û') = index++;
     trans('Ü') = trans('ü') = index++;
 #endif
-    // if (transform[opt_var_] == transform_table_size) transform[opt_var_] = index++;
-    if (true)
-      for (size_t i = 128; i < 256; ++i) {
-        if (transform[reorder[i]] == transform_table_size) {
-          transform[reorder[i]] = index++;
-        }
+    for (size_t i = 128; i < 256; ++i) {
+      if (transform[reorder[i]] == transform_table_size) {
+        transform[reorder[i]] = index++;
       }
+    }
 
     len = 0;
     prev = 0;
@@ -215,13 +211,13 @@ class DictXMLModel : public WordModel {
   
   // 40 82 6
 public:
-  void init(uint8_t* reorder) {
+  void Init(const ReorderMap<uint8_t, 256>& reorder) {
     last_char_ = 0;
     dict_remain_ = 0;
     escape_ = reorder[0x3];
     upper1_ = reorder[0x4];
     upper2_ = reorder[0x6];
-    WordModel::init(reorder);
+    WordModel::Init(reorder);
   }
 
   void update(uint8_t c) {
@@ -264,12 +260,12 @@ private:
 
 class XMLWordModel : public WordModel {
 public:
-  void init(uint8_t* reorder) {
+  void init(const ReorderMap<uint8_t, 256>& reorder) {
     for (auto& c : stack_) c = 0;
     stack_pos_ = 0;
     last_symbol_ = 0;
     tag_ = kTagNone;
-    WordModel::init(reorder);
+    WordModel::Init(reorder);
   }
 
   void update(uint8_t c) {

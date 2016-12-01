@@ -40,16 +40,13 @@
 #include "Model.hpp"
 #include "ProbMap.hpp"
 #include "Range.hpp"
+#include "Reorder.hpp"
 #include "StateMap.hpp"
 #include "Util.hpp"
 #include "WordModel.hpp"
 #include "SSE.hpp"
 
-// Options.
-#define USE_MMX 0
-
 namespace cm {
-
   // Flags for which models are enabled.
   enum ModelType {
     kModelOrder0,
@@ -354,8 +351,7 @@ namespace cm {
     size_t mixer_sse_ctx_;
 
     // Reorder
-    uint8_t reorder_[256];
-    uint8_t inverse_reorder_[256];
+    ReorderMap<uint8_t, 256> reorder_;
     uint8_t text_reorder_[256];
     uint8_t binary_reorder_[256];
 
@@ -667,16 +663,6 @@ namespace cm {
         ent.encode(stream, bit, p, kShift);
       }
       return bit;
-    }
-
-    void SetActiveReorder(uint8_t* reorder) {
-      memcpy(inverse_reorder_, reorder, 256);
-      int count[256] = {};
-      for (size_t i = 0; i < 256; ++i) {
-        reorder_[inverse_reorder_[i]] = i;
-        ++count[inverse_reorder_[i]];
-      }
-      for (auto c : count) check(c == 1);
     }
 
     template <const bool decode, BitType kBitType, typename TStream>
@@ -1055,7 +1041,7 @@ namespace cm {
         reorder = binary_reorder_;
         break;
       }
-      SetActiveReorder(reorder);
+      reorder_.Copy(reorder);
       UpdateLearnRates();
     }
 

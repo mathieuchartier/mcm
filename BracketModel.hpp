@@ -26,6 +26,7 @@
 
 #include <algorithm>
 
+#include "Reorder.hpp"
 #include "UTF8.hpp"
 
 // Keep track of last special char + o0
@@ -35,14 +36,9 @@ public:
   uint8_t last_important_char_ = 0;
   size_t* opts_ = 0;
 
-  void Init(uint8_t* reorder) {
+  void Init(const ReorderMap<uint8_t, 256>& reorder) {
     last_important_char_ = 0;
     std::fill_n(important_map_, 256, false);
-    // important_map_[reorder[113]] = true;
-    // important_map_[reorder[64]] = true;
-    // important_map_[reorder[81]] = true;
-    // important_map_[reorder[opts_[0]]] = true;
-    // for (size_t i = 0; i < 10; ++i) if (opts_[i]) important_map_[reorder[opts_[i]]] = true;
   }
 
   void SetOpts(size_t* opts) {
@@ -71,7 +67,7 @@ private:
   uint32_t last_char_ = 0;
   size_t* opts_ = 0;
   uint32_t last_notable_ = 0;
-  uint8_t* reorder_;
+  ReorderMap<uint8_t, 256> reorder_;
 
   void Push(uint8_t c) {
     if (stack_pos_ >= kStackSize) {
@@ -138,7 +134,7 @@ public:
     return hash;
   }
 
-  void init(uint8_t* reorder) {
+  void Init(const ReorderMap<uint8_t, 256>& reorder) {
     stack_pos_ = 0;
     len_ = 0;
     last_char_ = 0;
