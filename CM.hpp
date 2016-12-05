@@ -469,46 +469,7 @@ namespace cm {
     uint64_t IntervalHash(uint64_t model) {
       return hashify(model);
     }
-    
-    // WIP: Ultra mode
-#if 0
-    template <const bool decode, BitType kBitType, typename TStream>
-    size_t ProcessBitMulti(TStream& stream, size_t bit, size_t* base_contexts, size_t n_ctx, size_t ctx, size_t mixer_ctx) {
-      // Get states out of the hash table.
-      uint8_t states[100];
-      for (size_t i = 0; i < n_ctx) {
-        states[i] = hash_table_[contexts[i] ^ ctx];
-      }
-      size_t p_add = match_model_.getLength() != 0 ? kProbCtx : 0u;
-      // Add probabilities
-      int probs[100]; size_t p_index = 0;
-      // Prob contexts.
-      for (size_t i = 0; i < n_ctx) {
-        probs[p_index++] = probs_[i + p_add].GetSTP(state, table_);
-      }
-      // Mixer
-      size_t mix_count = 0;
-      int mixer_p[], mix_p_c = 0;
-      for (size_t i = 0; i < n_mixers; ++i) {
-        mixer_p[mix_p_c++] = Clamp(mixers[i]->P(17, probs), kMinST, kMaxST - 1);
-      }
-      size_t bit = 0;
-      size_t mixer_pass_count = 0;
-      for (size_t i = 0; i < n_mixers; ++i) {
-        mixer_pass_count += m0->Update(mixer_p[i], bit, kShift, kLimit, 600, 1, mixer_update_rate_[m0->GetLearn()], 16, probs);
-      }
-      if (mixer_pass_count > 0) {
-        auto updater = probs_[0].GetUpdater(bit);
-        for (size_t i = 0; i < n_ctx) {
-          probs_[prob_ctx_add_ + i].Update(states[i], updater, table_, /*unused*/ 9);
-        }
-        for (size_t i = 0; i < n_ctx) {
-          hash_table_[contexts[i] ^ ctx] = state_trans_[states[i]][bit];
-        }
-      }
-      return bit;
-    }
-#endif
+
     template <const bool decode, BitType kBitType, typename TStream>
     size_t ProcessBit(TStream& stream, size_t bit, size_t* base_contexts, size_t ctx, size_t mixer_ctx) {
       const auto mm_l = match_model_.getLength();
