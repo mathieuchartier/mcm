@@ -142,7 +142,7 @@ namespace cm {
 
     std::cout << std::endl;
     for (auto& m : mixers_) {
-      std::cout << "Mixers " << m.Size() << " RAM=" << m.Size() * sizeof(CMMixer) << " bytes" << std::endl;
+      // std::cout << "Mixers " << m.Size() << " RAM=" << m.Size() * sizeof(CMMixer) << " bytes" << std::endl;
     }
 
     for (auto& c : mixer_text_learn_) c = 9;
@@ -379,6 +379,42 @@ namespace cm {
       update(c);
     }
     ent.flush(sout);
+
+    {
+      // auto ctx2 = 15 + (n1 * 15);
+      // 
+      std::map<size_t, size_t> counts;
+      size_t first_64 = 0, total = 0;
+      size_t leaf_count = 0;
+      uint64_t leaf_counts[256] = {};
+      for (size_t i = 0; i < kDiffCounter; ++i) {
+        if (i < 16) continue; // Only first nibble.
+        size_t c = i;
+        --c;  // Subtract always added one.
+        size_t second_nibble = c % 15 + 1;
+        if (second_nibble * 2 < 16) continue;
+        ++leaf_count;
+        if (ctx_count_[i] == 0) continue;
+        std::cout << "Count " << i << " : " << ctx_count_[i] << std::endl;
+        counts.emplace(ctx_count_[i], i);
+        if (i < 64) first_64 += ctx_count_[i];
+        total += ctx_count_[i];
+        leaf_counts[i] = ctx_count_[i];
+      }
+      check(leaf_count == 128);
+      size_t first_64_2 = 0;
+      size_t i = 0;
+      for (auto it = counts.rbegin(); it != counts.rend(); ++it) {
+        if (it->first != 0) {
+          std::cout << it->second << " : " << it->first << std::endl;
+          if (i < 32) first_64_2 += it->first;
+        }
+        ++i;
+      }
+      const uint64_t optimal = SolveOptimalLeaves(leaf_counts);
+      // std::cout << "first64 " << first_64 << " optimal " << optimal << " total " << total << std::endl;
+      // std::cout << "Before first64 " << double(first_64) / double(total) << " " << double(optimal) / double(total) << " " << double(first_64_2) / double(total) << std::endl;
+    }
 
     if (kStatistics) {
       if (!kFastStats) {

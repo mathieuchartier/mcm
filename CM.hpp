@@ -369,6 +369,8 @@ namespace cm {
     uint64_t match_count_, non_match_count_, other_count_;
     uint64_t lzp_bit_match_bytes_, lzp_bit_miss_bytes_, lzp_miss_bytes_, normal_bytes_;
     uint64_t match_hits_[kMaxMatch], match_miss_[kMaxMatch];
+    static const size_t kDiffCounter = 256;
+    uint64_t ctx_count_[kDiffCounter] = {};
 
     static const uint64_t kMaxMiss = 512;
     uint64_t miss_len_;
@@ -473,7 +475,7 @@ namespace cm {
     template <const bool decode, BitType kBitType, typename TStream>
     size_t ProcessBit(TStream& stream, size_t bit, size_t* base_contexts, size_t ctx, size_t mixer_ctx) {
       const auto mm_l = match_model_.getLength();
-
+      // ++ctx_count_[mixer_ctx];
       uint8_t
         *rst sp0, *rst sp1, *rst sp2, *rst sp3, *rst sp4, *rst sp5, *rst sp6, *rst sp7,
         *rst sp8, *rst sp9, *rst sp10, *rst sp11, *rst sp12, *rst sp13, *rst sp14, *rst sp15;
@@ -485,6 +487,9 @@ namespace cm {
       int32_t
         p0 = 0, p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0,
         p8 = 0, p9 = 0, p10 = 0, p11 = 0, p12 = 0, p13 = 0, p14 = 0, p15 = 0;
+      constexpr bool kUseAdd = false;
+      auto ctx_xor = kUseAdd ? 0 : ctx;
+      auto ht = kUseAdd ? hash_table_ + ctx : hash_table_;
       if (kBitType == kBitTypeLZP) {
         if (kInputs > 0) {
           if (kFixedMatchProbs) {
@@ -495,7 +500,7 @@ namespace cm {
         }
       } else if (mm_l == 0) {
         if (kInputs > 0) {
-          sp0 = &hash_table_[base_contexts[0] ^ ctx];
+          sp0 = &ht[base_contexts[0] ^ ctx_xor];
           s0 = *sp0;
           p0 = getSTP(s0, 0);
         }
@@ -508,31 +513,48 @@ namespace cm {
           }
         }
       }
-      if (kInputs > 1) p1 = getSTP(s1 = *(sp1 = &hash_table_[base_contexts[1] ^ ctx]), 1);
-      if (kInputs > 2) p2 = getSTP(s2 = *(sp2 = &hash_table_[base_contexts[2] ^ ctx]), 2);
-      if (kInputs > 3) p3 = getSTP(s3 = *(sp3 = &hash_table_[base_contexts[3] ^ ctx]), 3);
-      if (kInputs > 4) p4 = getSTP(s4 = *(sp4 = &hash_table_[base_contexts[4] ^ ctx]), 4);
-      if (kInputs > 5) p5 = getSTP(s5 = *(sp5 = &hash_table_[base_contexts[5] ^ ctx]), 5);
-      if (kInputs > 6) p6 = getSTP(s6 = *(sp6 = &hash_table_[base_contexts[6] ^ ctx]), 6);
-      if (kInputs > 7) p7 = getSTP(s7 = *(sp7 = &hash_table_[base_contexts[7] ^ ctx]), 7);
-      if (kInputs > 8) p8 = getSTP(s8 = *(sp8 = &hash_table_[base_contexts[8] ^ ctx]), 8);
-      if (kInputs > 9) p9 = getSTP(s9 = *(sp9 = &hash_table_[base_contexts[9] ^ ctx]), 9);
-      if (kInputs > 10) p10 = getSTP(s10 = *(sp10 = &hash_table_[base_contexts[10] ^ ctx]), 10);
-      if (kInputs > 11) p11 = getSTP(s11 = *(sp11 = &hash_table_[base_contexts[11] ^ ctx]), 11);
-      if (kInputs > 12) p12 = getSTP(s12 = *(sp12 = &hash_table_[base_contexts[12] ^ ctx]), 12);
-      if (kInputs > 13) p13 = getSTP(s13 = *(sp13 = &hash_table_[base_contexts[13] ^ ctx]), 13);
-      if (kInputs > 14) p14 = getSTP(s14 = *(sp14 = &hash_table_[base_contexts[14] ^ ctx]), 14);
-      if (kInputs > 15) p15 = getSTP(s15 = *(sp15 = &hash_table_[base_contexts[15] ^ ctx]), 15);
+      if (kInputs > 1) s1 = *(sp1 = &ht[base_contexts[1] ^ ctx_xor]);
+      if (kInputs > 2) s2 = *(sp2 = &ht[base_contexts[2] ^ ctx_xor]);
+      if (kInputs > 3) s3 = *(sp3 = &ht[base_contexts[3] ^ ctx_xor]);
+      if (kInputs > 4) s4 = *(sp4 = &ht[base_contexts[4] ^ ctx_xor]);
+      if (kInputs > 5) s5 = *(sp5 = &ht[base_contexts[5] ^ ctx_xor]);
+      if (kInputs > 6) s6 = *(sp6 = &ht[base_contexts[6] ^ ctx_xor]);
+      if (kInputs > 7) s7 = *(sp7 = &ht[base_contexts[7] ^ ctx_xor]);
+      if (kInputs > 8) s8 = *(sp8 = &ht[base_contexts[8] ^ ctx_xor]);
+      if (kInputs > 9) s9 = *(sp9 = &ht[base_contexts[9] ^ ctx_xor]);
+      if (kInputs > 10) s10 = *(sp10 = &ht[base_contexts[10] ^ ctx_xor]);
+      if (kInputs > 11) s11 = *(sp11 = &ht[base_contexts[11] ^ ctx_xor]);
+      if (kInputs > 12) s12 = *(sp12 = &ht[base_contexts[12] ^ ctx_xor]);
+      if (kInputs > 13) s13 = *(sp13 = &ht[base_contexts[13] ^ ctx_xor]);
+      if (kInputs > 14) s14 = *(sp14 = &ht[base_contexts[14] ^ ctx_xor]);
+      if (kInputs > 15) s15 = *(sp15 = &ht[base_contexts[15] ^ ctx_xor]);
+      
+      if (kInputs > 1) p1 = getSTP(s1, 1);
+      if (kInputs > 2) p2 = getSTP(s2, 2);
+      if (kInputs > 3) p3 = getSTP(s3, 3);
+      if (kInputs > 4) p4 = getSTP(s4, 4);
+      if (kInputs > 5) p5 = getSTP(s5, 5);
+      if (kInputs > 6) p6 = getSTP(s6, 6);
+      if (kInputs > 7) p7 = getSTP(s7, 7);
+      if (kInputs > 8) p8 = getSTP(s8, 8);
+      if (kInputs > 9) p9 = getSTP(s9, 9);
+      if (kInputs > 10) p10 = getSTP(s10, 10);
+      if (kInputs > 11) p11 = getSTP(s11, 11);
+      if (kInputs > 12) p12 = getSTP(s12, 12);
+      if (kInputs > 13) p13 = getSTP(s13, 13);
+      if (kInputs > 14) p14 = getSTP(s14, 14);
+      if (kInputs > 15) p15 = getSTP(s15, 15);
       int m0p, m1p, m2p, stage2p;
       CMMixer* m0 = mixers_[0].GetMixer() + mixer_ctx;
-      m0p = Clamp(m0->P(kMixerBits, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15), kMinST, kMaxST - 1);
+      m0p = m0->P(kMixerBits, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15);
       int stp = m0p;
-      int mixer_p = table_.squnsafe(stp); // Mix probabilities.
+      int mixer_p = table_.sqfast(stp); // Mix probabilities.
       p = mixer_p;
       bool sse3 = false;
       if (kUseLZP) {
         if (kUseLZPSSE) {
           if (kBitType == kBitTypeLZP || kBitType == kBitTypeNormalSSE) {
+            stp = Clamp(stp, kMinST, kMaxST - 1);
             if (kBitType == kBitTypeLZP) {
               p = sse2_.p(stp + kMaxValue / 2, sse_ctx_ + mm_l);
             } else {
@@ -540,6 +562,7 @@ namespace cm {
             }
             p += p == 0;
           } else if (kUseSSE) {
+            stp = Clamp(stp, kMinST, kMaxST - 1);
             constexpr uint32_t kDiv = 32;
             const uint32_t blend = 14;
             int input_p = stp + kMaxValue / 2;
@@ -571,6 +594,7 @@ namespace cm {
       bool ret = m0->Update(
         mixer_p, bit,
         kShift, kLimit, 600, 1,
+        // mixer_update_rate_[m0->NextLearn(8)], 16,
         mixer_update_rate_[m0->GetLearn()], 16,
         p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15
         );
@@ -758,6 +782,59 @@ namespace cm {
       }
     }
 
+    // Optimal leaf algorithm.
+    uint64_t SolveOptimalLeaves(const uint64_t* cost) {
+      // DP array [node][remain] = max leaf values
+      static const size_t kCount = 1 << 16;
+      int64_t total[kCount];
+      std::fill_n(total, kCount, -1);
+      return DPOptimalLeaves(cost, total, 1, 64);
+    }
+
+    int NextDPLeaf(int node, size_t next) {
+      size_t first_nibble = 0;
+      size_t second_nibble = 0;
+      if (node < 16) {
+        node = node * 2 + next;
+        if (node < 16) {
+          return node;
+        }
+        first_nibble = node ^ 16;
+        second_nibble = 1;
+      } else {
+        first_nibble = (node - 1) / 15 - 1;
+        second_nibble = (node - 1) % 15 + 1;
+        second_nibble = second_nibble * 2 + next;
+        if (second_nibble >= 16) return -1;
+      }
+      return 15 + first_nibble * 15 + second_nibble;
+    }
+
+    uint64_t DPOptimalLeaves(const uint64_t* cost, int64_t* total, size_t node, size_t remain) {
+      auto& slot = total[256 * node + remain];
+      if (slot != -1) {
+        return slot;
+      }
+      if (remain == 0) {
+        return 0;
+      }
+      --remain;
+      // Try all combinations left and right.
+      const int next_a = NextDPLeaf(node, 0);
+      const int next_b = NextDPLeaf(node, 1);
+      for (size_t i = 0; i <= remain; ++i) {
+        int64_t cur = cost[node];
+        if (next_a != -1) {
+          cur += DPOptimalLeaves(cost, total, next_a, i);
+        }
+        if (next_b != -1) {
+          cur += DPOptimalLeaves(cost, total, next_b, remain - i);
+        }
+        slot = std::max(slot, cur);
+      }
+      return slot;
+    }
+
     template <const bool decode, typename TStream>
     size_t processByte(TStream& stream, uint32_t c = 0) {
       size_t base_contexts[kInputs] = {};
@@ -906,8 +983,6 @@ namespace cm {
             return expected_char;
           }
         }
-      } else {
-        
       }
       if (false) {
         match_model_.resetMatch();
@@ -927,9 +1002,10 @@ namespace cm {
         if (kPrefetchMatchModel) {
           match_model_.fetch(n1 << 4);
         }
+        auto ctx2 = 15 + (n1 * 15);
         size_t n2 = (sse_ctx_ != 0) ?
-          processNibble<decode, kBitTypeNormalSSE>(stream, c & 0xF, base_contexts, 15 + (n1 * 15), 0) :
-          processNibble<decode, kBitTypeNormal>(stream, c & 0xF, base_contexts, 15 + (n1 * 15), 0);
+          processNibble<decode, kBitTypeNormalSSE>(stream, c & 0xF, base_contexts, ctx2, 0) :
+          processNibble<decode, kBitTypeNormal>(stream, c & 0xF, base_contexts, ctx2, 0);
         if (decode) {
           c = n2 | (n1 << 4);
         }

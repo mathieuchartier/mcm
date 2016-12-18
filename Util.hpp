@@ -48,7 +48,7 @@
 #endif
 
 #define no_alias __restrict
-#define rst no_alias
+#define rst // no_alias
 
 // TODO: Implement these.
 #define LIKELY(x) x

@@ -399,6 +399,7 @@ int main(int argc, char* argv[]) {
       size_t bads = 0;
       size_t best_cur = 0;
       double total = 0;
+      double min_time = std::numeric_limits<double>::max();
       size_t count = 0;
       const bool kPerm = false;
       if (kPerm) {
@@ -444,8 +445,9 @@ int main(int argc, char* argv[]) {
           }
           uint64_t in_bytes = archive.compress(options.files);
           if (in_bytes == 0) continue;
-          const clock_t time = clock() - start;
-          total += clockToSeconds(time);
+          const double time = clockToSeconds(clock() - start);
+          total += time;
+          min_time = std::min(min_time, time);
           const auto size = fout.tell();
           opt_file << "opts ";
           for (auto opt : opts) opt_file << opt << ",";
@@ -466,11 +468,11 @@ int main(int argc, char* argv[]) {
             ++opts[cur_index];
           }
 
-          opt_file << " -> " << size << " best " << best_var << " in," << clockToSeconds(time) << " s avg " << total / double(count) << std::endl << std::flush;
+          opt_file << " -> " << size << " best " << best_var << " in," << time << " s avg " << total / double(count) << std::endl << std::flush;
 
           std::cout << "opt[" << before_index << "]=" << before_opt << " best=" << best_var << "(" << formatNumber(best_size) << ") "
             << formatNumber(in_bytes) << " -> " << formatNumber(size)
-            << " took " << std::setprecision(3) << clockToSeconds(time) << "s avg " << total / double(count) << std::endl;
+            << " took " << std::setprecision(3) << time << "s avg " << total / double(count) << " min " << min_time << std::endl;
 
         }
       }

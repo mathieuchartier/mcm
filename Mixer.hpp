@@ -85,6 +85,13 @@ public:
     return learn_;
   }
 
+  ALWAYS_INLINE int NextLearn(size_t max_shift) {
+    auto before = learn_;
+    ++learn_;
+    learn_ -= learn_ >> max_shift;
+    return before;
+  }
+
   ALWAYS_INLINE T GetWeight(uint32_t index) const {
     assert(index < kWeights);
     return w_[index];

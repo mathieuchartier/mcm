@@ -127,12 +127,12 @@ public:
     size_ -= count;
   }
   void PushBackCount(T* elements, size_t count) {
-    assert(size_ + count <= capacity());
+    assert(size_ + count <= Capacity());
     CyclicBuffer<T>::Push(elements, count);
     size_ += count;
   }
   void PushBack(T c) {
-    assert(size_ < capacity());
+    assert(size_ < Capacity());
     ++size_;
     Push(c);
   }

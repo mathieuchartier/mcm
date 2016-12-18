@@ -54,11 +54,15 @@ static int squash_init(int d, int opt = 0) {
 template <typename T, int denom, int minInt, int maxInt, int FP>
 struct ss_table {
   static const int total = maxInt - minInt;
-  T stretchTable[denom], squashTable[total], *squashPtr;
+  static_assert((total & (total - 1)) == 0, "must be power of 2");
+  T stretch_table_[denom];
+  static const size_t kFastTableMask = 4 * total - 1;
+  T squash_table_fast_[kFastTableMask + 1];
 public:
   // probability = p / Denom		
   void build(size_t* opts) {
-    squashPtr = &squashTable[0 - minInt];
+    T squash_table_[total];
+    T* squash_ptr_ = &squash_table_[0 - minInt];
     // From paq9a
     const size_t num_stems = 32 + 1;
     int stems[num_stems] = {
@@ -77,50 +81,58 @@ public:
       const int pos = i - minInt;
       const int stem_idx = pos / stem_divisor;
       const int stem_frac = pos % stem_divisor;
-      squashTable[pos] =
+      squash_table_[pos] =
         (stems[stem_idx] * (stem_divisor - stem_frac) + stems[stem_idx + 1] * stem_frac + stem_divisor / 2) / stem_divisor;
-      squashTable[pos] = Clamp(squashTable[pos], 1, 4095);
+      squash_table_[pos] = Clamp(squash_table_[pos], 1, 4095);
     }
     int pi = 0;
     // Inverse squash function.
     for (int x = minInt; x < maxInt; ++x) {
       // squashPtr[x] = squash_init(x, opts[0]);
-      int i = squashPtr[x];
-      squashPtr[x] = Clamp(squashPtr[x], 1, 4095);
+      int i = squash_ptr_[x];
+      squash_ptr_[x] = Clamp(squash_ptr_[x], 1, 4095);
       for (int j = pi; j < i; ++j) {
-        stretchTable[j] = x;
+        stretch_table_[j] = x;
       }
       pi = i;
     }
     for (int x = pi; x < total; ++x) {
-      stretchTable[x] = 2047;
+      stretch_table_[x] = 2047;
+    }
+    for (int i = 0; i <= kFastTableMask; ++i) {
+      int p = i;
+      if (p >= kFastTableMask / 2) p = i - static_cast<int>(kFastTableMask + 1);
+      if (p <= minInt) p = 1;
+      else if (p >= maxInt) p = denom - 1;
+      else p = squash_ptr_[p];
+      squash_table_fast_[i] = p;
     }
   }
 
   const T* getStretchPtr() const {
-    return stretchTable;
+    return stretch_table_;
   }
 
   // 0 <= p < denom
   ALWAYS_INLINE int st(uint32_t p) const {
-    return stretchTable[p];
+    return stretch_table_[p];
   }
 
   // minInt <= p < maxInt
   ALWAYS_INLINE uint32_t sq(int p) const {
-    if (p <= minInt) {
-      return 1;
-    }
-    if (p >= maxInt) {
-      return denom - 1;
-    }
-    return squashPtr[p];
+    if (p <= minInt) return 1;
+    if (p >= maxInt) return denom - 1;
+    return sqfast(p);
   }
 
   ALWAYS_INLINE uint32_t squnsafe(int p) const {
     dcheck(p >= minInt);
     dcheck(p < maxInt);
-    return squashPtr[p];
+    return sqfast(p);
+  }
+
+  ALWAYS_INLINE uint32_t sqfast(int p) const {
+    return squash_table_fast_[static_cast<uint32_t>(p) & kFastTableMask];
   }
 };
 
