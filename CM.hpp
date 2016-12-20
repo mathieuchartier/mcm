@@ -458,7 +458,7 @@ namespace cm {
       return probs_[ctx + kProbCtxPer].GetP(state);
     }
 
-    ALWAYS_INLINE int getSTP(uint8_t state, uint32_t ctx) const {
+    ALWAYS_INLINE int GetSTP(uint8_t state, uint32_t ctx) const {
       return kFixedProbs ? fast_probs_[0][state] : probs_[ctx + prob_ctx_add_].GetSTP(state, table_);
     }
 
@@ -472,218 +472,215 @@ namespace cm {
       return hashify(model);
     }
 
-    template <const bool decode, BitType kBitType, typename TStream>
-    size_t ProcessBit(TStream& stream, size_t bit, size_t* base_contexts, size_t ctx, size_t mixer_ctx) {
-      const auto mm_l = match_model_.getLength();
-      // ++ctx_count_[mixer_ctx];
-      uint8_t
-        *rst sp0, *rst sp1, *rst sp2, *rst sp3, *rst sp4, *rst sp5, *rst sp6, *rst sp7,
-        *rst sp8, *rst sp9, *rst sp10, *rst sp11, *rst sp12, *rst sp13, *rst sp14, *rst sp15;
-      uint8_t
-        s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, s5 = 0, s6 = 0, s7 = 0,
-        s8 = 0, s9 = 0, s10 = 0, s11 = 0, s12 = 0, s13 = 0, s14 = 0, s15 = 0;
-
-      uint32_t p;
-      int32_t
-        p0 = 0, p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0,
-        p8 = 0, p9 = 0, p10 = 0, p11 = 0, p12 = 0, p13 = 0, p14 = 0, p15 = 0;
-      constexpr bool kUseAdd = false;
-      auto ctx_xor = kUseAdd ? 0 : ctx;
-      auto ht = kUseAdd ? hash_table_ + ctx : hash_table_;
-      if (kBitType == kBitTypeLZP) {
-        if (kInputs > 0) {
-          if (kFixedMatchProbs) {
-            p0 = fixed_match_probs_[mm_l * 2 + 1];
-          } else {
-            p0 = match_model_.getP(table_.getStretchPtr(), 1);
-          }
-        }
-      } else if (mm_l == 0) {
-        if (kInputs > 0) {
-          sp0 = &ht[base_contexts[0] ^ ctx_xor];
-          s0 = *sp0;
-          p0 = getSTP(s0, 0);
-        }
-      } else {
-        if (kInputs > 0) {
-          if (kFixedMatchProbs) {
-            p0 = fixed_match_probs_[mm_l * 2 + match_model_.getExpectedBit()];
-          } else {
-            p0 = match_model_.getP(table_.getStretchPtr(), match_model_.getExpectedBit());
-          }
-        }
-      }
-      if (kInputs > 1) s1 = *(sp1 = &ht[base_contexts[1] ^ ctx_xor]);
-      if (kInputs > 2) s2 = *(sp2 = &ht[base_contexts[2] ^ ctx_xor]);
-      if (kInputs > 3) s3 = *(sp3 = &ht[base_contexts[3] ^ ctx_xor]);
-      if (kInputs > 4) s4 = *(sp4 = &ht[base_contexts[4] ^ ctx_xor]);
-      if (kInputs > 5) s5 = *(sp5 = &ht[base_contexts[5] ^ ctx_xor]);
-      if (kInputs > 6) s6 = *(sp6 = &ht[base_contexts[6] ^ ctx_xor]);
-      if (kInputs > 7) s7 = *(sp7 = &ht[base_contexts[7] ^ ctx_xor]);
-      if (kInputs > 8) s8 = *(sp8 = &ht[base_contexts[8] ^ ctx_xor]);
-      if (kInputs > 9) s9 = *(sp9 = &ht[base_contexts[9] ^ ctx_xor]);
-      if (kInputs > 10) s10 = *(sp10 = &ht[base_contexts[10] ^ ctx_xor]);
-      if (kInputs > 11) s11 = *(sp11 = &ht[base_contexts[11] ^ ctx_xor]);
-      if (kInputs > 12) s12 = *(sp12 = &ht[base_contexts[12] ^ ctx_xor]);
-      if (kInputs > 13) s13 = *(sp13 = &ht[base_contexts[13] ^ ctx_xor]);
-      if (kInputs > 14) s14 = *(sp14 = &ht[base_contexts[14] ^ ctx_xor]);
-      if (kInputs > 15) s15 = *(sp15 = &ht[base_contexts[15] ^ ctx_xor]);
-      
-      if (kInputs > 1) p1 = getSTP(s1, 1);
-      if (kInputs > 2) p2 = getSTP(s2, 2);
-      if (kInputs > 3) p3 = getSTP(s3, 3);
-      if (kInputs > 4) p4 = getSTP(s4, 4);
-      if (kInputs > 5) p5 = getSTP(s5, 5);
-      if (kInputs > 6) p6 = getSTP(s6, 6);
-      if (kInputs > 7) p7 = getSTP(s7, 7);
-      if (kInputs > 8) p8 = getSTP(s8, 8);
-      if (kInputs > 9) p9 = getSTP(s9, 9);
-      if (kInputs > 10) p10 = getSTP(s10, 10);
-      if (kInputs > 11) p11 = getSTP(s11, 11);
-      if (kInputs > 12) p12 = getSTP(s12, 12);
-      if (kInputs > 13) p13 = getSTP(s13, 13);
-      if (kInputs > 14) p14 = getSTP(s14, 14);
-      if (kInputs > 15) p15 = getSTP(s15, 15);
-      int m0p, m1p, m2p, stage2p;
-      CMMixer* m0 = mixers_[0].GetMixer() + mixer_ctx;
-      m0p = m0->P(kMixerBits, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15);
-      int stp = m0p;
-      int mixer_p = table_.sqfast(stp); // Mix probabilities.
-      p = mixer_p;
-      bool sse3 = false;
-      if (kUseLZP) {
-        if (kUseLZPSSE) {
-          if (kBitType == kBitTypeLZP || kBitType == kBitTypeNormalSSE) {
-            stp = Clamp(stp, kMinST, kMaxST - 1);
-            if (kBitType == kBitTypeLZP) {
-              p = sse2_.p(stp + kMaxValue / 2, sse_ctx_ + mm_l);
-            } else {
-              p = sse_.p(stp + kMaxValue / 2, sse_ctx_ + mixer_ctx);
-            }
-            p += p == 0;
-          } else if (kUseSSE) {
-            stp = Clamp(stp, kMinST, kMaxST - 1);
-            constexpr uint32_t kDiv = 32;
-            const uint32_t blend = 14;
-            int input_p = stp + kMaxValue / 2;
-            p = (p * blend + sse3_.p(input_p, (last_bytes_ & 0xFF) * 256 + mixer_ctx) * (kDiv - blend)) / kDiv;
-            // p = (p * opt_var_ + sse3_.p(stp + kMaxValue / 2, (interval_model_ & 0xFF) * 256 + mixer_ctx) * (kDiv - opt_var_)) / kDiv;
-            // p = sse3_.p(stp + kMaxValue / 2, (interval_model_ & 0xFF) * 256 + mixer_ctx);
-            // p = sse3_.p(stp + kMaxValue / 2, mixer_ctx);
-            // p = (p * 1 + sse3_.p(stp + kMaxValue / 2, (mix1_.GetContext() & 0xFF00) + mixer_ctx) * 15) / 16;
-            p += p == 0;
-            mixer_p = p;
-            sse3 = true;
-          }
-        }
-      } else if (true) {
-        p = (p * 1 + sse3_.p(stp + kMaxValue / 2, (last_bytes_ & 0xFF) * 256 + mixer_ctx) * 15) / 16;
-        p += p == 0;
-        // mixer_p = p;
-        sse3 = true;
-      }
-
-      if (decode) {
-        bit = ent.getDecodedBit(p, kShift);
-      }
-      dcheck(bit < 2);
-
-      const size_t kLimit = kMaxLearn - 1;
-      const size_t kDelta = 5;
-      // Returns false if we skipped the update due to a low error, should happen moderately frequently on highly compressible files.
-      bool ret = m0->Update(
-        mixer_p, bit,
-        kShift, kLimit, 600, 1,
-        // mixer_update_rate_[m0->NextLearn(8)], 16,
-        mixer_update_rate_[m0->GetLearn()], 16,
-        p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15
-        );
-      // Only update the states / predictions if the mixer was far enough from the bounds, helps 60k on enwik8 and 1-2sec.
-      const bool kOptP = false;
-      if (ret) {
-        auto updater = probs_[0].GetUpdater(bit);
-        if (kBitType == kBitTypeLZP) {
-          if (!kFixedMatchProbs) {
-            match_model_.updateCurMdl(1, bit, 6);
-          }
-        } else if (mm_l == 0) {
-          if (kInputs > 0) *sp0 = NextState(sp0 - hash_table_, s0, bit, updater, 0, kOptP ? opts_[0] : 23);
-        }
-        if (kInputs > 1) *sp1 = NextState(sp1 - hash_table_, s1, bit, updater, 1, kOptP ? opts_[1] : 10);
-        if (kInputs > 2) *sp2 = NextState(sp2 - hash_table_, s2, bit, updater, 2, kOptP ? opts_[2] : 9);
-        if (kInputs > 3) *sp3 = NextState(sp3 - hash_table_, s3, bit, updater, 3, kOptP ? opts_[3] : 9);
-        if (kInputs > 4) *sp4 = NextState(sp4 - hash_table_, s4, bit, updater, 4, kOptP ? opts_[4] : 9);
-        if (kInputs > 5) *sp5 = NextState(sp5 - hash_table_, s5, bit, updater, 5, kOptP ? opts_[5] : 9);
-        if (kInputs > 6) *sp6 = NextState(sp6 - hash_table_, s6, bit, updater, 6, kOptP ? opts_[6] : 9);
-        if (kInputs > 7) *sp7 = NextState(sp7 - hash_table_, s7, bit, updater, 7, kOptP ? opts_[7] : 9);
-        if (kInputs > 8) *sp8 = NextState(sp8 - hash_table_, s8, bit, updater, 8, kOptP ? opts_[8] : 9);
-        if (kInputs > 9) *sp9 = NextState(sp9 - hash_table_, s9, bit, updater, 9, kOptP ? opts_[9] : 9);
-        if (kInputs > 10) *sp10 = NextState(sp10 - hash_table_, s10, bit, updater, 10, kOptP ? opts_[10] : 9);
-        if (kInputs > 11) *sp11 = NextState(sp11 - hash_table_, s11, bit, updater, 11, kOptP ? opts_[11] : 9);
-        if (kInputs > 12) *sp12 = NextState(sp12 - hash_table_, s12, bit, updater, 12, kOptP ? opts_[12] : 9);
-        if (kInputs > 13) *sp13 = NextState(sp13 - hash_table_, s13, bit, updater, 13, kOptP ? opts_[13] : 9);
-        if (kInputs > 14) *sp14 = NextState(sp14 - hash_table_, s14, bit, updater, 14, kOptP ? opts_[14] : 9);
-        if (kInputs > 15) *sp15 = NextState(sp15 - hash_table_, s15, bit, updater, 15, kOptP ? opts_[15] : 9);
-      }
-      if (kUseLZP) {
-        if (kUseLZPSSE) {
-          if (kBitType == kBitTypeLZP) {
-            sse2_.update(bit);
-          } else if (kBitType == kBitTypeNormalSSE) {
-            sse_.update(bit);
-          }
-        }
-      }
-      if (sse3) {
-        sse3_.update(bit);
-      }
-      if (kBitType != kBitTypeLZP) {
-        match_model_.updateBit(bit, !kFixedMatchProbs, 7);
-      }
-      if (kStatistics) ++mixer_skip_[ret];
-
-      if (decode) {
-        ent.Normalize(stream);
-      } else {
-        ent.encode(stream, bit, p, kShift);
-      }
-      return bit;
-    }
-
-    template <const bool decode, BitType kBitType, typename TStream>
-    size_t processNibble(TStream& stream, size_t c, size_t* base_contexts, size_t ctx_add, size_t ctx_add2) {
-      uint32_t huff_state = huff.start_state, code = 0;
-      if (!decode) {
-        if (use_huffman) {
-          const auto& huff_code = huff.getCode(c);
-          code = huff_code.value << (sizeof(uint32_t) * 8 - huff_code.length);
-        } else {
-          code = c << (sizeof(uint32_t) * 8 - 4);
-        }
-      }
-      size_t base_ctx = 1;
-      for (;;) {
-        const size_t ctx = use_huffman ? huff_state : ctx_add + base_ctx;
-        size_t bit = 0;
-        if (!decode) {
+		template <const bool kDecode, BitType kBitType, size_t kBits, typename TStream>
+		size_t ProcessBits(TStream& stream, const size_t c, size_t* base_contexts, size_t ctx_add) {
+			uint32_t code = 0;
+			if (!kDecode) {
+        code = c << (sizeof(uint32_t) * kBitsPerByte - kBits);
+			}
+      size_t base_ctx = 0;
+      size_t cur_ctx = kBits > 1;
+      size_t bits = kBits;
+			do {
+        const size_t mixer_ctx = base_ctx + cur_ctx;
+        const size_t ctx = mixer_ctx + ctx_add;
+				size_t bit = 0;
+				if (!kDecode) {
           bit = code >> (sizeof(uint32_t) * 8 - 1);
           code <<= 1;
-        }
-        bit = ProcessBit<decode, kBitType>(stream, bit, base_contexts, ctx_add2 + ctx, ctx);
+				}
+				const auto mm_l = match_model_.getLength();
+				// ++ctx_count_[mixer_ctx];
+				uint8_t
+					*rst sp0, *rst sp1, *rst sp2, *rst sp3, *rst sp4, *rst sp5, *rst sp6, *rst sp7,
+					*rst sp8, *rst sp9, *rst sp10, *rst sp11, *rst sp12, *rst sp13, *rst sp14, *rst sp15;
+				uint8_t
+					s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0, s5 = 0, s6 = 0, s7 = 0,
+					s8 = 0, s9 = 0, s10 = 0, s11 = 0, s12 = 0, s13 = 0, s14 = 0, s15 = 0;
 
-        // Encode the bit / decode at the last second.
-        if (use_huffman) {
-          huff_state = huff.getTransition(huff_state, bit);
-          if (huff.isLeaf(huff_state)) {
-            return huff_state;
-          }
-        } else {
-          base_ctx = base_ctx * 2 + bit;
-          if ((base_ctx & 16) != 0) break;
+				uint32_t p;
+				int32_t
+					p0 = 0, p1 = 0, p2 = 0, p3 = 0, p4 = 0, p5 = 0, p6 = 0, p7 = 0,
+					p8 = 0, p9 = 0, p10 = 0, p11 = 0, p12 = 0, p13 = 0, p14 = 0, p15 = 0;
+				constexpr bool kUseAdd = false;
+				auto ctx_xor = kUseAdd ? 0 : ctx;
+				auto ht = kUseAdd ? hash_table_ + ctx : hash_table_;
+				if (kBitType == kBitTypeLZP) {
+					if (kInputs > 0) {
+						if (kFixedMatchProbs) {
+							p0 = fixed_match_probs_[mm_l * 2 + 1];
+						} else {
+							p0 = match_model_.getP(table_.getStretchPtr(), 1);
+						}
+					}
+				}
+				else if (mm_l == 0) {
+					if (kInputs > 0) {
+						sp0 = &ht[base_contexts[0] ^ ctx_xor];
+						s0 = *sp0;
+						p0 = GetSTP(s0, 0);
+					}
+				} else {
+					if (kInputs > 0) {
+						if (kFixedMatchProbs) {
+							p0 = fixed_match_probs_[mm_l * 2 + match_model_.getExpectedBit()];
+						} else {
+							p0 = match_model_.getP(table_.getStretchPtr(), match_model_.getExpectedBit());
+						}
+					}
+				}
+				if (kInputs > 1) s1 = *(sp1 = &ht[base_contexts[1] ^ ctx_xor]);
+				if (kInputs > 2) s2 = *(sp2 = &ht[base_contexts[2] ^ ctx_xor]);
+				if (kInputs > 3) s3 = *(sp3 = &ht[base_contexts[3] ^ ctx_xor]);
+				if (kInputs > 4) s4 = *(sp4 = &ht[base_contexts[4] ^ ctx_xor]);
+				if (kInputs > 5) s5 = *(sp5 = &ht[base_contexts[5] ^ ctx_xor]);
+				if (kInputs > 6) s6 = *(sp6 = &ht[base_contexts[6] ^ ctx_xor]);
+				if (kInputs > 7) s7 = *(sp7 = &ht[base_contexts[7] ^ ctx_xor]);
+				if (kInputs > 8) s8 = *(sp8 = &ht[base_contexts[8] ^ ctx_xor]);
+				if (kInputs > 9) s9 = *(sp9 = &ht[base_contexts[9] ^ ctx_xor]);
+				if (kInputs > 10) s10 = *(sp10 = &ht[base_contexts[10] ^ ctx_xor]);
+				if (kInputs > 11) s11 = *(sp11 = &ht[base_contexts[11] ^ ctx_xor]);
+				if (kInputs > 12) s12 = *(sp12 = &ht[base_contexts[12] ^ ctx_xor]);
+				if (kInputs > 13) s13 = *(sp13 = &ht[base_contexts[13] ^ ctx_xor]);
+				if (kInputs > 14) s14 = *(sp14 = &ht[base_contexts[14] ^ ctx_xor]);
+				if (kInputs > 15) s15 = *(sp15 = &ht[base_contexts[15] ^ ctx_xor]);
+
+				if (kInputs > 1) p1 = GetSTP(s1, 1);
+				if (kInputs > 2) p2 = GetSTP(s2, 2);
+				if (kInputs > 3) p3 = GetSTP(s3, 3);
+				if (kInputs > 4) p4 = GetSTP(s4, 4);
+				if (kInputs > 5) p5 = GetSTP(s5, 5);
+				if (kInputs > 6) p6 = GetSTP(s6, 6);
+				if (kInputs > 7) p7 = GetSTP(s7, 7);
+				if (kInputs > 8) p8 = GetSTP(s8, 8);
+				if (kInputs > 9) p9 = GetSTP(s9, 9);
+				if (kInputs > 10) p10 = GetSTP(s10, 10);
+				if (kInputs > 11) p11 = GetSTP(s11, 11);
+				if (kInputs > 12) p12 = GetSTP(s12, 12);
+				if (kInputs > 13) p13 = GetSTP(s13, 13);
+				if (kInputs > 14) p14 = GetSTP(s14, 14);
+				if (kInputs > 15) p15 = GetSTP(s15, 15);
+				int m0p, m1p, m2p, stage2p;
+				CMMixer* m0 = mixers_[0].GetMixer() + mixer_ctx;
+				m0p = m0->P(kMixerBits, p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15);
+				int stp = m0p;
+				int mixer_p = table_.sqfast(stp); // Mix probabilities.
+				p = mixer_p;
+				bool sse3 = false;
+				if (kUseLZP) {
+					if (kUseLZPSSE) {
+						if (kBitType == kBitTypeLZP || kBitType == kBitTypeNormalSSE) {
+							stp = Clamp(stp, kMinST, kMaxST - 1);
+              if (kBitType == kBitTypeLZP) {
+                p = sse2_.p(stp + kMaxValue / 2, sse_ctx_ + mm_l);
+              } else {
+                p = sse_.p(stp + kMaxValue / 2, sse_ctx_ + mixer_ctx);
+							}
+							p += p == 0;
+						}
+						else if (kUseSSE) {
+							stp = Clamp(stp, kMinST, kMaxST - 1);
+							constexpr uint32_t kDiv = 32;
+							const uint32_t blend = 14;
+							int input_p = stp + kMaxValue / 2;
+							p = (p * blend + sse3_.p(input_p, (last_bytes_ & 0xFF) * 256 + mixer_ctx) * (kDiv - blend)) / kDiv;
+							// p = (p * opt_var_ + sse3_.p(stp + kMaxValue / 2, (interval_model_ & 0xFF) * 256 + mixer_ctx) * (kDiv - opt_var_)) / kDiv;
+							// p = sse3_.p(stp + kMaxValue / 2, (interval_model_ & 0xFF) * 256 + mixer_ctx);
+							// p = sse3_.p(stp + kMaxValue / 2, mixer_ctx);
+							// p = (p * 1 + sse3_.p(stp + kMaxValue / 2, (mix1_.GetContext() & 0xFF00) + mixer_ctx) * 15) / 16;
+							p += p == 0;
+							mixer_p = p;
+							sse3 = true;
+						}
+					}
+				}
+				else if (true) {
+					p = (p * 1 + sse3_.p(stp + kMaxValue / 2, (last_bytes_ & 0xFF) * 256 + mixer_ctx) * 15) / 16;
+					p += p == 0;
+					// mixer_p = p;
+					sse3 = true;
+				}
+
+				if (kDecode) {
+					bit = ent.getDecodedBit(p, kShift);
+				}
+				dcheck(bit < 2);
+
+				const size_t kLimit = kMaxLearn - 1;
+				const size_t kDelta = 5;
+				// Returns false if we skipped the update due to a low error, should happen moderately frequently on highly compressible files.
+				bool ret = m0->Update(
+					mixer_p, bit,
+					kShift, kLimit, 600, 1,
+					// mixer_update_rate_[m0->NextLearn(8)], 16,
+					mixer_update_rate_[m0->GetLearn()], 16,
+					p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15
+				);
+				// Only update the states / predictions if the mixer was far enough from the bounds, helps 60k on enwik8 and 1-2sec.
+				const bool kOptP = false;
+				if (ret) {
+					auto updater = probs_[0].GetUpdater(bit);
+					if (kBitType == kBitTypeLZP) {
+						if (!kFixedMatchProbs) {
+							match_model_.updateCurMdl(1, bit, 6);
+						}
+					} else if (mm_l == 0) {
+						if (kInputs > 0) *sp0 = NextState(sp0 - hash_table_, s0, bit, updater, 0, kOptP ? opts_[0] : 23);
+					}
+					if (kInputs > 1) *sp1 = NextState(sp1 - hash_table_, s1, bit, updater, 1, kOptP ? opts_[1] : 10);
+					if (kInputs > 2) *sp2 = NextState(sp2 - hash_table_, s2, bit, updater, 2, kOptP ? opts_[2] : 9);
+					if (kInputs > 3) *sp3 = NextState(sp3 - hash_table_, s3, bit, updater, 3, kOptP ? opts_[3] : 9);
+					if (kInputs > 4) *sp4 = NextState(sp4 - hash_table_, s4, bit, updater, 4, kOptP ? opts_[4] : 9);
+					if (kInputs > 5) *sp5 = NextState(sp5 - hash_table_, s5, bit, updater, 5, kOptP ? opts_[5] : 9);
+					if (kInputs > 6) *sp6 = NextState(sp6 - hash_table_, s6, bit, updater, 6, kOptP ? opts_[6] : 9);
+					if (kInputs > 7) *sp7 = NextState(sp7 - hash_table_, s7, bit, updater, 7, kOptP ? opts_[7] : 9);
+					if (kInputs > 8) *sp8 = NextState(sp8 - hash_table_, s8, bit, updater, 8, kOptP ? opts_[8] : 9);
+					if (kInputs > 9) *sp9 = NextState(sp9 - hash_table_, s9, bit, updater, 9, kOptP ? opts_[9] : 9);
+					if (kInputs > 10) *sp10 = NextState(sp10 - hash_table_, s10, bit, updater, 10, kOptP ? opts_[10] : 9);
+					if (kInputs > 11) *sp11 = NextState(sp11 - hash_table_, s11, bit, updater, 11, kOptP ? opts_[11] : 9);
+					if (kInputs > 12) *sp12 = NextState(sp12 - hash_table_, s12, bit, updater, 12, kOptP ? opts_[12] : 9);
+					if (kInputs > 13) *sp13 = NextState(sp13 - hash_table_, s13, bit, updater, 13, kOptP ? opts_[13] : 9);
+					if (kInputs > 14) *sp14 = NextState(sp14 - hash_table_, s14, bit, updater, 14, kOptP ? opts_[14] : 9);
+					if (kInputs > 15) *sp15 = NextState(sp15 - hash_table_, s15, bit, updater, 15, kOptP ? opts_[15] : 9);
+				}
+				if (kUseLZP) {
+					if (kUseLZPSSE) {
+						if (kBitType == kBitTypeLZP) {
+							sse2_.update(bit);
+						}
+						else if (kBitType == kBitTypeNormalSSE) {
+							sse_.update(bit);
+						}
+					}
+				}
+				if (sse3) {
+					sse3_.update(bit);
+				}
+				if (kBitType != kBitTypeLZP) {
+					match_model_.updateBit(bit, !kFixedMatchProbs, 7);
+				}
+				if (kStatistics) ++mixer_skip_[ret];
+
+				if (kDecode) {
+					ent.Normalize(stream);
+				} else {
+					ent.encode(stream, bit, p, kShift);
+				}
+        cur_ctx = cur_ctx * 2 + bit;
+        if (kDecode) {
+          code = (code << 1) | bit;
         }
-      }
-      return base_ctx ^ 16;
-    }
+        if (--bits == 4) {
+          auto nibble = cur_ctx ^ 16;
+          if (kPrefetchMatchModel) {
+            match_model_.fetch(nibble << 4);
+          }
+          base_ctx = (nibble + 1) * 15;
+          cur_ctx = 1;
+        }
+			} while (bits != 0);
+			return kDecode ? code : c;
+		}
 
     uint64_t opt_op(uint64_t a, uint64_t b) const {
       if (opt_var_ & 1) {
@@ -971,7 +968,7 @@ namespace cm {
           dcheck(mm_len >= match_model_.getMinMatch());
           size_t bit = decode ? 0 : expected_char == c;
           sse_ctx_ = 256 * (1 + expected_char);
-          bit = ProcessBit<decode, kBitTypeLZP>(stream, bit, base_contexts, expected_char ^ 256, 0);
+          bit = ProcessBits<decode, kBitTypeLZP, 1u>(stream, bit, base_contexts, expected_char ^ 256);
           // CalcMixerBase(false);
           if (kStatistics) {
             const uint64_t after_pos = kStatistics ? stream.tell() : 0;
@@ -989,29 +986,14 @@ namespace cm {
         return c;
       }
       // Non match, do normal encoding.
-      size_t huff_state = 0;
-      if (use_huffman) {
-        huff_state = processNibble<decode, kBitTypeNormal>(stream, c, base_contexts, 0, 0);
-        if (decode) {
-          c = huff.getChar(huff_state);
-        }
-      } else {
-        size_t n1 = (sse_ctx_ != 0) ?
-          processNibble<decode, kBitTypeNormalSSE>(stream, c >> 4, base_contexts, 0, 0) :
-          processNibble<decode, kBitTypeNormal>(stream, c >> 4, base_contexts, 0, 0);
-        if (kPrefetchMatchModel) {
-          match_model_.fetch(n1 << 4);
-        }
-        auto ctx2 = 15 + (n1 * 15);
-        size_t n2 = (sse_ctx_ != 0) ?
-          processNibble<decode, kBitTypeNormalSSE>(stream, c & 0xF, base_contexts, ctx2, 0) :
-          processNibble<decode, kBitTypeNormal>(stream, c & 0xF, base_contexts, ctx2, 0);
-        if (decode) {
-          c = n2 | (n1 << 4);
-        }
-        if (kStatistics) {
-          (sse_ctx_ != 0 ? lzp_miss_bytes_ : normal_bytes_) += stream.tell() - cur_pos;
-        }
+      size_t n = (sse_ctx_ != 0) ?
+        ProcessBits<decode, kBitTypeNormalSSE, kBitsPerByte>(stream, c, base_contexts, 0) :
+				ProcessBits<decode, kBitTypeNormal, kBitsPerByte>(stream, c, base_contexts, 0);
+      if (decode) {
+				c = n;
+      }
+      if (kStatistics) {
+        (sse_ctx_ != 0 ? lzp_miss_bytes_ : normal_bytes_) += stream.tell() - cur_pos;
       }
 
       return c;

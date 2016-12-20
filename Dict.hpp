@@ -148,9 +148,9 @@ public:
     size_t num1_;
     size_t num2_;
     size_t num3_;
-    std::vector<std::string> codewords_;
+    std::vector<WordCount> codewords_;
 
-    std::vector<std::string>* getCodeWords() {
+    std::vector<WordCount>* GetCodeWords() {
       return &codewords_;
     }
   };
@@ -186,6 +186,7 @@ public:
     // CC: first char EOR whole word.
     WordCounter words_;
     /// WordCollectionMap words_;
+    FrequencyCounter<256> counter_;
   public:
     void GetWords(std::vector<WordCount>& out, size_t min_occurences = kDefaultMinOccurrences) {
       words_.GetWords(out, min_occurences);
@@ -193,6 +194,7 @@ public:
     }
 
     void addChar(uint8_t c) {
+      counter_.Add(c);
       // Add to current word.
       if (isWordChar(c)) {
         if (word_pos_ < kMaxWordLen) {
@@ -240,17 +242,12 @@ public:
     }
   };
 
-  class CodeWordGenerator {
-  public:
-    virtual void generate(Builder& builder, CodeWordSet& code_words) = 0;
-  };
-
   class CodeWordGeneratorFast {
     static const bool kVerbose = true;
   public:
     void generateCodeWords(Builder& builder, CodeWordSet* words, size_t min_occurrences, size_t num_1 = 32, size_t num_2 = 32) {
       auto start_time = clock();
-      auto* cw = words->getCodeWords();
+      auto* cw = words->GetCodeWords();
       cw->clear();
 
       std::vector<WordCount> word_pairs;
@@ -276,10 +273,10 @@ public:
       for (size_t i = 0; i < words->num1_; ++i) {
         const auto& p = word_pairs[i];
         ++count1;
-        cw->push_back(p.word);
+        cw->push_back(p);
         save1 += p.Savings(1);
       }
-      std::sort(cw->begin(), cw->end());
+      std::sort(cw->begin(), cw->end(), WordCount::CompareLexicographically());
       word_pairs.erase(word_pairs.begin(), word_pairs.begin() + count1);
       std::sort(word_pairs.rbegin(), word_pairs.rend(), WordCount::CompareSavings(2));
       // 2 byte codes.
@@ -298,7 +295,7 @@ public:
         for (size_t b2 = start_other2; b2 < end_other2; ++b2) {
           if (count2 < word_pairs.size()) {
             const auto& p = word_pairs[count2++];
-            cw->push_back(p.word);
+            cw->push_back(p);
             save2 += p.Savings(2);
           }
         }
@@ -323,127 +320,18 @@ public:
           for (size_t b3 = start_other3; b3 < 256; ++b3) {
             if (count3 < word_pairs.size()) {
               const auto& p = word_pairs[count3++];
-              cw->push_back(p.word);
+              cw->push_back(p);
               save3 += p.Savings(3);
             }
           }
         }
       }
       word_pairs.erase(word_pairs.begin(), word_pairs.begin() + count3);
+      auto start = count1;
+      std::sort(cw->begin() + start, cw->begin() + start + count2, WordCount::CompareLexicographically());
+      start += count2;
+      std::sort(cw->begin() + start, cw->begin() + start + count3, WordCount::CompareLexicographically());
 
-      if (false) {
-        // High mode, incomplete.
-        // Total / count.
-        typedef std::pair<uint64_t, uint64_t> MeanPair;
-        std::unordered_map<std::string, MeanPair> words2b;
-        std::unordered_map<std::string, MeanPair> words3b;
-        auto it = cw->begin() + count1;
-        for (; it != cw->begin() + count1 + count2; ++it) {
-          words2b.insert(std::make_pair(*it, MeanPair(0, 0)));
-        }
-        if (false)  // 3 byte ones, ignore since they are probably low freq.
-          for (; it != cw->end(); ++it) {
-            words3b.insert(std::make_pair(*it, MeanPair(0, 0)));
-          }
-
-        // Expensive suffix sort approach.
-        auto* buffer = builder.getBuffer();
-        // Find interesting indexes.
-        std::vector<uint32_t> indexes;
-        size_t num_words = 0;
-        static const size_t kSuffixOffset = 0;
-        const uint8_t* arr = &buffer->operator[](0);
-        for (size_t pos = 0; pos < buffer->size(); ) {
-          if (isWordChar(arr[pos])) {
-            size_t len = 0;
-            for (;pos + len < buffer->size() && isWordChar(arr[pos + len]); ++len) {
-            }
-            std::string s(arr + pos, arr + pos + len);
-            if (words2b.find(s) != words2b.end() || words3b.find(s) != words3b.end()) {
-              indexes.push_back(static_cast<uint32_t>(pos + kSuffixOffset));
-            }
-            ++num_words;
-            pos += len;
-          } else {
-            ++pos;
-          }
-        }
-
-        SuffixSortComparator cmp(arr);
-        auto start = clock();
-        std::cout << "sorting " << indexes.size() << "/" << num_words << std::endl;
-        std::sort(indexes.begin(), indexes.end(), cmp);
-        std::cout << "sorting took " << clockToSeconds(clock() - start) << std::endl;
-
-        // Use suffix to build avg indexes.
-        // Whether or not do dump suffixes.
-        std::ofstream fout("suffixes.txt");
-        for (size_t i = 0; i < indexes.size(); ++i) {
-          size_t pos = indexes[i] - kSuffixOffset;
-          check(isWordChar(arr[pos]));
-          size_t len = 0;
-          for (;pos + len < buffer->size() && isWordChar(arr[pos + len]); ++len) {
-          }
-          std::string s(arr + pos, arr + pos + len);
-
-#if 1
-          auto end = pos + len;
-          std::string str(std::max(arr, arr + pos - 12), std::min(arr + end, arr + buffer->size()));
-          for (auto& c : str) {
-            if (c == '\n') c = '_';
-            if (c == '\t') c = '_';
-          }
-          fout << str << std::endl;
-#endif
-
-          auto it = words2b.find(s);
-          if (it == words2b.end()) {
-            it = words3b.find(s);
-            check(it != words3b.end());
-          }
-          it->second.first += i;
-          ++it->second.second;
-        }
-
-        // Re-sort based on averages.
-        std::vector<std::pair<uint32_t, std::string>> sort_arr;
-        // 2b first
-        for (auto& p : words2b) {
-          sort_arr.push_back(std::make_pair(static_cast<uint32_t>(p.second.first / p.second.second), p.first));
-        }
-        std::sort(sort_arr.begin(), sort_arr.end());
-        it = cw->begin() + count1;
-        for (auto& p : sort_arr) {
-          *(it++) = p.second;
-        }
-
-        // 3b first
-        sort_arr.clear();
-        for (auto& p : words3b) {
-          sort_arr.push_back(std::make_pair(static_cast<uint32_t>(p.second.first / p.second.second), p.first));
-        }
-        std::sort(sort_arr.begin(), sort_arr.end());
-        for (auto& p : sort_arr) {
-          *(it++) = p.second;
-        }
-
-      } else {
-        // std::sort(cw->begin() + count1, cw->begin() + count1 + count2, ReverseCompareString());
-        // std::sort(cw->begin() + count1 + count2, cw->end(), ReverseCompareString());
-        size_t count = 0;
-        std::unordered_map<std::string, size_t> dict;
-        if (false) {
-          std::ifstream fin("dict.dic");
-          std::string line;
-          while (std::getline(fin, line)) {
-            if (line != "") {
-              dict[line] = count++;
-            }
-          }
-        }
-        std::sort(cw->begin() + count1, cw->begin() + count1 + count2, DictCompare(&dict));
-        std::sort(cw->begin() + count1 + count2, cw->end(), DictCompare(&dict));
-      }
       if (kVerbose) {
         // Remaining chars.
         int64_t remain = 0;
@@ -536,7 +424,7 @@ public:
     // 3b count
 
     // Creates an encodable dictionary array.
-    void addCodeWords(std::vector<std::string>* words, uint8_t num1, uint8_t num2, uint8_t num3) {
+    void addCodeWords(std::vector<WordCount>* words, uint8_t num1, uint8_t num2, uint8_t num3) {
       // Create the dict array.
       WriteVectorStream wvs(&dict_buffer_);
       // Save space for dict size.
@@ -553,7 +441,8 @@ public:
       dict_buffer_.push_back(num3);
       // Encode words.
       std::string last;
-      for (const auto& s : *words) {
+      for (const auto& w : *words) {
+        const std::string& s = w.word;
         size_t common_len = 0;
         // Common prefix encoding, seems to hurt ratio.
         if (false) {
@@ -598,15 +487,17 @@ public:
       word2bstart = word1bstart + num1;
       word3bstart = word2bstart + num2;
       // Encode words.
-      std::vector<std::string> words;
+      std::vector<WordCount> words;
       while (rms.tell() != dict_buffer_.size()) {
-        words.push_back(rms.readString());
+        WordCount wc;
+        wc.word = rms.readString();
+        words.push_back(wc);
       }
       // Generate the actual encode map.
       generate(words, num1, num2, num3, false);
       std::cout << "Dictionary words=" << words.size() << " size=" << prettySize(dict_buffer_.size()) << std::endl;
     }
-    void generate(std::vector<std::string>& words, size_t num1, size_t num2, size_t num3, bool encode) {
+    void generate(std::vector<WordCount>& words, size_t num1, size_t num2, size_t num3, bool encode) {
       static const size_t start = 128u;
       size_t end1 = start + num1;
       size_t end2 = end1 + num2;
@@ -615,9 +506,9 @@ public:
       for (size_t b1 = start; b1 < end1; ++b1) {
         if (idx < words.size()) {
           if (encode) {
-            encode_map_.Add(words[idx++], CodeWord(1, static_cast<uint8_t>(b1)));
+            encode_map_.Add(words[idx++].word, CodeWord(1, static_cast<uint8_t>(b1)));
           } else {
-            words1b.push_back(words[idx++]);
+            words1b.push_back(words[idx++].word);
           }
         }
       }
@@ -625,9 +516,9 @@ public:
         for (size_t b2 = (kOverlapCodewords ? start : end1); b2 < (kOverlapCodewords ? 256u : end2); ++b2) {
           if (idx < words.size()) {
             if (encode) {
-              encode_map_.Add(words[idx++], CodeWord(2, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2)));
+              encode_map_.Add(words[idx++].word, CodeWord(2, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2)));
             } else {
-              words2b.push_back(words[idx++]);
+              words2b.push_back(words[idx++].word);
             }
           }
         }
@@ -637,9 +528,9 @@ public:
           for (size_t b3 = (kOverlapCodewords ? start : end2); b3 < (kOverlapCodewords ? 256u : end3); ++b3) {
             if (idx < words.size()) {
               if (encode) {
-                encode_map_.Add(words[idx++], CodeWord(3, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2), static_cast<uint8_t>(b3)));
+                encode_map_.Add(words[idx++].word, CodeWord(3, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2), static_cast<uint8_t>(b3)));
               } else {
-                words3b.push_back(words[idx++]);
+                words3b.push_back(words[idx++].word);
               }
             }
           }

@@ -471,4 +471,56 @@ struct OffsetBlock {
   size_t len;
 };
 
+template <uint32_t kAlphabetSize = 0x100>
+class FrequencyCounter {
+  uint64_t frequencies_[kAlphabetSize] = {};
+public:
+  inline void Add(uint32_t index) {
+    ++frequencies_[index];
+  }
+
+  void Normalize(uint32_t target) {
+    check(target != 0U);
+    uint64_t total = 0;
+    for (auto f : frequencies_) {
+      total += f;
+    }
+    const auto factor = static_cast<double>(target) / static_cast<double>(total);
+    for (auto& f : frequencies_) {
+      auto new_val = static_cast<uint32_t>(double(f) * factor);
+      total += new_val - f;
+      f = new_val;
+    }
+    // Fudge the probabilities until we match.
+    int64_t delta = static_cast<int64_t>(target) - total;
+    while (delta) {
+      for (auto& f : frequencies_) {
+        if (f) {
+          if (delta > 0) {
+            ++f;
+            delta--;
+          } else {
+            // Don't ever go back down to 0 since we can't necessarily represent that.
+            if (f > 1) {
+              --f;
+              delta++;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const uint64_t* GetFrequencies() const {
+    return frequencies_;
+  }
+
+  void Count(uint8_t* data, uint32_t bytes) {
+    // TODO: Vectorize.
+    for (; count; --count) {
+      addFrequency(*data++);
+    }
+  }
+};
+
 #endif

@@ -174,7 +174,9 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer, Arc
           std::string line;
           while (std::getline(fin, line)) {
             if (!line.empty()) {
-              code_words.getCodeWords()->push_back(line);
+              WordCount count;
+              count.word = line;
+              code_words.GetCodeWords()->push_back(count);
             }
           }
           auto temp = code_words.codewords_;
@@ -209,7 +211,7 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer, Arc
           std::cerr << "Invalid number of words for dictionary " << count << std::endl;
         }
       }
-      if (code_words.getCodeWords()->empty()) {
+      if (code_words.GetCodeWords()->empty()) {
         generator.generateCodeWords(builder, &code_words, 5, 40, 32);
       }
       const auto& out_dict_file = archive.Options().out_dict_file_;
@@ -217,10 +219,17 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer, Arc
         std::ofstream fout(out_dict_file.c_str());
         fout << code_words.codewords_.size() << " " << code_words.num1_ << " " << code_words.num2_ << " " << code_words.num3_ << std::endl;
         for (const auto& s : code_words.codewords_) {
-          fout << s << std::endl;
+          fout << s.word << std::endl;
         }
       }
-      dict_filter->addCodeWords(code_words.getCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_);
+#if 0
+      size_t sum = 0;
+      for (size_t i = 0; i < 256; ++i) {
+        sum += counter_.GetFrequencies()[i];
+      }
+      std::cerr << std::endl << "WORD SUM " << sum << std::endl;
+#endif
+      dict_filter->addCodeWords(code_words.GetCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_);
       dict_filter->setOpt(opt_var);
       ret = dict_filter;
     } else {
@@ -430,7 +439,7 @@ void testFilter(Stream* stream, Analyzer* analyzer) {
     Dict::CodeWordSet code_words;
     generator.generateCodeWords(builder, &code_words, 8);
     auto dict_filter = new Dict::Filter(stream, 0x3, 0x4, 0x6);
-    dict_filter->addCodeWords(code_words.getCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_);
+    dict_filter->addCodeWords(code_words.GetCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_);
     WriteVectorStream wvs(&comp);
     Store store;
     store.compress(dict_filter, &wvs, std::numeric_limits<uint64_t>::max());

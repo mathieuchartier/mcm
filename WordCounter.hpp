@@ -94,6 +94,13 @@ struct WordCount {
   private:
     const size_t code_word_len_;
   };
+
+  class CompareLexicographically {
+  public:
+    bool operator()(const WordCount& a, const WordCount& b) const {
+      return a.word < b.word;
+    }
+  };
 };
 
 // Fast memory efficient word counter that uses a compacting GC.

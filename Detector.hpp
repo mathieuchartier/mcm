@@ -38,6 +38,7 @@
 // Detects blocks and data type from input data
 class Detector {
   bool is_forbidden[256]; // Chars which don't appear in text often.
+  bool is_word_or_ascii_art[256];
   uint8_t is_space[256];
 
   // MZ pattern, todo replace with better detection.
@@ -200,7 +201,10 @@ public:
       29, 30, 31
     };
     for (auto c : forbidden_arr) is_forbidden[c] = true;
-    for (size_t i = 0; i < 256; ++i) is_space[i] = isspace(i) ? 1u : 0u;
+    for (size_t i = 0; i < 256; ++i) {
+      is_space[i] = isspace(i) ? 1u : 0u;
+      is_word_or_ascii_art[i] = IsWordOrAsciiArtChar(i);
+    }
     no_spaces_ = 0;
 
     buffer_.Resize(256 * KB);
@@ -210,8 +214,8 @@ public:
     for (auto& c : p) exe_pattern.push_back(c);
   }
 
-  void refillRead() {
-    const size_t kBufferSize = 4 * KB;
+  void RefillRead() {
+    const size_t kBufferSize = 8 * KB;
     uint8_t buffer[kBufferSize];
     for (;;) {
       const size_t remain = buffer_.Remain();
@@ -314,7 +318,7 @@ public:
   }
   int popChar() {
     if (buffer_.Empty()) {
-      refillRead();
+      RefillRead();
       if (buffer_.Empty()) {
         return EOF;
       }
@@ -351,7 +355,7 @@ public:
       saved_blocks_.pop_front();
       return ret;
     }
-    refillRead();
+    RefillRead();
     const size_t buffer_size = buffer_.Size();
     if (buffer_size == 0) {
       return DetectedBlock(kProfileEOF, 0);
@@ -370,13 +374,13 @@ public:
       size_t number_len = 0;
       int text_score = 0;
       while (binary_len + text_len < buffer_size) {
-        size_t pos = binary_len + text_len;
+        const size_t pos = binary_len + text_len;
         Window<BufferType> window(buffer_, static_cast<uint32_t>(pos));
         OffsetBlock b;
-        if ((b = Wav16::Detect(last_word_, window)).len > 0) {
+        if (Wav16::Detect(last_word_, window, &b)) {
           saved_blocks_.push_back(DetectedBlock(kProfileWave16, b.len));
           return DetectedBlock(kProfileBinary, b.offset);
-        } else if ((b = JPEGCompressor::Detect(last_word_, window)).len > 0) {
+        } else if (JPEGCompressor::Detect(last_word_, window, &b)) {
           saved_blocks_.push_back(DetectedBlock(kProfileBinary, b.len));
           return DetectedBlock(kProfileBinary, b.offset);
         }
@@ -390,7 +394,7 @@ public:
         const uint8_t last_c = (last_word_ >> 8) & 0xFF;
         text_score += is_space[c];
         if (last_c != c) {
-          if (IsWordOrAsciiArtChar(c)) {
+          if (is_word_or_ascii_art[c]) {
             ++word_len;
             text_score += is_space[last_c] * 10;
           } else if (word_len != 0) {

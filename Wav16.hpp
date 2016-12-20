@@ -83,9 +83,9 @@ public:
   }
 
   template <typename Subtype>
-  static OffsetBlock Detect(uint32_t last_word, Window<Subtype>& window) {
+  ALWAYS_INLINE static bool Detect(uint32_t last_word, Window<Subtype>& window, OffsetBlock* out) {
     if (last_word != MakeWord('R', 'I', 'F', 'F')) {
-      return OffsetBlock();
+      return false;
     }
     // This is pretty bad, need a clean way to do it.
     uint32_t fpos = 0;
@@ -96,11 +96,11 @@ public:
     const uint32_t kWave = MakeWord('W', 'A', 'V', 'E');
     const uint32_t kSubchunk = MakeWord('f', 'm', 't', ' ');
     if (format != kWave || subchunk_id != kSubchunk) {
-      return OffsetBlock();
+      return false;
     }
     const uint32_t subchunk_size = window.Read<kEndianLittle>(fpos, 4); fpos += 4;
     if (subchunk_size != 16 && subchunk_size != 18) {
-      return OffsetBlock();
+      return false;
     }
     const uint32_t audio_format = window.Read<kEndianLittle>(fpos, 2); fpos += 2;
     const uint32_t num_channels = window.Read<kEndianLittle>(fpos, 2); fpos += 2;
@@ -117,13 +117,14 @@ public:
           if (subchunk2_size >= chunk_size) {
             break;
           }
-          return OffsetBlock{fpos, chunk_size};
+          *out = OffsetBlock{fpos, chunk_size};
+          return true;
         }
         fpos += subchunk2_size;
         if (fpos >= window.size()) break;
       }
     }
-    return OffsetBlock();
+    return false;
   }
 
   template <const bool kDecode, typename TStream>
