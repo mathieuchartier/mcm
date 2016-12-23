@@ -185,18 +185,22 @@ public:
     size_t word_pos_;
     // CC: first char EOR whole word.
     WordCounter words_;
-    /// WordCollectionMap words_;
     FrequencyCounter<256> counter_;
+
   public:
     void GetWords(std::vector<WordCount>& out, size_t min_occurences = kDefaultMinOccurrences) {
       words_.GetWords(out, min_occurences);
       words_.Clear();
     }
 
+    FrequencyCounter<256>& FrequencyCounter() {
+      return counter_;
+    }
+
     void addChar(uint8_t c) {
       counter_.Add(c);
       // Add to current word.
-      if (isWordChar(c)) {
+      if (IsWordChar(c)) {
         if (word_pos_ < kMaxWordLen) {
           word_[word_pos_++] = c;
         }
@@ -205,15 +209,13 @@ public:
           WordCC cc_type = GetWordCase(word_, word_pos_);
           if (cc_type == kWordCCAll) {
             for (size_t i = 0; i < word_pos_; ++i) {
-              word_[i] = makeLowerCase(word_[i]);
+              word_[i] = MakeLowerCase(word_[i]);
             }
           } else if (cc_type == kWordCCFirstChar) {
-            word_[0] = makeLowerCase(word_[0]);
+            word_[0] = MakeLowerCase(word_[0]);
           } else if (cc_type == kWordCCInvalid && (false)) {
             for (size_t i = 0; i < word_pos_; ++i) {
-              if (isUpperCase(word_[i])) {
-                word_[i] = makeLowerCase(word_[i]);
-              }
+              word_[i] = MakeLowerCase(word_[i]);
             }
             cc_type = kWordCCNone;
           }
@@ -341,7 +343,6 @@ public:
           << " extra=" << remain
           << " time=" << clockToSeconds(clock() - start_time) << "s"
           << std::endl;
-
       }
     }
   };
@@ -357,9 +358,7 @@ public:
       std::string lower_case(word);
       auto word_case = GetWordCase(reinterpret_cast<const uint8_t*>(word.c_str()), word.length());
       for (auto& c : lower_case) {
-        if (isUpperCase(c)) {
-          c = makeLowerCase(c);
-        }
+        c = MakeLowerCase(c);
       }
       map_.emplace(lower_case, Entry{ code_word, word_case });
     }
@@ -424,7 +423,7 @@ public:
     // 3b count
 
     // Creates an encodable dictionary array.
-    void addCodeWords(std::vector<WordCount>* words, uint8_t num1, uint8_t num2, uint8_t num3) {
+    void addCodeWords(std::vector<WordCount>* words, uint8_t num1, uint8_t num2, uint8_t num3, FrequencyCounter<256>* fc) {
       // Create the dict array.
       WriteVectorStream wvs(&dict_buffer_);
       // Save space for dict size.
@@ -442,10 +441,11 @@ public:
       // Encode words.
       std::string last;
       for (const auto& w : *words) {
-        const std::string& s = w.word;
+        const std::string& s = w.Word();
         size_t common_len = 0;
         // Common prefix encoding, seems to hurt ratio.
-        if (false) {
+        static const bool kCommonPrefixEncoding = false;
+        if (kCommonPrefixEncoding) {
           while (common_len < 32 && common_len < s.length() && common_len < last.length() && last[common_len] == s[common_len]) {
             ++common_len;
           }
@@ -466,7 +466,11 @@ public:
       dict_buffer_[2] = static_cast<uint8_t>(dict_buffer_size_ >> 8);
       dict_buffer_[3] = static_cast<uint8_t>(dict_buffer_size_ >> 0);
       // Generate the actual encode map.
-      generate(*words, num1, num2, num3, true);
+      generate(*words, num1, num2, num3, true, fc);
+      // Dictionary is prepended to output, make sure to add the bytes to the frequency counter.
+      if (fc != nullptr) {
+        fc->AddRegion(&dict_buffer_[0], dict_buffer_.size());
+      }
       std::cout << "Dictionary words=" << words->size() << " size=" << prettySize(dict_buffer_.size()) << std::endl;
     }
     void createFromBuffer() {
@@ -489,15 +493,14 @@ public:
       // Encode words.
       std::vector<WordCount> words;
       while (rms.tell() != dict_buffer_.size()) {
-        WordCount wc;
-        wc.word = rms.readString();
+        WordCount wc(rms.readString());
         words.push_back(wc);
       }
       // Generate the actual encode map.
       generate(words, num1, num2, num3, false);
       std::cout << "Dictionary words=" << words.size() << " size=" << prettySize(dict_buffer_.size()) << std::endl;
     }
-    void generate(std::vector<WordCount>& words, size_t num1, size_t num2, size_t num3, bool encode) {
+    void generate(std::vector<WordCount>& words, size_t num1, size_t num2, size_t num3, bool encode, FrequencyCounter<256>* fc = nullptr) {
       static const size_t start = 128u;
       size_t end1 = start + num1;
       size_t end2 = end1 + num2;
@@ -506,9 +509,14 @@ public:
       for (size_t b1 = start; b1 < end1; ++b1) {
         if (idx < words.size()) {
           if (encode) {
-            encode_map_.Add(words[idx++].word, CodeWord(1, static_cast<uint8_t>(b1)));
+            encode_map_.Add(words[idx].Word(), CodeWord(1, static_cast<uint8_t>(b1)));
+            if (fc != nullptr) {
+              words[idx].UpdateFrequencies(fc, escape_cap_first_, escape_cap_word_);
+              fc->Add(b1, words[idx].Count());
+            }
+            ++idx;
           } else {
-            words1b.push_back(words[idx++].word);
+            words1b.push_back(words[idx++].Word());
           }
         }
       }
@@ -516,9 +524,15 @@ public:
         for (size_t b2 = (kOverlapCodewords ? start : end1); b2 < (kOverlapCodewords ? 256u : end2); ++b2) {
           if (idx < words.size()) {
             if (encode) {
-              encode_map_.Add(words[idx++].word, CodeWord(2, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2)));
+              encode_map_.Add(words[idx].Word(), CodeWord(2, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2)));
+              if (fc != nullptr) {
+                words[idx].UpdateFrequencies(fc, escape_cap_first_, escape_cap_word_);
+                fc->Add(b1, words[idx].Count());
+                fc->Add(b2, words[idx].Count());
+              }
+              ++idx;
             } else {
-              words2b.push_back(words[idx++].word);
+              words2b.push_back(words[idx++].Word());
             }
           }
         }
@@ -528,9 +542,16 @@ public:
           for (size_t b3 = (kOverlapCodewords ? start : end2); b3 < (kOverlapCodewords ? 256u : end3); ++b3) {
             if (idx < words.size()) {
               if (encode) {
-                encode_map_.Add(words[idx++].word, CodeWord(3, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2), static_cast<uint8_t>(b3)));
+                encode_map_.Add(words[idx].Word(), CodeWord(3, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2), static_cast<uint8_t>(b3)));
+                if (fc != nullptr) {
+                  words[idx].UpdateFrequencies(fc, escape_cap_first_, escape_cap_word_);
+                  fc->Add(b1, words[idx].Count());
+                  fc->Add(b2, words[idx].Count());
+                  fc->Add(b3, words[idx].Count());
+                  ++idx;
+                }
               } else {
-                words3b.push_back(words[idx++].word);
+                words3b.push_back(words[idx++].Word());
               }
             }
           }
@@ -574,9 +595,9 @@ public:
                 WordCC cc = GetWordCase(in_ptr, cur_len);
                 std::string word(in_ptr, in_ptr + cur_len);
                 if (cc == kWordCCAll) {
-                  for (auto& c : word) c = makeLowerCase(c);
+                  for (auto& c : word) c = MakeLowerCase(c);
                 } else if (cc == kWordCCFirstChar) {
-                  word[0] = makeLowerCase(word[0]);
+                  word[0] = MakeLowerCase(word[0]);
                 }
                 const EncodeMap::Entry* entry = encode_map_.Find(word);
                 if (entry != nullptr) {
@@ -614,7 +635,7 @@ public:
               std::string word(in_ptr, in_ptr + word_len);
               size_t upper_count = 0;
               if (cc == kWordCCAll) {
-                for (auto& c : word) c = makeLowerCase(c);
+                for (auto& c : word) c = MakeLowerCase(c);
                 *(out_ptr++) = static_cast<uint8_t>(escape_cap_word_);
                 if (kStats) ++escape_count_word_;
                 memcpy(out_ptr, &word[0], word_len);
@@ -622,7 +643,7 @@ public:
                 out_ptr += word_len;
                 break;
               } else if (cc == kWordCCFirstChar) {
-                word[0] = makeLowerCase(word[0]);
+                word[0] = MakeLowerCase(word[0]);
                 *(out_ptr++) = static_cast<uint8_t>(escape_cap_first_);
                 if (kStats) ++escape_count_first_;
                 memcpy(out_ptr, &word[0], word_len);
@@ -692,13 +713,13 @@ public:
               std::copy(word_start, word_start + word_len, out_ptr);
               const size_t capital_c = all_cap ? word_len : static_cast<size_t>(first_cap);
               for (size_t i = 0; i < capital_c; ++i) {
-                out_ptr[i] = makeUpperCase(out_ptr[i]);
+                out_ptr[i] = MakeUpperCase(out_ptr[i]);
               }
               out_ptr += word_len;
               last_char_ = out_ptr[-1];
               continue;
             } else if (first_cap && c >= 'a' && c <= 'z') {
-              c = makeUpperCase(c);
+              c = MakeUpperCase(c);
             } else if (all_cap) {
               capital_mode_ = true;
             }
@@ -708,7 +729,7 @@ public:
           }
         }
         if (capital_mode_ && c >= 'a' && c <= 'z') {
-          c = makeUpperCase(c);
+          c = MakeUpperCase(c);
         } else {
           capital_mode_ = false;
         }
@@ -738,7 +759,7 @@ public:
     }
     void init() {
       for (int i = 0; i < 256; ++i) {
-        is_word_char_[i] = static_cast<uint8_t>(isWordChar(i));
+        is_word_char_[i] = static_cast<uint8_t>(IsWordChar(i));
       }
     }
   };

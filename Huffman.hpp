@@ -204,7 +204,8 @@ public:
 
   // TODO: Optimize, fix memory leaks.
   // Based off of example from Introduction to Data Compression.
-  static HuffTree* buildTreePackageMerge(size_t* frequencies, uint32_t count = 256, uint32_t max_depth = 16) {
+  template <typename FreqType>
+  static HuffTree* buildTreePackageMerge(FreqType* frequencies, uint32_t count = 256, uint32_t max_depth = 16) {
     class Package {
     public:
       std::multiset<uint32_t> alphabets;
@@ -298,7 +299,8 @@ public:
     return buildFromCodeLengths(&lengths[0], count, max_depth, &frequencies[0]);
   }
 
-  static HuffTree* buildFromCodeLengths(uint32_t* lengths, uint32_t count, uint32_t max_depth, size_t* freqs = nullptr) {
+  template <typename FreqType>
+  static HuffTree* buildFromCodeLengths(uint32_t* lengths, uint32_t count, uint32_t max_depth, FreqType* freqs = nullptr) {
     HuffTree* tree = new HuffTree(uint32_t(0), 0);
     typedef std::vector<HuffTree*> TreeVec;
     TreeVec cur_level;

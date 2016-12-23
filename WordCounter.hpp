@@ -40,10 +40,10 @@ enum WordCC {
 };
 
 static WordCC GetWordCase(const uint8_t* word, size_t word_len) {
-  bool first_cap = isUpperCase(word[0]);
+  bool first_cap = IsUpperCase(word[0]);
   size_t cap_count = first_cap;
   for (size_t i = 1; i < word_len; ++i) {
-    cap_count += isUpperCase(word[i]);
+    cap_count += IsUpperCase(word[i]);
   }
   if (cap_count == word_len) {
     return kWordCCAll;
@@ -55,17 +55,61 @@ static WordCC GetWordCase(const uint8_t* word, size_t word_len) {
   return kWordCCNone;
 }
 
-struct WordCount {
-  std::string word;
+class WordCount {
+  std::string word_;
 
   // Occurrences that are normal.
-  uint32_t normal;
+  uint32_t normal_count_ = 0;
 
-  // Occurences that require capital conversion.
-  uint32_t cap_count;
+  // Occurences that require first char CC.
+  uint32_t first_char_count_ = 0;
 
-  size_t Count() const {
-    return normal + cap_count;
+  // Occurences that require all char CC.
+  uint32_t all_char_count_ = 0;
+
+public:
+  WordCount(const std::string& w, uint32_t a = 0, uint32_t b = 0, uint32_t c = 0)
+    : word_(w),
+      normal_count_(a),
+      first_char_count_(b),
+      all_char_count_(c) {}
+  WordCount() = default;
+  WordCount(const WordCount&) = default;
+  WordCount& operator=(const WordCount&) = default;
+
+  const std::string& Word() const {
+    return word_;
+  }
+
+  ALWAYS_INLINE size_t Count() const {
+    return normal_count_ + CapCount();
+  }
+
+  ALWAYS_INLINE size_t CapCount() const {
+    return first_char_count_ + all_char_count_;
+  }
+
+  void RemoveFrequencies(FrequencyCounter<256>* f) {
+    // TODO: Deal with CC.
+    f->Remove(MakeUpperCase(static_cast<uint8_t>(word_[0])), first_char_count_);
+    for (size_t i = 0; i < word_.length(); ++i) {
+      const uint8_t c = word_[i];
+      f->Remove(MakeUpperCase(c), all_char_count_);
+      f->Remove(c, normal_count_);
+      if (i != 0) {
+        f->Remove(c, first_char_count_);
+      }
+    }
+  }
+
+  void AddCCFrequencies(FrequencyCounter<256>* f, uint8_t cc_first, uint8_t cc_all) {
+    f->Add(cc_first, first_char_count_);
+    f->Add(cc_all, all_char_count_);
+  }
+
+  void UpdateFrequencies(FrequencyCounter<256>* f, uint8_t cc_first, uint8_t cc_all) {
+    RemoveFrequencies(f);
+    AddCCFrequencies(f, cc_first, cc_all);
   }
 
   int64_t SavingsVS(size_t code_word_len) const {
@@ -79,8 +123,10 @@ struct WordCount {
 
   int64_t Savings(size_t code_word_len) const {
     // This approach seems worse for some reason.
-    int64_t before = word.size() * (normal + cap_count);
-    int64_t after = code_word_len * (normal + cap_count) + cap_count + word.size() + 1;
+    const size_t normal_count = normal_count_;
+    const size_t cap_count = CapCount();
+    int64_t before = word_.size() * (normal_count + cap_count);
+    int64_t after = code_word_len * (normal_count + cap_count) + cap_count + word_.size() + 1;
     return before - after;
   }
 
@@ -98,7 +144,7 @@ struct WordCount {
   class CompareLexicographically {
   public:
     bool operator()(const WordCount& a, const WordCount& b) const {
-      return a.word < b.word;
+      return a.word_ < b.word_;
     }
   };
 };
@@ -195,10 +241,10 @@ public:
         // Keep first char capital if is excessively more common. Reduces size due to escapes.
         const bool kEnableCapDict = false;
         if (kEnableCapDict && first_char > 10 * (normal_count + all_char)) {
-          assert(isLowerCase(string_name[0]));
-          string_name[0] = makeUpperCase(string_name[0]);
+          assert(IsLowerCase(string_name[0]));
+          string_name[0] = MakeUpperCase(string_name[0]);
         }
-        WordCount wc{ string_name, normal_count, cc_count };
+        WordCount wc(string_name, normal_count, first_char, all_char);
         out.push_back(wc);
       }
     });

@@ -70,7 +70,7 @@ public:
       transform[reorder[i]] = index++;
     }
     for (uint32_t i = 'A'; i <= 'Z'; ++i) {
-      transform[reorder[i]] = transform[reorder[makeLowerCase(static_cast<int>(i))]];
+      transform[reorder[i]] = transform[reorder[MakeLowerCase(static_cast<int>(i))]];
     }
     // 6,38,92,3
     trans(reorder[6]) = index++;

@@ -346,7 +346,7 @@ public:
   }
 
   static bool IsWordOrAsciiArtChar(uint8_t c) {
-    return isWordChar(c) || c == '|' || c == '_' || c == '-';
+    return IsWordChar(c) || c == '|' || c == '_' || c == '-';
   }
 
   DetectedBlock detectBlock() {

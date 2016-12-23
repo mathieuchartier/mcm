@@ -83,22 +83,40 @@ ALWAYS_INLINE void prefetch(const void* ptr) {
 #endif
 }
 
-ALWAYS_INLINE static bool isUpperCase(int c) {
+ALWAYS_INLINE static bool IsUpperCase(int c) {
   return c >= 'A' && c <= 'Z';
 }
-ALWAYS_INLINE static bool isLowerCase(int c) {
+
+ALWAYS_INLINE static bool IsLowerCase(int c) {
   return c >= 'a' && c <= 'z';
 }
-ALWAYS_INLINE static bool isWordChar(int c) {
-  return isLowerCase(c) || isUpperCase(c) || c >= 128;
+
+ALWAYS_INLINE static bool IsWordChar(int c) {
+  return IsLowerCase(c) || IsUpperCase(c) || c >= 128;
 }
-ALWAYS_INLINE static int makeLowerCase(int c) {
-  assert(isUpperCase(c));
+
+ALWAYS_INLINE inline static int UpperToLower(int c) {
+  assert(IsUpperCase(c));
   return c - 'A' + 'a';
 }
-ALWAYS_INLINE static int makeUpperCase(int c) {
-  assert(isLowerCase(c));
+
+ALWAYS_INLINE inline static int LowerToUpper(int c) {
+  assert(IsLowerCase(c));
   return c - 'a' + 'A';
+}
+
+ALWAYS_INLINE inline static int MakeUpperCase(int c) {
+  if (IsLowerCase(c)) {
+    c = LowerToUpper(c);
+  }
+  return c;
+}
+
+ALWAYS_INLINE inline static int MakeLowerCase(int c) {
+  if (IsUpperCase(c)) {
+    c = UpperToLower(c);
+  }
+  return c;
 }
 
 // Trust in the compiler
@@ -475,8 +493,28 @@ template <uint32_t kAlphabetSize = 0x100>
 class FrequencyCounter {
   uint64_t frequencies_[kAlphabetSize] = {};
 public:
-  inline void Add(uint32_t index) {
-    ++frequencies_[index];
+  ALWAYS_INLINE void Add(uint32_t index, uint64_t count = 1) {
+    frequencies_[index] += count;
+  }
+
+  template <typename T>
+  ALWAYS_INLINE void AddRegion(const T* in, size_t count) {
+    for (size_t i = 0; i < count; ++i) {
+      Add(in[i], 1);
+    }
+  }
+
+  ALWAYS_INLINE void Remove(uint32_t index, uint64_t count = 1) {
+    dcheck(frequencies_[index] >= count);
+    frequencies_[index] -= count;
+  }
+
+  uint64_t Sum() const {
+    uint64_t ret = 0;
+    for (uint64_t c : frequencies_) {
+      ret += c;
+    }
+    return ret;
   }
 
   void Normalize(uint32_t target) {
@@ -513,13 +551,6 @@ public:
 
   const uint64_t* GetFrequencies() const {
     return frequencies_;
-  }
-
-  void Count(uint8_t* data, uint32_t bytes) {
-    // TODO: Vectorize.
-    for (; count; --count) {
-      addFrequency(*data++);
-    }
   }
 };
 

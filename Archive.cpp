@@ -174,8 +174,7 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer, Arc
           std::string line;
           while (std::getline(fin, line)) {
             if (!line.empty()) {
-              WordCount count;
-              count.word = line;
+              WordCount count(line);
               code_words.GetCodeWords()->push_back(count);
             }
           }
@@ -183,7 +182,7 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer, Arc
           if (true) {
             Permute(&code_words.codewords_[0], &temp[0], archive.opt_vars_, code_words.num1_);
           } else {
-            uint8_t perm0[] = {2,3,29,4,22,10,8,7,9,11,12,18,13,14,1,5,17,23,21,0,24,25,26,20,19,6,27,16,15,28,30,31,32,33,35,34,37,36,38,39,};
+            uint8_t perm0[] = { 2,3,29,4,22,10,8,7,9,11,12,18,13,14,1,5,17,23,21,0,24,25,26,20,19,6,27,16,15,28,30,31,32,33,35,34,37,36,38,39, };
             Permute(&code_words.codewords_[0], &temp[0], perm0, code_words.num1_);
           }
           auto count2 = code_words.num2_ * 128;
@@ -200,8 +199,8 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer, Arc
             code_words.num3_ = 128 - code_words.num1_ - code_words.num2_;
             auto remain = count - code_words.num1_;
             while (code_words.num2_ > 0 &&
-                   code_words.num3_ < 128 - code_words.num1_ &&
-                   code_words.num2_ * 128 + code_words.num3_ * 128 * 128 < remain) {
+              code_words.num3_ < 128 - code_words.num1_ &&
+              code_words.num2_ * 128 + code_words.num3_ * 128 * 128 < remain) {
               code_words.num2_--;
               code_words.num3_++;
             }
@@ -219,7 +218,7 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer, Arc
         std::ofstream fout(out_dict_file.c_str());
         fout << code_words.codewords_.size() << " " << code_words.num1_ << " " << code_words.num2_ << " " << code_words.num3_ << std::endl;
         for (const auto& s : code_words.codewords_) {
-          fout << s.word << std::endl;
+          fout << s.Word() << std::endl;
         }
       }
 #if 0
@@ -229,7 +228,18 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer, Arc
       }
       std::cerr << std::endl << "WORD SUM " << sum << std::endl;
 #endif
-      dict_filter->addCodeWords(code_words.GetCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_);
+      auto& freq = builder.FrequencyCounter();
+      std::cerr << std::endl << "Before " << freq.Sum() << std::endl;
+      dict_filter->addCodeWords(code_words.GetCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_, &freq);
+      auto* tree = Huffman::buildTreePackageMerge(freq.GetFrequencies(), 256, 16);
+      Huffman::Code codes[256];
+      tree->getCodes(codes);
+      uint64_t total_bits = 0;
+      for (size_t i = 0; i < 256; ++i) {
+        std::cerr << i << " bits " << codes[i].length << " freq " << freq.GetFrequencies()[i] << std::endl;
+        total_bits += codes[i].length * freq.GetFrequencies()[i];
+      }
+      std::cerr << std::endl << "After " << freq.Sum() <<  " huff " << total_bits / kBitsPerByte << std::endl;
       dict_filter->setOpt(opt_var);
       ret = dict_filter;
     } else {
@@ -439,7 +449,7 @@ void testFilter(Stream* stream, Analyzer* analyzer) {
     Dict::CodeWordSet code_words;
     generator.generateCodeWords(builder, &code_words, 8);
     auto dict_filter = new Dict::Filter(stream, 0x3, 0x4, 0x6);
-    dict_filter->addCodeWords(code_words.GetCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_);
+    dict_filter->addCodeWords(code_words.GetCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_, nullptr);
     WriteVectorStream wvs(&comp);
     Store store;
     store.compress(dict_filter, &wvs, std::numeric_limits<uint64_t>::max());

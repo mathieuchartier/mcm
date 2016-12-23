@@ -56,7 +56,7 @@ struct ss_table {
   static const int total = maxInt - minInt;
   static_assert((total & (total - 1)) == 0, "must be power of 2");
   T stretch_table_[denom];
-  static const size_t kFastTableMask = 4 * total - 1;
+  static const size_t kFastTableMask = 8 * total - 1;
   T squash_table_fast_[kFastTableMask + 1];
 public:
   // probability = p / Denom		
