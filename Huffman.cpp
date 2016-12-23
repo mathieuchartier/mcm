@@ -35,7 +35,7 @@ uint32_t HuffmanStatic::compressBytes(uint8_t* in, uint8_t* out, uint32_t count)
   Huffman huff;
 
   // Build length limited tree with package merge algorithm.
-  auto* tree = huff.buildTreePackageMerge(&freq[0], kAlphabetSize, kCodeBits);
+  auto* tree = Huffman::Tree<uint32_t>::BuildPackageMerge(&freq[0], kAlphabetSize, kCodeBits);
 
 #if 0
 

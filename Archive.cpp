@@ -231,9 +231,9 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer, Arc
       auto& freq = builder.FrequencyCounter();
       std::cerr << std::endl << "Before " << freq.Sum() << std::endl;
       dict_filter->addCodeWords(code_words.GetCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_, &freq);
-      auto* tree = Huffman::buildTreePackageMerge(freq.GetFrequencies(), 256, 16);
+      auto* tree = Huffman::Tree<uint32_t>::BuildPackageMerge(freq.GetFrequencies(), 256, 16);
       Huffman::Code codes[256];
-      tree->getCodes(codes);
+      tree->GetCodes(codes);
       uint64_t total_bits = 0;
       for (size_t i = 0; i < 256; ++i) {
         std::cerr << i << " bits " << codes[i].length << " freq " << freq.GetFrequencies()[i] << std::endl;

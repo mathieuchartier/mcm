@@ -353,8 +353,8 @@ namespace cm {
       const clock_t start = clock();
       size_t freqs[256] = { 1 };
       std::cout << "Building huffman tree" << std::endl;
-      Huffman::HuffTree* tree = Huffman::buildTreePackageMerge(freqs, 256, static_cast<size_t>(huffman_len_limit));
-      tree->printRatio("LL");
+      Huffman::HuffTree* tree = Huffman::Tree<uint32_t>::BuildPackageMerge(freqs, 256, huffman_len_limit);
+      tree->PrintRatio(std::cout, "LL");
       Huffman::writeTree(ent, sout, tree, 256, huffman_len_limit);
       huff.build(tree);
       std::cout << "Building huffman tree took: " << clock() - start << " MS" << std::endl;

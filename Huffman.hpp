@@ -34,91 +34,195 @@
 
 class Huffman {
 public:
-  class Code {
+  struct Code {
   public:
-    static const uint32_t nonLeaf = 0;
-    uint32_t value;
-    uint32_t length;
-
-    Code() : value(0), length(nonLeaf) {
-
-    }
+    static const uint32_t kNonLeaf = 0;
+    uint32_t value = kNonLeaf;
+    uint32_t length = 0;
   };
 
   template <typename T>
   class Tree {
+    uint32_t value_ = 0;
+    T weight_ = 0;
+    std::unique_ptr<Tree> a_, b_;
   public:
-    uint32_t value;
-    T weight;
-    Tree *a, *b;
-
-    ALWAYS_INLINE uint32_t getAlphabet() const {
-      return value;
+    ALWAYS_INLINE uint32_t Alphabet() const {
+      return value_;
     }
 
-    ALWAYS_INLINE bool isLeaf() const {
-      return a == nullptr && b == nullptr;
+    ALWAYS_INLINE bool IsLeaf() const {
+      return a_ == nullptr && b_ == nullptr;
     }
 
-    ALWAYS_INLINE T getWeight() const {
-      return weight;
+    ALWAYS_INLINE T Weight() const {
+      return weight_;
     }
 
-    void getCodes(Code* codes, uint32_t bits = 0, uint32_t length = 0) const {
+    ALWAYS_INLINE void SetWeight(T weight) {
+      weight_ = weight;
+    }
+
+    ALWAYS_INLINE void SetValue(uint32_t value) {
+      value_ = value;
+    }
+
+    const Tree* A() const { return a_.get(); }
+    Tree* A() { return a_.get(); }
+    const Tree* B() const { return b_.get(); }
+    Tree* B() { return b_.get(); }
+
+    void GetCodes(Code* codes, uint32_t bits = 0, uint32_t length = 0) const {
       assert(codes != nullptr);
-      if (isLeaf()) {
-        codes[value].value = bits;
-        codes[value].length = length;
+      if (IsLeaf()) {
+        codes[Alphabet()].value = bits;
+        codes[Alphabet()].length = length;
       } else {
-        a->getCodes(codes, (bits << 1) | 0, length + 1);
-        b->getCodes(codes, (bits << 1) | 1, length + 1);
+        a_->GetCodes(codes, (bits << 1) | 0, length + 1);
+        b_->GetCodes(codes, (bits << 1) | 1, length + 1);
       }
     }
 
-    void getLengths(T* lengths, uint32_t cur_len = 0) {
-      if (isLeaf()) {
-        lengths[value] = cur_len;
+    void GetLengths(T* lengths, uint32_t cur_len = 0) const {
+      if (IsLeaf()) {
+        lengths[Alphabet()] = cur_len;
       } else {
-        a->getLengths(lengths, cur_len + 1);
-        b->getLengths(lengths, cur_len + 1);
+        a_->GetLengths(lengths, cur_len + 1);
+        b_->GetLengths(lengths, cur_len + 1);
       }
     }
 
-    void calcDepth(uint32_t cur_depth = 0) {
-      if (!isLeaf()) weight = 0;
-      if (a != nullptr) {
-        a->calcDepth(cur_depth + 1);
-        weight += a->getWeight();
+    void UpdateDepth(uint32_t cur_depth = 0) {
+      if (!IsLeaf()) {
+        weight_ = 0;
       }
-      if (b != nullptr) {
-        b->calcDepth(cur_depth + 1);
-        weight += b->getWeight();
+      if (a_ != nullptr) {
+        a_->UpdateDepth(cur_depth + 1);
+        weight_ += a_->Weight();
+      }
+      if (b_ != nullptr) {
+        b_->UpdateDepth(cur_depth + 1);
+        weight_ += b_->Weight();
       }
     }
 
-    uint64_t getCost(uint32_t bits = 0) const {
-      if (isLeaf())
-        return bits * weight;
-      else
-        return a->getCost(bits + 1) + b->getCost(bits + 1);
+    uint64_t Cost(uint32_t bits = 0) const {
+      return IsLeaf() ? bits * weight_ : a_->Cost(bits + 1) + b_->Cost(bits + 1);
     }
 
-    Tree(uint32_t value, T w) : value(value), weight(w), a(nullptr), b(nullptr) {
+    Tree(uint32_t value = 0, T w = 0) : value_(value), weight_(w) {}
 
+    Tree(Tree* a, Tree* b) : weight_(a->Weight() + b->Weight()), a_(a), b_(b) {}
+
+    void PrintRatio(std::ostream& os, const char* name) const {
+      os << "Huffman tree " << name << ": " << Weight() << " -> " << Cost() / kBitsPerByte << std::endl;
     }
 
-    Tree(Tree* a, Tree* b)
-      : value(0), weight(a->getWeight() + b->getWeight()), a(a), b(b) {
+    // Based off of example from Introduction to Data Compression.
+    template <typename FreqType>
+    static Tree* BuildPackageMerge(FreqType* frequencies, uint32_t count = 256, uint32_t max_depth = 16) {
+      struct Package {
+      public:
+        std::multiset<uint32_t> alphabets;
+        uint64_t weight = 0;
 
+        bool operator()(const Package& a, const Package& b) const {
+          if (a.weight != b.weight) {
+            return a.weight < b.weight;
+          }
+          return a.alphabets.size() < b.alphabets.size();
+        }
+      };
+
+      const uint32_t package_limit = 2 * count - 2;
+
+      // Set up initial packages.
+      typedef std::multiset<Package, Package> PSet;
+      PSet original_set;
+      for (uint32_t i = 0; i < count; ++i) {
+        Package p;
+        p.alphabets.insert(i);
+        p.weight = 1 + frequencies[i]; // The algorithm can't handle 0 frequencies.
+        original_set.insert(std::move(p));
+      }
+
+      // Perform the package merge algorithm.
+      PSet merge_set(original_set);
+      for (uint32_t i = 1; i < max_depth; ++i) {
+        PSet new_set;
+        // Package count pacakges.
+        auto it = merge_set.begin();
+        for (uint32_t count = merge_set.size() / 2; count != 0; --count) {
+          const Package& a = *(it++);
+          const Package& b = *(it++);
+          Package new_package;
+          new_package.alphabets.insert(a.alphabets.begin(), a.alphabets.end());
+          new_package.alphabets.insert(b.alphabets.begin(), b.alphabets.end());
+          new_package.weight = a.weight + b.weight;
+          new_set.insert(std::move(new_package));
+        }
+
+        // Merge back into original set.
+        merge_set = original_set;
+        merge_set.insert(std::make_move_iterator(new_set.begin()),
+                         std::make_move_iterator(new_set.end()));
+        while (merge_set.size() > package_limit) {
+          merge_set.erase(--merge_set.end());
+        }
+      }
+      // Calculate lengths.
+      std::vector<uint32_t> lengths(count, 0);
+      for (auto& p : merge_set) {
+        for (auto a : p.alphabets) {
+          ++lengths[a];
+        }
+      }
+      // Might not work for max_depth = 32.
+      uint32_t total = 0;
+      for (auto l : lengths) {
+        assert(l > 0 && l <= max_depth);
+        total += 1 << (max_depth - l);
+      }
+
+      // Sanity check.
+      if (total != (1 << max_depth)) {
+        std::cerr << "Fatal error constructing huffman table " << total << " vs " << (1 << max_depth) << std::endl;
+        return nullptr;
+      }
+
+      // Build huffmann tree from the code lengths.
+      return BuildFromCodeLengths(&lengths[0], count, max_depth, &frequencies[0]);
     }
 
-    ~Tree() {
-      delete a;
-      delete b;
-    }
+    template <typename FreqType>
+    static Tree* BuildFromCodeLengths(uint32_t* lengths, uint32_t count, uint32_t max_depth, FreqType* freqs = nullptr) {
+      Tree* tree = new Tree;
+      typedef std::vector<Tree*> TreeVec;
+      TreeVec cur_level;
+      cur_level.push_back(tree);
+      for (uint32_t i = 0; i <= max_depth; ++i) {
+        for (uint32_t j = 0; j < count; ++j) {
+          if (lengths[j] == i) {
+            if (cur_level.empty()) break;
+            auto* tree = cur_level.back();
+            cur_level.pop_back();
+            tree->SetValue(j);
+            tree->SetWeight(freqs != nullptr ? freqs[j] : 0);
+          }
+        }
 
-    void printRatio(const char* name) const {
-      std::cout << "Huffman tree " << name << ": " << getWeight() << " -> " << getCost() / 8 << std::endl;
+        TreeVec new_set;
+        for (uint32_t i = 0; i < cur_level.size(); ++i) {
+          auto* tree = cur_level[i];
+          tree->a_.reset(new Tree);
+          tree->b_.reset(new Tree);
+          new_set.push_back(tree->a_.get());
+          new_set.push_back(tree->b_.get());
+        }
+        cur_level = std::move(new_set);
+      }
+      tree->UpdateDepth(0);
+      return tree;
     }
   };
 
@@ -127,7 +231,7 @@ public:
   class TreeComparator {
   public:
     inline bool operator()(HuffTree* a, HuffTree* b) const {
-      return a->getWeight() < b->getWeight();
+      return a->Weight() < b->Weight();
     }
   };
 
@@ -160,7 +264,7 @@ public:
   template <typename T>
   void build(const Tree<T>* tree, uint32_t alphabet_size = 256) {
     typedef const Tree<T> TTree;
-    tree->getCodes(codes);
+    tree->GetCodes(codes);
     std::vector<TTree*> work, todo;
     work.push_back(tree);
 
@@ -175,18 +279,13 @@ public:
       std::vector<TTree*> temp;
       for (uint32_t i = 0; i < work.size(); ++i) {
         auto* cur_tree = work[i];
-        if (cur_tree->isLeaf()) {
-          tree_map[cur_tree] = cur_tree->value | 0x100;
+        if (cur_tree->IsLeaf()) {
+          tree_map[cur_tree] = cur_tree->Alphabet() | 0x100;
         } else {
-          if (true || cur_state < 64) {
-            state_available[cur_state] = false;
-            tree_map[cur_tree] = cur_state++;
-          } else {
-            // Try to find a state with matching low 6 bits:
-            // todo
-          }
-          temp.push_back(cur_tree->a);
-          temp.push_back(cur_tree->b);
+          state_available[cur_state] = false;
+          tree_map[cur_tree] = cur_state++;
+          temp.push_back(cur_tree->A());
+          temp.push_back(cur_tree->B());
         }
       }
       work.swap(temp);
@@ -196,138 +295,10 @@ public:
     for (auto it : tree_map) {
       auto* t = it.first;
       if (!isLeaf(tree_map[t])) {
-        state_trans[tree_map[t]][0] = tree_map[t->a];
-        state_trans[tree_map[t]][1] = tree_map[t->b];
+        state_trans[tree_map[t]][0] = tree_map[t->A()];
+        state_trans[tree_map[t]][1] = tree_map[t->B()];
       }
     }
-  }
-
-  // TODO: Optimize, fix memory leaks.
-  // Based off of example from Introduction to Data Compression.
-  template <typename FreqType>
-  static HuffTree* buildTreePackageMerge(FreqType* frequencies, uint32_t count = 256, uint32_t max_depth = 16) {
-    class Package {
-    public:
-      std::multiset<uint32_t> alphabets;
-      uint64_t weight;
-
-      Package() : weight(0) {
-
-      }
-
-      bool operator()(const Package* a, const Package* b) const {
-        if (a->weight < b->weight) return true;
-        if (a->weight > b->weight) return false;
-        return a->alphabets.size() < b->alphabets.size();
-      }
-    };
-
-    uint32_t package_limit = 2 * count - 2;
-
-    // Set up initial packages.
-    typedef std::multiset<Package*, Package> PSet;
-    PSet original_set;
-    for (uint32_t i = 0; i < count; ++i) {
-      auto* p = new Package;
-      p->alphabets.insert(i);
-      p->weight = 1 + frequencies[i]; // Algorithm can't handle 0 frequencies.
-      original_set.insert(p);
-    }
-
-    PSet merge_set = original_set;
-
-    // Perform the package merge algorithm.
-    for (uint32_t i = 1; i < max_depth; ++i) {
-      PSet new_set;
-      size_t count = merge_set.size() / 2;
-      // Package count pacakges.
-      auto it = merge_set.begin();
-      for (uint32_t j = 0; j < count; ++j) {
-        Package *a = *(it++);
-        Package *b = *(it++);
-        auto *new_package = new Package;
-        new_package->alphabets.insert(a->alphabets.begin(), a->alphabets.end());
-        new_package->alphabets.insert(b->alphabets.begin(), b->alphabets.end());
-        new_package->weight = a->weight + b->weight;
-        new_set.insert(new_package);
-      }
-
-      // Merge back into original set.
-      merge_set = original_set;
-      merge_set.insert(new_set.begin(), new_set.end());
-
-      while (merge_set.size() > package_limit) {
-        auto* pend = *merge_set.rbegin();
-        merge_set.erase(pend);
-        //delete pend;
-      }
-
-      // Print packages.
-      if (false) {
-        for (auto* p : merge_set) {
-          std::cout << " " << p->weight << "{";
-          for (auto a : p->alphabets)
-            std::cout << a << ",";
-          std::cout << "}, ";
-        }
-        std::cout << std::endl;
-      }
-    }
-
-    // Calculate lengths.
-    std::vector<uint32_t> lengths(count, 0);
-    for (auto* p : merge_set) {
-      for (auto a : p->alphabets) {
-        ++lengths[a];
-      }
-    }
-
-    // Might not work for max_depth = 32.
-    uint32_t total = 0;
-    for (auto l : lengths) {
-      assert(l > 0 && l <= max_depth);
-      total += 1 << (max_depth - l);
-    }
-
-    // Sanity check.
-    if (total != 1 << max_depth) {
-      std::cerr << "Fatal error constructing huffman table " << total << " vs " << (1 << max_depth) << std::endl;
-      return nullptr;
-    }
-
-    // Build huffmann tree from the code lengths.
-    return buildFromCodeLengths(&lengths[0], count, max_depth, &frequencies[0]);
-  }
-
-  template <typename FreqType>
-  static HuffTree* buildFromCodeLengths(uint32_t* lengths, uint32_t count, uint32_t max_depth, FreqType* freqs = nullptr) {
-    HuffTree* tree = new HuffTree(uint32_t(0), 0);
-    typedef std::vector<HuffTree*> TreeVec;
-    TreeVec cur_level;
-    cur_level.push_back(tree);
-    for (uint32_t i = 0; i <= max_depth; ++i) {
-      for (uint32_t j = 0; j < count; ++j) {
-        if (lengths[j] == i) {
-          if (cur_level.empty()) break;
-          auto* tree = cur_level.back();
-          cur_level.pop_back();
-          tree->value = j;
-          tree->weight = static_cast<uint32_t>(freqs != nullptr ? freqs[j] : 0);
-        }
-      }
-
-      TreeVec new_set;
-      for (uint32_t i = 0; i < cur_level.size(); ++i) {
-        auto* tree = cur_level[i];
-        tree->a = new HuffTree(uint32_t(0), 0);
-        tree->b = new HuffTree(uint32_t(0), 0);
-        new_set.push_back(tree->a);
-        new_set.push_back(tree->b);
-      }
-      cur_level = new_set;
-    }
-    tree->calcDepth(0);
-    return tree;
   }
 
   // Combine two smallest trees until we hit max depth.
@@ -349,7 +320,7 @@ public:
   template <typename TEnt, typename TStream>
   static void writeTree(TEnt& ent, TStream& stream, HuffTree* tree, uint32_t alphabet_size, uint32_t max_length) {
     std::vector<uint32_t> lengths(alphabet_size, 0);
-    tree->getLengths(&lengths[0]);
+    tree->GetLengths(&lengths[0]);
     // Assumes we can't have any 0 length codes.
     for (uint32_t i = 0; i < alphabet_size; ++i) {
       assert(lengths[i] > 0 && lengths[i] <= max_length);
