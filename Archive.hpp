@@ -30,6 +30,7 @@
 #include "Compressor.hpp"
 #include "File.hpp"
 #include "Stream.hpp"
+#include "Util.hpp"
 
 // Force filter
 enum FilterType {
@@ -108,7 +109,8 @@ public:
     Algorithm() {}
     Algorithm(const CompressionOptions& options, Detector::Profile profile);
     Algorithm(Stream* stream);
-    Compressor* createCompressor();
+    // Freq is the approximate distribution of input frequencies for the compressor.
+    Compressor* CreateCompressor(const FrequencyCounter<256>& freq);
     void read(Stream* stream);
     void write(Stream* stream);
     Filter* createFilter(Stream* stream, Analyzer* analyzer, Archive& archive, size_t opt_var = 0);

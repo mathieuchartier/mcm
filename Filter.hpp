@@ -51,6 +51,10 @@ public:
     opt_var_ = opt_var;
   }
 
+  virtual FrequencyCounter<256> GetFrequencies() {
+    return FrequencyCounter<256>();
+  }
+
   virtual void flush() {}
 };
 

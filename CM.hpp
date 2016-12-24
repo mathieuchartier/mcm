@@ -180,6 +180,28 @@ namespace cm {
     size_t max_order_ = 0;
   };
 
+  class ByteState {
+  public:
+    ALWAYS_INLINE static bool IsLeaf(uint32_t state) {
+      return (state >> 8) != 0;
+    }
+
+    ALWAYS_INLINE uint32_t Next(uint32_t bit) const {
+      return next_[bit];
+    }
+
+    ALWAYS_INLINE static uint32_t GetNibble(uint32_t state) {
+      return (state + 1) ^ 16;
+    }
+
+    void SetNext(uint32_t bit, uint32_t next) {
+      next_[bit] = next;
+    }
+
+  private:
+    uint32_t next_[2];
+  };
+
   class VoidHistoryWriter {
   public:
     uint32_t end() { return 0u; }
@@ -230,6 +252,8 @@ namespace cm {
     // Bracket model
     BracketModel bracket_;
     LastSpecialCharModel special_char_model_;
+
+    FrequencyCounter<256> frequencies_;
 
     Range7 ent;
 
@@ -337,8 +361,12 @@ namespace cm {
     //FastProbMap<StationaryModel, 256> probs_[kProbCtx];
     // DynamicProbMap<StationaryModel, 256> probs_[kProbCtx];
     FastAdaptiveProbMap<256> probs_[kProbCtx];
-    int16_t fast_probs_[kProbCtx][256];
+    int16_t fast_probs_[256];
     uint32_t prob_ctx_add_ = 0;
+
+    // Ctx state map
+    using CtxState = ByteState;
+    CtxState ctx_state_[256];
 
     // SSE
     SSE<kShift> sse_;
@@ -394,9 +422,10 @@ namespace cm {
       out_history_ = out_history;
     }
 
-    CM(uint32_t mem_level = 8,
-      bool lzp_enabled = true,
-      Detector::Profile profile = Detector::kProfileDetect);
+    CM(const FrequencyCounter<256>& freq,
+       uint32_t mem_level = 8,
+       bool lzp_enabled = true,
+       Detector::Profile profile = Detector::kProfileDetect);
 
     bool setOpt(uint32_t var) OVERRIDE {
       opt_var_ = var;
@@ -422,6 +451,8 @@ namespace cm {
       b += rotate_left(b * 7, 11);
       return b ^ (b >> 13);
     }
+
+    void SetUpCtxState();
 
     void CalcMixerBase() {
       uint32_t mixer_ctx = 0;
@@ -459,7 +490,7 @@ namespace cm {
     }
 
     ALWAYS_INLINE int GetSTP(uint8_t state, uint32_t ctx) const {
-      return kFixedProbs ? fast_probs_[0][state] : probs_[ctx + prob_ctx_add_].GetSTP(state, table_);
+      return probs_[ctx + prob_ctx_add_].GetSTP(state, table_);
     }
 
     enum BitType {
@@ -479,7 +510,7 @@ namespace cm {
         code = c << (sizeof(uint32_t) * kBitsPerByte - kBits);
 			}
       size_t base_ctx = 0;
-      size_t cur_ctx = kBits > 1;
+      size_t cur_ctx = 0;
       size_t bits = kBits;
 			do {
         const size_t mixer_ctx = base_ctx + cur_ctx;
@@ -575,14 +606,13 @@ namespace cm {
                 p = sse2_.p(stp + kMaxValue / 2, sse_ctx_ + mm_l);
               } else {
                 p = sse_.p(stp + kMaxValue / 2, sse_ctx_ + mixer_ctx);
-							}
-							p += p == 0;
-						}
-						else if (kUseSSE) {
-							stp = Clamp(stp, kMinST, kMaxST - 1);
-							constexpr uint32_t kDiv = 32;
-							const uint32_t blend = 14;
-							int input_p = stp + kMaxValue / 2;
+              }
+              p += p == 0;
+            } else if (kUseSSE) {
+              stp = Clamp(stp, kMinST, kMaxST - 1);
+              constexpr uint32_t kDiv = 32;
+              const uint32_t blend = 14;
+              int input_p = stp + kMaxValue / 2;
 							p = (p * blend + sse3_.p(input_p, (last_bytes_ & 0xFF) * 256 + mixer_ctx) * (kDiv - blend)) / kDiv;
 							// p = (p * opt_var_ + sse3_.p(stp + kMaxValue / 2, (interval_model_ & 0xFF) * 256 + mixer_ctx) * (kDiv - opt_var_)) / kDiv;
 							// p = sse3_.p(stp + kMaxValue / 2, (interval_model_ & 0xFF) * 256 + mixer_ctx);
@@ -609,13 +639,15 @@ namespace cm {
 				const size_t kLimit = kMaxLearn - 1;
 				const size_t kDelta = 5;
 				// Returns false if we skipped the update due to a low error, should happen moderately frequently on highly compressible files.
+        bool ret = true;
+        /*
 				bool ret = m0->Update(
 					mixer_p, bit,
 					kShift, kLimit, 600, 1,
 					// mixer_update_rate_[m0->NextLearn(8)], 16,
 					mixer_update_rate_[m0->GetLearn()], 16,
 					p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15
-				);
+				);*/
 				// Only update the states / predictions if the mixer was far enough from the bounds, helps 60k on enwik8 and 1-2sec.
 				const bool kOptP = false;
 				if (ret) {
@@ -647,8 +679,7 @@ namespace cm {
 					if (kUseLZPSSE) {
 						if (kBitType == kBitTypeLZP) {
 							sse2_.update(bit);
-						}
-						else if (kBitType == kBitTypeNormalSSE) {
+						} else if (kBitType == kBitTypeNormalSSE) {
 							sse_.update(bit);
 						}
 					}
@@ -666,17 +697,16 @@ namespace cm {
 				} else {
 					ent.encode(stream, bit, p, kShift);
 				}
-        cur_ctx = cur_ctx * 2 + bit;
+        cur_ctx = ctx_state_[cur_ctx].Next(bit);
+        // cur_ctx = cur_ctx * 2 + bit;
         if (kDecode) {
           code = (code << 1) | bit;
         }
         if (--bits == 4) {
-          auto nibble = cur_ctx ^ 16;
+          auto nibble = CtxState::GetNibble(cur_ctx);
           if (kPrefetchMatchModel) {
             match_model_.fetch(nibble << 4);
           }
-          base_ctx = (nibble + 1) * 15;
-          cur_ctx = 1;
         }
 			} while (bits != 0);
 			return kDecode ? code : c;
@@ -895,9 +925,9 @@ namespace cm {
               auto* st0 = s0 + ctx;
               auto* st1 = s1 + ctx;
               auto* st2 = s2 + ctx;
-              uint32_t idx0 = (fast_probs_[0][*st0] + 2048) >> (4 + 4);
-              uint32_t idx1 = (fast_probs_[0][*st1] + 2048) >> (4 + 4);
-              uint32_t idx2 = (fast_probs_[0][*st2] + 2048) >> (4 + 4);
+              uint32_t idx0 = (fast_probs_[*st0] + 2048) >> (4 + 4);
+              uint32_t idx1 = (fast_probs_[*st1] + 2048) >> (4 + 4);
+              uint32_t idx2 = (fast_probs_[*st2] + 2048) >> (4 + 4);
               size_t cur = idx0;
               cur = (cur << 4) | idx1;
               cur = (cur << 4) | idx2;

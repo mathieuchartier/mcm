@@ -113,16 +113,16 @@ Archive::Archive(Stream* stream) : stream_(stream) {
   header_.read(stream_);
 }
 
-Compressor* Archive::Algorithm::createCompressor() {
+Compressor* Archive::Algorithm::CreateCompressor(const FrequencyCounter<256>& freq) {
   switch (algorithm_) {
   case Compressor::kTypeStore: return new Store;
   case Compressor::kTypeWav16: return new Wav16;
-  case Compressor::kTypeCMTurbo: return new cm::CM<3, /*sse*/false>(mem_usage_, lzp_enabled_, profile_);
-  case Compressor::kTypeCMFast: return new cm::CM<4, /*sse*/false>(mem_usage_, lzp_enabled_, profile_);
-  case Compressor::kTypeCMMid: return new cm::CM<6, /*sse*/false>(mem_usage_, lzp_enabled_, profile_);
-  case Compressor::kTypeCMHigh: return new cm::CM<10, /*sse*/false>(mem_usage_, lzp_enabled_, profile_);
-  case Compressor::kTypeCMMax: return new cm::CM<13, /*sse*/true>(mem_usage_, lzp_enabled_, profile_);
-  case Compressor::kTypeCMSimple: return new cm::CM<6, false>(mem_usage_, lzp_enabled_, Detector::kProfileSimple);
+  case Compressor::kTypeCMTurbo: return new cm::CM<3, /*sse*/false>(freq, mem_usage_, lzp_enabled_, profile_);
+  case Compressor::kTypeCMFast: return new cm::CM<4, /*sse*/false>(freq, mem_usage_, lzp_enabled_, profile_);
+  case Compressor::kTypeCMMid: return new cm::CM<6, /*sse*/false>(freq, mem_usage_, lzp_enabled_, profile_);
+  case Compressor::kTypeCMHigh: return new cm::CM<10, /*sse*/false>(freq, mem_usage_, lzp_enabled_, profile_);
+  case Compressor::kTypeCMMax: return new cm::CM<13, /*sse*/true>(freq, mem_usage_, lzp_enabled_, profile_);
+  case Compressor::kTypeCMSimple: return new cm::CM<6, false>(freq, mem_usage_, lzp_enabled_, Detector::kProfileSimple);
   }
   return nullptr;
 }
@@ -221,25 +221,21 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer, Arc
           fout << s.Word() << std::endl;
         }
       }
-#if 0
-      size_t sum = 0;
-      for (size_t i = 0; i < 256; ++i) {
-        sum += counter_.GetFrequencies()[i];
-      }
-      std::cerr << std::endl << "WORD SUM " << sum << std::endl;
-#endif
       auto& freq = builder.FrequencyCounter();
-      std::cerr << std::endl << "Before " << freq.Sum() << std::endl;
       dict_filter->addCodeWords(code_words.GetCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_, &freq);
-      auto* tree = Huffman::Tree<uint32_t>::BuildPackageMerge(freq.GetFrequencies(), 256, 16);
-      Huffman::Code codes[256];
-      tree->GetCodes(codes);
-      uint64_t total_bits = 0;
-      for (size_t i = 0; i < 256; ++i) {
-        std::cerr << i << " bits " << codes[i].length << " freq " << freq.GetFrequencies()[i] << std::endl;
-        total_bits += codes[i].length * freq.GetFrequencies()[i];
+      if (false) {
+        std::cerr << std::endl << "Before " << freq.Sum() << std::endl;
+        auto* tree = Huffman::Tree<uint32_t>::BuildPackageMerge(freq.GetFrequencies(), 256, 16);
+        Huffman::Code codes[256];
+        tree->GetCodes(codes);
+        uint64_t total_bits = 0;
+        for (size_t i = 0; i < 256; ++i) {
+          std::cerr << i << " bits " << codes[i].length << " freq " << freq.GetFrequencies()[i] << std::endl;
+          total_bits += codes[i].length * freq.GetFrequencies()[i];
+        }
+        std::cerr << std::endl << "After " << freq.Sum() << " huff " << total_bits / kBitsPerByte << std::endl;
       }
-      std::cerr << std::endl << "After " << freq.Sum() <<  " huff " << total_bits / kBitsPerByte << std::endl;
+      dict_filter->SetFrequencies(freq);
       dict_filter->setOpt(opt_var);
       ret = dict_filter;
     } else {
@@ -264,7 +260,7 @@ Compressor* Archive::createMetaDataCompressor() {
   if (kIsDebugBuild) {
     return new Store;
   }
-  return new cm::CM<6, false>(6, true, Detector::kProfileText);
+  return new cm::CM<6, false>(FrequencyCounter<256>(), 6, true, Detector::kProfileText);
 }
 
 void Archive::writeBlocks() {
@@ -782,11 +778,13 @@ uint64_t Archive::compress(const std::vector<FileInfo>& in_files) {
       << " block size=" << formatNumber(block->total_size_) << "\t" << std::endl;
     std::unique_ptr<Filter> filter(algo->createFilter(&segstream, &analyzer, *this, opt_var_));
     Stream* in_stream = &segstream;
-    if (filter.get() != nullptr) {
+    FrequencyCounter<256> freq;
+    if (filter != nullptr) {
       in_stream = filter.get();
+      freq = filter->GetFrequencies();
     }
     auto in_start = in_stream->tell();
-    std::unique_ptr<Compressor> comp(algo->createCompressor());
+    std::unique_ptr<Compressor> comp(algo->CreateCompressor(freq));
     if (!comp->setOpt(opt_var_)) return 0;
     if (!comp->setOpts(opt_vars_)) return 0;
     {
@@ -856,8 +854,12 @@ void Archive::decompress(const std::string& out_dir, bool verify) {
     Stream* out_stream = verify ? static_cast<Stream*>(&verify_segstream) : static_cast<Stream*>(&segstream);
     Stream* filter_out_stream = out_stream;
     std::unique_ptr<Filter> filter(algo->createFilter(filter_out_stream, nullptr, *this));
-    if (filter.get() != nullptr) filter_out_stream = filter.get();
-    std::unique_ptr<Compressor> comp(algo->createCompressor());
+    FrequencyCounter<256> freq;
+    if (filter != nullptr) {
+      filter_out_stream = filter.get();
+      freq = filter->GetFrequencies();
+    }
+    std::unique_ptr<Compressor> comp(algo->CreateCompressor(freq));
     comp->setOpt(opt_var_);
     comp->setOpts(opt_vars_);
     {

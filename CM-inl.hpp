@@ -306,7 +306,7 @@ namespace cm {
       for (uint32_t k = 0; k < kNumStates; ++k) {
         int p = initial_probs[std::min(j, 9U)][k];
         probs_[j].SetP(k, p, table_);
-        fast_probs_[j][k] = table_.st(p);
+        if (j == 0) fast_probs_[k] = table_.st(p);
       }
     }
 
@@ -549,12 +549,34 @@ namespace cm {
   }
 
   template <size_t kInputs, bool kUseSSE, typename HistoryType>
-  CM<kInputs, kUseSSE, HistoryType>::CM(uint32_t mem_level, bool lzp_enabled, Detector::Profile profile)
+  CM<kInputs, kUseSSE, HistoryType>::CM(const FrequencyCounter<256>& freq,
+                                        uint32_t mem_level,
+                                        bool lzp_enabled,
+                                        Detector::Profile profile)
     : mem_level_(mem_level)
     , data_profile_(profileForDetectorProfile(profile)) {
     force_profile_ = profile != Detector::kProfileDetect;
     lzp_enabled_ = lzp_enabled;
     opts_ = dummy_opts;
+    frequencies_ = freq;
+    SetUpCtxState();
   }
 
+  template <size_t kInputs, bool kUseSSE, typename HistoryType>
+  void CM<kInputs, kUseSSE, HistoryType>::SetUpCtxState() {
+    bool reached[256] = {};
+    size_t count = 0;
+    for (size_t i = 0; i < 256; ++i) {
+      for (size_t bit = 0; bit < 2; ++bit) {
+        auto next = i * 2 + 1 + bit;
+        if (next < 256) {
+          check(reached[next] == false);
+          reached[next] = true;
+          ++count;
+        }
+        ctx_state_[i].SetNext(bit, next);
+      }
+    }
+    std::cerr << "COUNT " << count << std::endl;
+  }
 }

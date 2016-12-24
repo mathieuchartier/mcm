@@ -254,7 +254,7 @@ void testFilter() {
 
 template<class FilterType>
 void benchFilter(const std::vector<uint8_t>& data) {
-  cm::CM<8, false> comp(6);
+  cm::CM<8, false> comp(FrequencyCounter<256>(), 6);
   // data = randomArray(kBenchDataSize);
   check(!data.empty());
   const uint64_t expected_sum = std::accumulate(data.begin(), data.end(), 0UL);

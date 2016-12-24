@@ -412,6 +412,9 @@ public:
     size_t escape_count_ = 0;
     size_t escape_count_word_ = 0;
     size_t escape_count_first_ = 0;
+
+    // Frequencies
+    FrequencyCounter<256> freq_;
   public:
     // Serialize to and from.
     // num words
@@ -421,6 +424,14 @@ public:
     // 1b count
     // 2b count
     // 3b count
+
+    FrequencyCounter<256> GetFrequencies() OVERRIDE {
+      return freq_;
+    }
+
+    void SetFrequencies(const FrequencyCounter<256>& freq) {
+      freq_ = freq;
+    }
 
     // Creates an encodable dictionary array.
     void addCodeWords(std::vector<WordCount>* words, uint8_t num1, uint8_t num2, uint8_t num3, FrequencyCounter<256>* fc) {
