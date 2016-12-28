@@ -199,7 +199,7 @@ namespace cm {
     }
 
   private:
-    uint32_t next_[2];
+    uint16_t next_[2];
   };
 
   class VoidHistoryWriter {
@@ -409,7 +409,7 @@ namespace cm {
 
     HistoryType* out_history_ = nullptr;
 
-    ALWAYS_INLINE uint32_t hash_lookup(hash_t hash, bool prefetch_addr = kUsePrefetch) {
+    ALWAYS_INLINE uint32_t HashLookup(hash_t hash, bool prefetch_addr) {
       hash &= hash_mask_;
       const uint32_t ret = hash + kHashStart;
       if (prefetch_addr) {
@@ -474,7 +474,6 @@ namespace cm {
         mixer_ctx = current_interval;
         mixer_ctx = (mixer_ctx << 1) | (mm_len > 0 || word_model_.getLength() > 6);
       }
-      // mixer_ctx = 0;
       mixers_[0].SetContext(mixer_ctx << 8);
     }
 
@@ -544,8 +543,7 @@ namespace cm {
 							p0 = match_model_.getP(table_.getStretchPtr(), 1);
 						}
 					}
-				}
-				else if (mm_l == 0) {
+				} else if (mm_l == 0) {
 					if (kInputs > 0) {
 						sp0 = &ht[base_contexts[0] ^ ctx_xor];
 						s0 = *sp0;
@@ -554,9 +552,9 @@ namespace cm {
 				} else {
 					if (kInputs > 0) {
 						if (kFixedMatchProbs) {
-							p0 = fixed_match_probs_[mm_l * 2 + match_model_.getExpectedBit()];
+							p0 = fixed_match_probs_[mm_l * 2 + match_model_.GetExpectedBit()];
 						} else {
-							p0 = match_model_.getP(table_.getStretchPtr(), match_model_.getExpectedBit());
+							p0 = match_model_.getP(table_.getStretchPtr(), match_model_.GetExpectedBit());
 						}
 					}
 				}
@@ -639,26 +637,20 @@ namespace cm {
 				const size_t kLimit = kMaxLearn - 1;
 				const size_t kDelta = 5;
 				// Returns false if we skipped the update due to a low error, should happen moderately frequently on highly compressible files.
-        bool ret = true;
-        /*
 				bool ret = m0->Update(
 					mixer_p, bit,
 					kShift, kLimit, 600, 1,
 					// mixer_update_rate_[m0->NextLearn(8)], 16,
 					mixer_update_rate_[m0->GetLearn()], 16,
 					p0, p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15
-				);*/
+				);
 				// Only update the states / predictions if the mixer was far enough from the bounds, helps 60k on enwik8 and 1-2sec.
 				const bool kOptP = false;
 				if (ret) {
 					auto updater = probs_[0].GetUpdater(bit);
-					if (kBitType == kBitTypeLZP) {
-						if (!kFixedMatchProbs) {
-							match_model_.updateCurMdl(1, bit, 6);
-						}
-					} else if (mm_l == 0) {
-						if (kInputs > 0) *sp0 = NextState(sp0 - hash_table_, s0, bit, updater, 0, kOptP ? opts_[0] : 23);
-					}
+          if (kBitType != kBitTypeLZP && mm_l == 0) {
+            if (kInputs > 0) *sp0 = NextState(sp0 - hash_table_, s0, bit, updater, 0, kOptP ? opts_[0] : 23);
+          }
 					if (kInputs > 1) *sp1 = NextState(sp1 - hash_table_, s1, bit, updater, 1, kOptP ? opts_[1] : 10);
 					if (kInputs > 2) *sp2 = NextState(sp2 - hash_table_, s2, bit, updater, 2, kOptP ? opts_[2] : 9);
 					if (kInputs > 3) *sp3 = NextState(sp3 - hash_table_, s3, bit, updater, 3, kOptP ? opts_[3] : 9);
@@ -688,7 +680,7 @@ namespace cm {
 					sse3_.update(bit);
 				}
 				if (kBitType != kBitTypeLZP) {
-					match_model_.updateBit(bit, !kFixedMatchProbs, 7);
+					match_model_.UpdateBit(bit, true, 7);
 				}
 				if (kStatistics) ++mixer_skip_[ret];
 
@@ -698,14 +690,13 @@ namespace cm {
 					ent.encode(stream, bit, p, kShift);
 				}
         cur_ctx = ctx_state_[cur_ctx].Next(bit);
-        // cur_ctx = cur_ctx * 2 + bit;
         if (kDecode) {
           code = (code << 1) | bit;
         }
         if (--bits == 4) {
           auto nibble = CtxState::GetNibble(cur_ctx);
           if (kPrefetchMatchModel) {
-            match_model_.fetch(nibble << 4);
+            match_model_.Fetch(nibble << 4);
           }
         }
 			} while (bits != 0);
@@ -755,7 +746,7 @@ namespace cm {
         *(ctx_ptr++) = o0pos;
       }
       if (cur.ModelEnabled(kModelSpecialChar, enabled)) {
-        *(ctx_ptr++) = hash_lookup(special_char_model_.GetHash());
+        *(ctx_ptr++) = HashLookup(special_char_model_.GetHash(), true);
       }
       if (cur.ModelEnabled(kModelOrder1, enabled)) {
         *(ctx_ptr++) = o1pos + p0 * o0size;
@@ -770,10 +761,10 @@ namespace cm {
         *(ctx_ptr++) = s4pos + p3 * o0size;
       }
       if (cur.ModelEnabled(kModelSparse23, enabled)) {
-        *(ctx_ptr++) = hash_lookup(HashFunc(p2, HashFunc(p1, 0x37220B98)), false); // Order 23
+        *(ctx_ptr++) = HashLookup(HashFunc(p2, HashFunc(p1, 0x37220B98)), false); // Order 23
       }
       if (cur.ModelEnabled(kModelSparse34, enabled)) {
-        *(ctx_ptr++) = hash_lookup(HashFunc(p3, HashFunc(p2, 0x651A833E)), false); // Order 34
+        *(ctx_ptr++) = HashLookup(HashFunc(p3, HashFunc(p2, 0x651A833E)), false); // Order 34
       }
       if (cur.ModelEnabled(kModelOrder2, enabled)) {
         *(ctx_ptr++) = o2pos + (last_bytes_ & 0xFFFF) * o0size;
@@ -782,30 +773,30 @@ namespace cm {
       for (; order <= cur.MaxOrder(); ++order) {
         h = HashFunc(buffer_[buffer_.Pos() - order], h);
         if (cur.ModelEnabled(static_cast<ModelType>(kModelOrder0 + order), enabled)) {
-          *(ctx_ptr++) = hash_lookup(h, kUsePrefetch);
+          *(ctx_ptr++) = HashLookup(h, true);
         }
       }
       if (cur.ModelEnabled(kModelWord1, enabled)) {
-        *(ctx_ptr++) = hash_lookup(word_model_.getMixedHash() + 99912312, false); // Already prefetched.
+        *(ctx_ptr++) = HashLookup(word_model_.getMixedHash() + 99912312, false); // Already prefetched.
       }
       if (cur.ModelEnabled(kModelWord2, enabled)) {
-        *(ctx_ptr++) = hash_lookup(word_model_.getPrevHash() + 111992, false);
+        *(ctx_ptr++) = HashLookup(word_model_.getPrevHash() + 111992, false);
       }
       if (cur.ModelEnabled(kModelWord12, enabled)) {
-        *(ctx_ptr++) = hash_lookup(word_model_.get01Hash() + 5111321, false); // Already prefetched.
+        *(ctx_ptr++) = HashLookup(word_model_.get01Hash() + 5111321, false); // Already prefetched.
       }
       if (cur.ModelEnabled(kModelInterval, enabled)) {
         uint64_t hash = interval_model_ & interval_mask_;
         // hash = hash
         const uint32_t interval_add = 7 * 0x97654321;
-        *(ctx_ptr++) = hash_lookup(IntervalHash(hash) + interval_add, kUsePrefetch);
+        *(ctx_ptr++) = HashLookup(IntervalHash(hash) + interval_add, true);
       }
       if (cur.ModelEnabled(kModelInterval2, enabled)) {
-        *(ctx_ptr++) = hash_lookup(hashify(interval_model2_ & interval2_mask_) + (22 * 123456781 + 1), kUsePrefetch);
+        *(ctx_ptr++) = HashLookup(hashify(interval_model2_ & interval2_mask_) + (22 * 123456781 + 1), true);
       }
       if (cur.ModelEnabled(kModelBracket, enabled)) {
         auto hash = bracket_.GetHash();
-        *(ctx_ptr++) = hash_lookup(hashify(hash + 82123123 * 9) + 0x20019412, false);
+        *(ctx_ptr++) = HashLookup(hashify(hash + 82123123 * 9) + 0x20019412, false);
       }
     }
 
@@ -815,26 +806,33 @@ namespace cm {
       static const size_t kCount = 1 << 16;
       int64_t total[kCount];
       std::fill_n(total, kCount, -1);
-      return DPOptimalLeaves(cost, total, 1, 64);
+      return DPOptimalLeaves(cost, total, 0, 64);
     }
 
-    int NextDPLeaf(int node, size_t next) {
+    int NextNibbleLeaf(int node, size_t next) {
+      // 0
+      // 1(1) 2(10)
+      // 3(11) 4 (100) 5 (101) 6 (110)
+      // 7-14
+      // 15-30
       size_t first_nibble = 0;
       size_t second_nibble = 0;
-      if (node < 16) {
-        node = node * 2 + next;
-        if (node < 16) {
+      if (node < 15) {
+        node = node * 2 + next + 1;
+        if (node < 15) {
           return node;
         }
-        first_nibble = node ^ 16;
-        second_nibble = 1;
+        first_nibble = (node + 1) ^ 16;
+        second_nibble = 0;
       } else {
-        first_nibble = (node - 1) / 15 - 1;
-        second_nibble = (node - 1) % 15 + 1;
-        second_nibble = second_nibble * 2 + next;
-        if (second_nibble >= 16) return -1;
+        first_nibble = node / 15 - 1;
+        second_nibble = node % 15;
+        second_nibble = second_nibble * 2 + next + 1;
+        if (second_nibble >= 15) {
+          return 256 + first_nibble * 16 + ((1 + second_nibble) ^ 16);
+        }
       }
-      return 15 + first_nibble * 15 + second_nibble;
+      return (first_nibble + 1) * 15 + second_nibble;
     }
 
     uint64_t DPOptimalLeaves(const uint64_t* cost, int64_t* total, size_t node, size_t remain) {
@@ -847,8 +845,8 @@ namespace cm {
       }
       --remain;
       // Try all combinations left and right.
-      const int next_a = NextDPLeaf(node, 0);
-      const int next_b = NextDPLeaf(node, 1);
+      const int next_a = NextNibbleLeaf(node, 0);
+      const int next_b = NextNibbleLeaf(node, 1);
       for (size_t i = 0; i <= remain; ++i) {
         int64_t cur = cost[node];
         if (next_a != -1) {
@@ -1100,13 +1098,11 @@ namespace cm {
         cur_profile_.ModelEnabled(kModelWord12) ||
         true) {
         word_model_.update(c);
-        if (word_model_.getLength() > 2) {
-          if (kPrefetchWordModel) {
-            hash_lookup(word_model_.getHash(), true);
-          }
+        if (kPrefetchWordModel && word_model_.getLength() > 2) {
+          HashLookup(word_model_.getHash(), true);
         }
         if (kPrefetchWordModel && cur_profile_.ModelEnabled(kModelWord12)) {
-          hash_lookup(word_model_.get01Hash(), true);
+          HashLookup(word_model_.get01Hash(), true);
         }
       }
       buffer_.Push(c);

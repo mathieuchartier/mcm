@@ -406,6 +406,7 @@ public:
 
     // Options
     static constexpr bool kOnlyDict = false;
+    static const size_t kCodeWordStart = 128u;
 
     // Stats
     static const bool kStats = true;
@@ -498,7 +499,7 @@ public:
       size_t num1 = rms.get();
       size_t num2 = rms.get();
       size_t num3 = rms.get();
-      word1bstart = 128;
+      word1bstart = kCodeWordStart;
       word2bstart = word1bstart + num1;
       word3bstart = word2bstart + num2;
       // Encode words.
@@ -512,12 +513,11 @@ public:
       std::cout << "Dictionary words=" << words.size() << " size=" << prettySize(dict_buffer_.size()) << std::endl;
     }
     void generate(std::vector<WordCount>& words, size_t num1, size_t num2, size_t num3, bool encode, FrequencyCounter<256>* fc = nullptr) {
-      static const size_t start = 128u;
-      size_t end1 = start + num1;
+      size_t end1 = kCodeWordStart + num1;
       size_t end2 = end1 + num2;
       size_t end3 = end2 + num3;
       size_t idx = 0;
-      for (size_t b1 = start; b1 < end1; ++b1) {
+      for (size_t b1 = kCodeWordStart; b1 < end1; ++b1) {
         if (idx < words.size()) {
           if (encode) {
             encode_map_.Add(words[idx].Word(), CodeWord(1, static_cast<uint8_t>(b1)));
@@ -532,7 +532,7 @@ public:
         }
       }
       for (size_t b1 = end1; b1 < end2; ++b1) {
-        for (size_t b2 = (kOverlapCodewords ? start : end1); b2 < (kOverlapCodewords ? 256u : end2); ++b2) {
+        for (size_t b2 = (kOverlapCodewords ? kCodeWordStart : end1); b2 < (kOverlapCodewords ? 256u : end2); ++b2) {
           if (idx < words.size()) {
             if (encode) {
               encode_map_.Add(words[idx].Word(), CodeWord(2, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2)));
@@ -549,8 +549,8 @@ public:
         }
       }
       for (size_t b1 = end2; b1 < end3; ++b1) {
-        for (size_t b2 = (kOverlapCodewords ? start : end2); b2 < (kOverlapCodewords ? 256u : end3); ++b2) {
-          for (size_t b3 = (kOverlapCodewords ? start : end2); b3 < (kOverlapCodewords ? 256u : end3); ++b3) {
+        for (size_t b2 = (kOverlapCodewords ? kCodeWordStart : end2); b2 < (kOverlapCodewords ? 256u : end3); ++b2) {
+          for (size_t b3 = (kOverlapCodewords ? kCodeWordStart : end2); b3 < (kOverlapCodewords ? 256u : end3); ++b3) {
             if (idx < words.size()) {
               if (encode) {
                 encode_map_.Add(words[idx].Word(), CodeWord(3, static_cast<uint8_t>(b1), static_cast<uint8_t>(b2), static_cast<uint8_t>(b3)));

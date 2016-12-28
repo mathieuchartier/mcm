@@ -46,6 +46,7 @@ namespace cm {
     }
     // Text model.
     const size_t text_mm_order = 7;
+    const size_t text_min_lzp_len = lzp_enabled_ ? 12 : kMaxMatch + 1;
     {
       size_t idx = 0;
       text_profile_ = CMProfile();
@@ -66,7 +67,7 @@ namespace cm {
       if (kInputs > idx++) text_profile_.EnableModel(kModelSparse34);
       // text_profile_ = CMProfile();
       text_profile_.SetMatchModelOrder(text_mm_order);
-      text_profile_.SetMinLZPLen(lzp_enabled_ ? 14 : kMaxMatch + 1);
+      text_profile_.SetMinLZPLen(text_min_lzp_len);
     }
     {
       // Text model for match.
@@ -89,6 +90,8 @@ namespace cm {
       if (kInputs > idx++) text_match_profile_.EnableModel(kModelSparse34);
       // text_match_profile_ = CMProfile();
       text_match_profile_.SetMatchModelOrder(text_mm_order);
+      text_match_profile_.SetMinLZPLen(text_min_lzp_len);
+
     }
     // Binary model.
     size_t binary_mm_order = 6;
@@ -411,7 +414,7 @@ namespace cm {
         }
         ++i;
       }
-      const uint64_t optimal = SolveOptimalLeaves(leaf_counts);
+      // const uint64_t optimal = SolveOptimalLeaves(leaf_counts);
       // std::cout << "first64 " << first_64 << " optimal " << optimal << " total " << total << std::endl;
       // std::cout << "Before first64 " << double(first_64) / double(total) << " " << double(optimal) / double(total) << " " << double(first_64_2) / double(total) << std::endl;
     }
@@ -565,18 +568,21 @@ namespace cm {
   template <size_t kInputs, bool kUseSSE, typename HistoryType>
   void CM<kInputs, kUseSSE, HistoryType>::SetUpCtxState() {
     bool reached[256] = {};
+    size_t prev[256] = {};
     size_t count = 0;
     for (size_t i = 0; i < 256; ++i) {
       for (size_t bit = 0; bit < 2; ++bit) {
-        auto next = i * 2 + 1 + bit;
+        size_t next = (opt_var_ & 1) ? i * 2 + 1 + bit : NextNibbleLeaf(i, bit);
+        // size_t next = NextNibbleLeaf(i, bit);
         if (next < 256) {
           check(reached[next] == false);
           reached[next] = true;
+          prev[next] = i;
           ++count;
         }
         ctx_state_[i].SetNext(bit, next);
       }
     }
-    std::cerr << "COUNT " << count << std::endl;
+    std::cerr << "COUNT " << count << " " << opt_var_ << std::endl;
   }
 }

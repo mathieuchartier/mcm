@@ -63,7 +63,7 @@ public:
     return pos;
   }
 
-  ALWAYS_INLINE uint32_t getExpectedBit() const {
+  ALWAYS_INLINE uint32_t GetExpectedBit() const {
     return expected_code >> kCodeBitShift;
   }
 
@@ -107,7 +107,7 @@ public:
     model_base = &models[ctx * num_length_models_];
   }
 
-  void search(Buffer& buffer, size_t spos) {
+  NO_INLINE void search(Buffer& buffer, size_t spos) {
     // Reverse match.
     size_t blast = buffer.Pos() - 1;
     size_t len = sizeof(uint32_t);
@@ -131,11 +131,11 @@ public:
     }
   }
 
-  void fetch(uint32_t ctx) {
+  void Fetch(uint32_t ctx) {
     prefetch(&hash_table[(hash_ ^ ctx) & hash_mask]);
   }
 
-  void update(Buffer& buffer) {
+  NO_INLINE void update(Buffer& buffer) {
     const auto blast = buffer.Pos() - 1;
     const auto bmask = buffer.Mask();
     hash_ = hash_ ^ buffer[blast];
@@ -181,11 +181,12 @@ public:
     cur_mdl[expected_bit].update(bit, learn_rate);
   }
 
-  ALWAYS_INLINE void updateBit(uint32_t bit, bool update_mdl = true, uint32_t learn_rate = 9) {
+  ALWAYS_INLINE void UpdateBit(uint32_t bit, bool update_mdl = true, uint32_t learn_rate = 9) {
     if (len) {
-      uint32_t diff = (expected_code >> kCodeBitShift) ^ bit;
+      const auto expected_bit = GetExpectedBit();
+      uint32_t diff = expected_bit ^ bit;
       if (update_mdl) {
-        cur_mdl[getExpectedBit()].update(bit, learn_rate);
+        cur_mdl[expected_bit].update(bit, learn_rate);
       }
       len &= -(1 ^ diff);
       expected_code <<= 1;
