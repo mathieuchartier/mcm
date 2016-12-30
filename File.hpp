@@ -131,9 +131,20 @@ public:
 
   // Not thread safe.
   void write(const uint8_t* bytes, size_t count) {
-    size_t ret = fwrite(bytes, 1, count, handle);
-    offset += ret;
-    check(ret == count);
+    while (count != 0) {
+      size_t ret = fwrite(bytes, 1, count, handle);
+      if (ret == 0 && ferror(handle) != 0) {
+        int e = errno;
+        if (errno != EINTR) {
+          perror("Fatal error during file writing");
+          check(false);
+        } else {
+          clearerr(handle);
+        }
+      }
+      offset += ret;
+      count -= ret;
+    }
   }
 
   // Not thread safe.
