@@ -102,10 +102,10 @@ public:
   StreamingMatchFinder(size_t min_match, size_t max_match) : MatchFinder(min_match, max_match) {}
   template <typename Stream>
   void RefillRead(Stream& stream) {
-    while (!lookahead_.full()) {
+    while (!lookahead_.Full()) {
       int c = stream.get();
       if (c == EOF) break;
-      lookahead_.push_back(c);
+      lookahead_.PushBack(c);
     }
   }
   // Return 0 to max_match_ as len.

@@ -89,30 +89,30 @@ public:
     }
     // This is pretty bad, need a clean way to do it.
     uint32_t fpos = 0;
-    const uint32_t chunk_size = window.Read<kEndianLittle>(fpos, 4); fpos += 4;
-    const uint32_t format = window.Read<kEndianBig>(fpos, 4); fpos += 4;
+    const uint32_t chunk_size = window.template Read<kEndianLittle>(fpos, 4); fpos += 4;
+    const uint32_t format = window.template Read<kEndianBig>(fpos, 4); fpos += 4;
     // Format subchunk.
-    const uint32_t subchunk_id = window.Read<kEndianBig>(fpos, 4); fpos += 4;
+    const uint32_t subchunk_id = window.template Read<kEndianBig>(fpos, 4); fpos += 4;
     const uint32_t kWave = MakeWord('W', 'A', 'V', 'E');
     const uint32_t kSubchunk = MakeWord('f', 'm', 't', ' ');
     if (format != kWave || subchunk_id != kSubchunk) {
       return false;
     }
-    const uint32_t subchunk_size = window.Read<kEndianLittle>(fpos, 4); fpos += 4;
+    const uint32_t subchunk_size = window.template Read<kEndianLittle>(fpos, 4); fpos += 4;
     if (subchunk_size != 16 && subchunk_size != 18) {
       return false;
     }
-    const uint32_t audio_format = window.Read<kEndianLittle>(fpos, 2); fpos += 2;
-    const uint32_t num_channels = window.Read<kEndianLittle>(fpos, 2); fpos += 2;
+    const uint32_t audio_format = window.template Read<kEndianLittle>(fpos, 2); fpos += 2;
+    const uint32_t num_channels = window.template Read<kEndianLittle>(fpos, 2); fpos += 2;
     if (audio_format == 1 && num_channels == 2) {
       fpos += subchunk_size - 6;
       // fpos += 4; // Skip: Sample rate
       // fpos += 4; // Skip: Byte rate
       // fpos += 2; // Skip: Block align
-      const uint32_t bits_per_sample = window.Read<kEndianLittle>(fpos, 2); fpos += 2;
+      const uint32_t bits_per_sample = window.template Read<kEndianLittle>(fpos, 2); fpos += 2;
       for (size_t i = 0; i < 5; ++i) {
-        const uint32_t subchunk2_id = window.Read<kEndianBig>(fpos, 4); fpos += 4;
-        const uint32_t subchunk2_size = window.Read<kEndianLittle>(fpos, 4); fpos += 4;
+        const uint32_t subchunk2_id = window.template Read<kEndianBig>(fpos, 4); fpos += 4;
+        const uint32_t subchunk2_size = window.template Read<kEndianLittle>(fpos, 4); fpos += 4;
         if (subchunk2_id == 0x64617461) {
           if (subchunk2_size >= chunk_size) {
             break;

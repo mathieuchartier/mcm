@@ -113,15 +113,16 @@ public:
   }
 
   void init() {
+    ReorderMap<uint8_t, 256> reorder;
     ent = Range7();
     for (auto& c : order0) c = 0;
     for (auto& c : order1) c = 0;
     table.build(0);
 
     hash_mask = ((2 * MB) << mem_usage) / sizeof(hash_table[0]) - 1;
-    buffer_.resize((MB / 4) << mem_usage, sizeof(uint32_t));
+    buffer_.Resize((MB / 4) << mem_usage, sizeof(uint32_t));
     hash_storage.resize(hash_mask + 1); // Add extra space for ctx.
-    match_model_.resize(buffer_.getSize() / 2);
+    match_model_.resize(buffer_.Size() / 2);
     match_model_.init(5, 100);
     std::cout << hash_mask + 1 << std::endl;
     hash_table = reinterpret_cast<uint8_t*>(hash_storage.getData());
@@ -180,7 +181,7 @@ public:
 
     eof_model.init();
 
-    word_model.init(nullptr);
+    word_model.Init(reorder);
 
     owhash = 0;
     byte_count = 0;
@@ -326,7 +327,7 @@ public:
       int mm_p = 0;
       int p0 = table.st(pr0.getP());
       if (!kLZP && match_model_.getLength()) {
-        mm_p = match_model_.getP(table.getStretchPtr(), match_model_.getExpectedBit());
+        mm_p = match_model_.getP(table.getStretchPtr(), match_model_.GetExpectedBit());
         p0 = mm_p;
       }
       int p1 = table.st(pr1.getP());
@@ -379,7 +380,7 @@ public:
         *s3 = nextState(*s3, bit, 3);
       }
       if (!kLZP && match_model_.getLength()) {
-        match_model_.updateBit(bit);
+        match_model_.UpdateBit(bit);
       }
       if (kSSE) {
         sse_.update(bit);
@@ -395,7 +396,7 @@ public:
 
   void update(char c) {
     word_model.update(c);
-    buffer_.push(c);
+    buffer_.Push(c);
     ++byte_count;
   }
 

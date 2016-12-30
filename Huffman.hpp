@@ -335,7 +335,7 @@ public:
     for (uint32_t i = 0; i < alphabet_size; ++i) {
       lengths[i] = ent.decodeDirect(stream, max_length) + 1;
     }
-    return buildFromCodeLengths(&lengths[0], alphabet_size, max_length, nullptr);
+    return HuffTree::BuildFromCodeLengths<uint32_t>(&lengths[0], alphabet_size, max_length, nullptr);
   }
 
   static const uint32_t alphabet_size = 256;
@@ -363,8 +363,8 @@ public:
     sin.restart();
 
     // Build length limited tree with package merge algorithm.
-    auto* tree = buildTreePackageMerge(&freq[0], alphabet_size, max_length);
-    tree->printRatio("LL(16)");
+    auto* tree = Tree<uint32_t>::BuildPackageMerge(&freq[0], alphabet_size, max_length);
+    tree->PrintRatio(std::cerr, "LL(16)");
 
     ProgressMeter meter;
     ent = Range7();

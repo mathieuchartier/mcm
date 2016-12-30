@@ -43,7 +43,7 @@
 #define ALWAYS_INLINE __forceinline
 #define NO_INLINE __declspec(noinline)
 #else
-#define ALWAYS_INLINE inline __attribute__((always_inline))
+#define ALWAYS_INLINE __attribute__((always_inline))
 #define NO_INLINE __declspec(noinline)
 #endif
 
@@ -95,24 +95,24 @@ ALWAYS_INLINE static bool IsWordChar(int c) {
   return IsLowerCase(c) || IsUpperCase(c) || c >= 128;
 }
 
-ALWAYS_INLINE inline static int UpperToLower(int c) {
+ALWAYS_INLINE static int UpperToLower(int c) {
   assert(IsUpperCase(c));
   return c - 'A' + 'a';
 }
 
-ALWAYS_INLINE inline static int LowerToUpper(int c) {
+ALWAYS_INLINE static int LowerToUpper(int c) {
   assert(IsLowerCase(c));
   return c - 'a' + 'A';
 }
 
-ALWAYS_INLINE inline static int MakeUpperCase(int c) {
+ALWAYS_INLINE static int MakeUpperCase(int c) {
   if (IsLowerCase(c)) {
     c = LowerToUpper(c);
   }
   return c;
 }
 
-ALWAYS_INLINE inline static int MakeLowerCase(int c) {
+ALWAYS_INLINE static int MakeLowerCase(int c) {
   if (IsUpperCase(c)) {
     c = UpperToLower(c);
   }

@@ -452,24 +452,6 @@ public:
     }
     return DetectedBlock(kProfileBinary, static_cast<uint32_t>(binary_len));
   }
-
-  ALWAYS_INLINE size_t readBytes(size_t pos, size_t bytes = 4, bool big_endian = true) {
-    if (pos + bytes > buffer_.Size()) {
-      return 0;
-    }
-    uint32_t w = 0;
-    // Past the end of buffer :(
-    if (big_endian) {
-      for (size_t i = 0; i < bytes; ++i) {
-        w = (w << 8) | buffer_[pos + i];
-      }
-    } else {
-      for (size_t shift = 0, i = 0; i < bytes; ++i, shift += 8) {
-        w |= static_cast<uint32_t>(buffer_[pos + i]) << shift;
-      }
-    }
-    return w;
-  }
 };
 
 class Deduplicator {

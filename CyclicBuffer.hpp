@@ -87,16 +87,16 @@ public:
     data_ = nullptr;
   }
   void Fill(T d) {
-    std::fill(&storage_[0], &storage_[0] + getSize(), d);
+    std::fill(&storage_[0], &storage_[0] + Size(), d);
   }
   void CopyStartToEndOfBuffer(size_t count) {
-    size_t size = getSize();
+    size_t size = Size();
     for (size_t i = 0;i < count;++i) {
       data_[size + i] = data_[i];
     }
   }
   void CopyEndToStartOfBuffer(size_t count) {
-    size_t size = getSize();
+    size_t size = Size();
     for (size_t i = 0;i < count;++i) {
       storage_[i] = storage_[i + size];
     }
@@ -134,10 +134,10 @@ public:
   void PushBack(T c) {
     assert(size_ < Capacity());
     ++size_;
-    Push(c);
+    this->Push(c);
   }
   ALWAYS_INLINE T Front() const {
-    return this->data_[front_pos_ & Mask()];
+    return this->data_[front_pos_ & this->Mask()];
   }
   ALWAYS_INLINE size_t Size() const {
     return size_;
@@ -146,7 +146,7 @@ public:
     return Capacity() - Size();
   }
   ALWAYS_INLINE T operator [] (size_t offset) const {
-    return this->data_[(front_pos_ + offset) & Mask()];
+    return this->data_[(front_pos_ + offset) & this->Mask()];
   }
   ALWAYS_INLINE bool Full() const {
     return this->Size() == Capacity();
