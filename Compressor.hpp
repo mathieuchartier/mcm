@@ -174,7 +174,7 @@ public:
 };
 
 class Store : public Compressor {
-  static constexpr bool kReorder = true;
+  static constexpr bool kReorder = false;
 public:
   Store();
   virtual void compress(Stream* in, Stream* out, uint64_t count);

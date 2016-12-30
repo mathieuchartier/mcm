@@ -210,8 +210,13 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer, Arc
           std::cerr << "Invalid number of words for dictionary " << count << std::endl;
         }
       }
+      CodeWordMap dict_codes;
+      // dict_codes.Add(0, 32);
+      dict_codes.Add(128, 256);
+      size_t num_code_bytes = 128 + 0;
+      // size_t num_code_bytes = 128;
       if (code_words.GetCodeWords()->empty()) {
-        generator.generateCodeWords(builder, &code_words, 5, 40, 32);
+        generator.Generate(builder, &code_words, 5, 40, 32, dict_codes.Count());
       }
       const auto& out_dict_file = archive.Options().out_dict_file_;
       if (!out_dict_file.empty()) {
@@ -222,7 +227,7 @@ Filter* Archive::Algorithm::createFilter(Stream* stream, Analyzer* analyzer, Arc
         }
       }
       auto& freq = builder.FrequencyCounter();
-      dict_filter->addCodeWords(code_words.GetCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_, &freq);
+      dict_filter->AddCodeWords(code_words.GetCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_, &freq, dict_codes.Count());
       if (false) {
         std::cerr << std::endl << "Before " << freq.Sum() << std::endl;
         auto* tree = Huffman::Tree<uint32_t>::BuildPackageMerge(freq.GetFrequencies(), 256, 16);
@@ -443,9 +448,9 @@ void testFilter(Stream* stream, Analyzer* analyzer) {
     auto& builder = analyzer->getDictBuilder();
     Dict::CodeWordGeneratorFast generator;
     Dict::CodeWordSet code_words;
-    generator.generateCodeWords(builder, &code_words, 8);
+    generator.Generate(builder, &code_words, 8);
     auto dict_filter = new Dict::Filter(stream, 0x3, 0x4, 0x6);
-    dict_filter->addCodeWords(code_words.GetCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_, nullptr);
+    dict_filter->AddCodeWords(code_words.GetCodeWords(), code_words.num1_, code_words.num2_, code_words.num3_, nullptr);
     WriteVectorStream wvs(&comp);
     Store store;
     store.compress(dict_filter, &wvs, std::numeric_limits<uint64_t>::max());

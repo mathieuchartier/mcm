@@ -618,7 +618,7 @@ public:
           break;
         }
         if (block.profile() == Detector::kProfileText) {
-          dict_builder_.addChar(c);
+          dict_builder_.AddChar(c);
         }
       }
       const size_t size = blocks_.size();
