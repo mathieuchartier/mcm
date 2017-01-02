@@ -32,9 +32,10 @@ private:
   size_t num_length_models_;
 
   // Hash table
-  size_t hash_mask;
+  size_t hash_mask_;
+  size_t hash_mask_prefetch_;
   MemMap hash_storage;
-  uint32_t* hash_table;
+  uint32_t* hash_table_;
   Model* cur_mdl;
   uint32_t expected_code;
   static const uint32_t kCodeBitShift = sizeof(uint32_t) * 8 - 1;
@@ -47,11 +48,12 @@ public:
   }
 
   void resize(size_t size) {
-    hash_mask = size - 1;
+    hash_mask_ = size - 1;
+    hash_mask_prefetch_ = hash_mask_ - (kCacheLineSize / sizeof(uint32_t) - 1);
     // Check power of 2.
-    assert((hash_mask & (hash_mask + 1)) == 0);
-    hash_storage.resize((hash_mask + 1) * sizeof(uint32_t));
-    hash_table = (uint32_t*)hash_storage.getData();
+    assert(isPowerOf2(hash_mask_ + 1));
+    hash_storage.resize((hash_mask_ + 1) * sizeof(uint32_t) + kCacheLineSize);
+    hash_table_ = reinterpret_cast<uint32_t*>(AlignUp(hash_storage.getData(), kCacheLineSize));
   }
 
   ALWAYS_INLINE int getP(const short* st, size_t expected_bit) {
@@ -132,7 +134,7 @@ public:
   }
 
   void Fetch(uint32_t ctx) {
-    prefetch(&hash_table[(hash_ ^ ctx) & hash_mask]);
+    Prefetch(&hash_table_[(hash_ ^ ctx) & hash_mask_]);
   }
 
   NO_INLINE void update(Buffer& buffer) {
@@ -142,7 +144,7 @@ public:
     const auto last_pos = blast & bmask;
     const auto hmask = hash_ & ~bmask;
     // Update the existing match.
-    auto& b1 = hash_table[hash_ & hash_mask];
+    auto& b1 = hash_table_[hash_ & hash_mask_];
     if (len) {
       len += len < cur_max_match;
       ++pos;

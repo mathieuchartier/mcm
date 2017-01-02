@@ -75,7 +75,7 @@ static const uint32_t kCacheLineSize = 64; // Sandy bridge.
 static const uint32_t kPageSize = 4 * KB;
 static const uint32_t kBitsPerByte = 8;
 
-ALWAYS_INLINE void prefetch(const void* ptr) {
+ALWAYS_INLINE void Prefetch(const void* ptr) {
 #ifdef WIN32
   _mm_prefetch((char*)ptr, _MM_HINT_T0);
 #else
@@ -417,6 +417,11 @@ static inline const size_t RoundDown(size_t n, size_t r) {
 
 static inline const size_t RoundUp(size_t n, size_t r) {
   return RoundDown(n + r - 1, r);
+}
+
+template <typename T>
+static inline T* AlignUp(T* ptr, size_t r) {
+  return reinterpret_cast<T*>(RoundUp(reinterpret_cast<size_t>(ptr), r));
 }
 
 template <typename T>

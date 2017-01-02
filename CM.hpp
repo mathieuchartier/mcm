@@ -180,26 +180,31 @@ namespace cm {
     size_t max_order_ = 0;
   };
 
-  class ByteState {
+  class ByteStateMap {
   public:
     ALWAYS_INLINE static bool IsLeaf(uint32_t state) {
       return (state >> 8) != 0;
     }
 
-    ALWAYS_INLINE uint32_t Next(uint32_t bit) const {
-      return next_[bit];
+    ALWAYS_INLINE uint32_t Next(uint32_t state, uint32_t bit) const {
+      return next_[state][bit];
     }
 
-    ALWAYS_INLINE static uint32_t GetNibble(uint32_t state) {
-      return (state + 1) ^ 16;
+    ALWAYS_INLINE uint32_t GetBits(uint32_t state) {
+      return bits_[state];
     }
 
-    void SetNext(uint32_t bit, uint32_t next) {
-      next_[bit] = next;
+    ALWAYS_INLINE void SetBits(uint32_t state, uint32_t bits) {
+      bits_[state] = bits;
+    }
+
+    void SetNext(uint32_t state, uint32_t bit, uint32_t next) {
+      next_[state][bit] = next;
     }
 
   private:
-    uint16_t next_[2];
+    uint16_t next_[256][2] = {};
+    uint8_t bits_[256] = {};
   };
 
   class VoidHistoryWriter {
@@ -226,7 +231,7 @@ namespace cm {
     static const bool kUseLZP = true;
     static const bool kUseLZPSSE = true;
     // Prefetching related flags.
-    static const bool kUsePrefetch = false;
+    static const bool kUsePrefetch = true;
     static const bool kPrefetchMatchModel = true;
     static const bool kPrefetchWordModel = true;
     static const bool kFixedMatchProbs = false;
@@ -365,8 +370,8 @@ namespace cm {
     uint32_t prob_ctx_add_ = 0;
 
     // Ctx state map
-    using CtxState = ByteState;
-    CtxState ctx_state_[256];
+    using ByteState = ByteStateMap;
+    ByteState ctx_state_;
 
     // SSE
     SSE<kShift> sse_;
@@ -412,8 +417,8 @@ namespace cm {
     ALWAYS_INLINE uint32_t HashLookup(hash_t hash, bool prefetch_addr) {
       hash &= hash_mask_;
       const uint32_t ret = hash + kHashStart;
-      if (prefetch_addr) {
-        prefetch(hash_table_ + ret);
+      if (prefetch_addr && kUsePrefetch) {
+        Prefetch(hash_table_ + ret);
       }
       return ret;
     }
@@ -452,6 +457,7 @@ namespace cm {
       return b ^ (b >> 13);
     }
 
+    void SetStates(const uint32_t* remap);
     void SetUpCtxState();
 
     void CalcMixerBase() {
@@ -689,12 +695,15 @@ namespace cm {
 				} else {
 					ent.encode(stream, bit, p, kShift);
 				}
-        cur_ctx = ctx_state_[cur_ctx].Next(bit);
+        cur_ctx = ctx_state_.Next(cur_ctx, bit);
         if (kDecode) {
           code = (code << 1) | bit;
         }
         if (--bits == 4) {
-          auto nibble = CtxState::GetNibble(cur_ctx);
+          auto nibble = ctx_state_.GetBits(cur_ctx);
+          if (!kDecode) {
+            dcheck(nibble == c / 16);
+          }
           if (kPrefetchMatchModel) {
             match_model_.Fetch(nibble << 4);
           }
