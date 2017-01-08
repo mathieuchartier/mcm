@@ -31,7 +31,7 @@
 #include "Entropy.hpp"
 #include "GD.hpp"
 #include "Huffman.hpp"
-#include "LD.hpp"
+// #include "LD.hpp"
 #include "Log.hpp"
 #include "MatchModel.hpp"
 #include "Memory.hpp"
@@ -192,7 +192,7 @@ public:
       actual.push_back(samples[j] / 32767.0);
     }
     std::vector<float> coeff(num_grad);
-    ForwardLinearPrediction(coeff, actual);
+    // ForwardLinearPrediction(coeff, actual);
 
     bool use_gd = false; // opt_var != 0;
     LinearPredictor<float, float, LogPredictor> p(num_grad);
