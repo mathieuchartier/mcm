@@ -418,7 +418,11 @@ namespace cm {
       hash &= hash_mask_;
       const uint32_t ret = hash + kHashStart;
       if (prefetch_addr && kUsePrefetch) {
-        Prefetch(hash_table_ + ret);
+        if (opt_var_ & 1) {
+          Prefetch(hash_table_ + ret);
+        } else {
+          Prefetch(hash_table_ + (ret & ~(kCacheLineSize - 1)));
+        }
       }
       return ret;
     }
@@ -459,6 +463,7 @@ namespace cm {
 
     void SetStates(const uint32_t* remap);
     void SetUpCtxState();
+    void OptimalCtxState();
 
     void CalcMixerBase() {
       uint32_t mixer_ctx = 0;
@@ -526,7 +531,6 @@ namespace cm {
           code <<= 1;
 				}
 				const auto mm_l = match_model_.getLength();
-				// ++ctx_count_[mixer_ctx];
 				uint8_t
 					*rst sp0, *rst sp1, *rst sp2, *rst sp3, *rst sp4, *rst sp5, *rst sp6, *rst sp7,
 					*rst sp8, *rst sp9, *rst sp10, *rst sp11, *rst sp12, *rst sp13, *rst sp14, *rst sp15;
@@ -695,6 +699,9 @@ namespace cm {
 				} else {
 					ent.encode(stream, bit, p, kShift);
 				}
+        if (bits == 1) {
+          // ++ctx_count_[cur_ctx];  // Only for last context.
+        }
         cur_ctx = ctx_state_.Next(cur_ctx, bit);
         if (kDecode) {
           code = (code << 1) | bit;
@@ -844,7 +851,7 @@ namespace cm {
       return (first_nibble + 1) * 15 + second_nibble;
     }
 
-    uint64_t DPOptimalLeaves(const uint64_t* cost, int64_t* total, size_t node, size_t remain) {
+    uint64_t OptimalByteStates(const int64_t* cost, int64_t* total, size_t node, size_t remain) {
       auto& slot = total[256 * node + remain];
       if (slot != -1) {
         return slot;
@@ -852,17 +859,23 @@ namespace cm {
       if (remain == 0) {
         return 0;
       }
-      --remain;
+      int64_t base_cost = cost[node];
+      if (base_cost == -1) {
+        base_cost = 0;
+      } else {
+        // -1 means we don't need to add.
+        --remain;
+      }
       // Try all combinations left and right.
-      const int next_a = NextNibbleLeaf(node, 0);
-      const int next_b = NextNibbleLeaf(node, 1);
+      const auto next_a = node * 2 + 1;
+      const auto next_b = node * 2 + 2;
       for (size_t i = 0; i <= remain; ++i) {
-        int64_t cur = cost[node];
-        if (next_a != -1) {
-          cur += DPOptimalLeaves(cost, total, next_a, i);
+        int64_t cur = base_cost;
+        if (next_a < 255) {
+          cur += OptimalByteStates(cost, total, next_a, i);
         }
-        if (next_b != -1) {
-          cur += DPOptimalLeaves(cost, total, next_b, remain - i);
+        if (next_b < 255) {
+          cur += OptimalByteStates(cost, total, next_b, remain - i);
         }
         slot = std::max(slot, cur);
       }

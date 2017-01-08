@@ -395,12 +395,13 @@ int main(int argc, char* argv[]) {
       size_t len = 1;
       // size_t kMaxIndex = 128 - len;
       // size_t kMaxIndex = cm::kModelCount;
-      size_t kMaxIndex = 32;
+      size_t kMaxIndex = 12345;
       size_t bads = 0;
       size_t best_cur = 0;
-      double total = 0;
+      static constexpr size_t kAvgCount = 2;
+      double total[kAvgCount] = {};
+      size_t count[kAvgCount] = {};
       double min_time = std::numeric_limits<double>::max();
-      size_t count = 0;
       const bool kPerm = false;
       if (kPerm) {
         for (size_t i = 0;; ++i) {
@@ -446,12 +447,12 @@ int main(int argc, char* argv[]) {
           uint64_t in_bytes = archive.compress(options.files);
           if (in_bytes == 0) continue;
           const double time = clockToSeconds(clock() - start);
-          total += time;
+          total[i % kAvgCount] += time;
           min_time = std::min(min_time, time);
           const auto size = fout.tell();
           opt_file << "opts ";
           for (auto opt : opts) opt_file << opt << ",";
-          ++count;
+          ++count[i % kAvgCount];
           auto before_index = cur_index;
           auto before_opt = opts[before_index];
           if (size < best_size) {
@@ -468,12 +469,21 @@ int main(int argc, char* argv[]) {
             ++opts[cur_index];
           }
 
-          opt_file << " -> " << size << " best " << best_var << " in," << time << " s avg " << total / double(count) << std::endl << std::flush;
+          std::ostringstream ss;
+          double avgs[kAvgCount] = {};
+          for (size_t i = 0; i < kAvgCount; ++i) {
+            if (count[i] != 0) avgs[i] = total[i] / double(count[i]);
+          }
+          double avg = std::accumulate(total, total + kAvgCount, 0.0) / double(std::accumulate(count, count + kAvgCount, 0u));
+          ss << " -> " << formatNumber(size) << " best " << best_var << " in " << time << "s avg "
+             << avg << "(";
+          for (double d : avgs) ss << d << ",";
+          ss << ") min " << min_time;
+
+          opt_file << ss.str() << std::endl << std::flush;
 
           std::cout << "opt[" << before_index << "]=" << before_opt << " best=" << best_var << "(" << formatNumber(best_size) << ") "
-            << formatNumber(in_bytes) << " -> " << formatNumber(size)
-            << " took " << std::setprecision(3) << time << "s avg " << total / double(count) << " min " << min_time << std::endl;
-
+            << formatNumber(in_bytes) << ss.str() << std::endl;
         }
       }
     } else {

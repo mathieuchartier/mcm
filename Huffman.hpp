@@ -164,8 +164,7 @@ public:
 
         // Merge back into original set.
         merge_set = original_set;
-        merge_set.insert(std::make_move_iterator(new_set.begin()),
-                         std::make_move_iterator(new_set.end()));
+        merge_set.insert(new_set.begin(), new_set.end());
         while (merge_set.size() > package_limit) {
           merge_set.erase(--merge_set.end());
         }

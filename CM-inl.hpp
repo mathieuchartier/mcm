@@ -342,7 +342,7 @@ inline void CM<kInputs, kUseSSE, HistoryType>::init() {
   }
   SetDataProfile(data_profile_);
   last_bytes_ = 0;
-
+  SetUpCtxState();
   // Statistics
   if (kStatistics) {
     for (auto& c : mixer_skip_) c = 0;
@@ -402,39 +402,12 @@ inline void CM<kInputs, kUseSSE, HistoryType>::compress(Stream* in_stream, Strea
   ent.flush(sout);
 
   {
-    // auto ctx2 = 15 + (n1 * 15);
-    // 
-    std::map<size_t, size_t> counts;
-    size_t first_64 = 0, total = 0;
-    size_t leaf_count = 0;
-    uint64_t leaf_counts[256] = {};
-    for (size_t i = 0; i < kDiffCounter; ++i) {
-      if (i < 16) continue; // Only first nibble.
-      size_t c = i;
-      --c;  // Subtract always added one.
-      size_t second_nibble = c % 15 + 1;
-      if (second_nibble * 2 < 16) continue;
-      ++leaf_count;
-      if (ctx_count_[i] == 0) continue;
-      std::cout << "Count " << i << " : " << ctx_count_[i] << std::endl;
-      counts.emplace(ctx_count_[i], i);
-      if (i < 64) first_64 += ctx_count_[i];
-      total += ctx_count_[i];
-      leaf_counts[i] = ctx_count_[i];
+    uint64_t total = 0, less64 = 0;
+    for (size_t i = 0; i < 64; ++i) less64 += ctx_count_[i];
+    for (size_t i = 0; i < 256; ++i) total += ctx_count_[i];
+    if (total > 0) {
+      std::cout << std::endl << less64 << "/" << total << " = " << double(less64) / double(total) << std::endl;
     }
-    check(leaf_count == 128);
-    size_t first_64_2 = 0;
-    size_t i = 0;
-    for (auto it = counts.rbegin(); it != counts.rend(); ++it) {
-      if (it->first != 0) {
-        std::cout << it->second << " : " << it->first << std::endl;
-        if (i < 32) first_64_2 += it->first;
-      }
-      ++i;
-    }
-    // const uint64_t optimal = SolveOptimalLeaves(leaf_counts);
-    // std::cout << "first64 " << first_64 << " optimal " << optimal << " total " << total << std::endl;
-    // std::cout << "Before first64 " << double(first_64) / double(total) << " " << double(optimal) / double(total) << " " << double(first_64_2) / double(total) << std::endl;
   }
 
   if (kStatistics) {
@@ -581,7 +554,6 @@ inline CM<kInputs, kUseSSE, HistoryType>::CM(
   lzp_enabled_ = lzp_enabled;
   opts_ = dummy_opts;
   frequencies_ = freq;
-  SetUpCtxState();
 }
 
 // Context map for each context.
@@ -613,6 +585,10 @@ inline void CM<kInputs, kUseSSE, HistoryType>::SetStates(const uint32_t* remap) 
   
 template <size_t kInputs, bool kUseSSE, typename HistoryType>
 inline void CM<kInputs, kUseSSE, HistoryType>::SetUpCtxState() {
+  if (false) {
+    OptimalCtxState();
+    return;
+  }
   uint32_t bits[256] = {256};
   uint32_t ctx_map[256] = {};
   bits[0] = 0;
@@ -627,6 +603,79 @@ inline void CM<kInputs, kUseSSE, HistoryType>::SetUpCtxState() {
         bits[next] = next_bits;
         ctx_map[next_bits] = next;
       }
+    }
+  }
+  SetStates(ctx_map);
+}
+
+template <size_t kInputs, bool kUseSSE, typename HistoryType>
+inline void CM<kInputs, kUseSSE, HistoryType>::OptimalCtxState() {
+  int64_t cost[256] = {};
+  // Fill in corresponding
+  // byte = (node * 2 + bit + 2) ^ 256
+  // (byte ^ 256) = node * 2 + bit + 2
+  // (byte ^ 256) - 2 = node * 2 + bit
+  auto* freq = frequencies_.GetFrequencies();
+  for (size_t i = 0; i < 256; ++i) {
+    cost[(i + 256 - 2) / 2] += freq[i];
+  }
+  for (size_t i = 0; i < 255; ++i) {
+    auto next = i * 2 + 2;
+    if (next > 255) {
+      check(cost[i] == freq[next ^ 256] + freq[(next + 1) ^ 256]);
+    }
+  }
+  uint32_t ctx_map[256] = {};
+  size_t cur_ctx = 0;
+  for (size_t i = 0; i < 4; ++i) {
+    const size_t kTotalSize = 256 * 256;
+    int64_t total[kTotalSize] = {};
+    std::fill_n(total, kTotalSize, -1);
+    const size_t kRemain = kCacheLineSize;
+    const size_t byte_states = OptimalByteStates(cost, total, 0, kRemain);
+    check(byte_states == total[256 * 0 + kRemain]);
+    std::cerr << "Optimal for cache line " << i << " " << byte_states << "/" << frequencies_.Sum() << std::endl;
+    using Pair = std::pair<uint32_t, uint32_t>;
+    std::vector<Pair> work;
+    work.push_back(Pair(0, kRemain));
+    size_t cur_cost = 0;
+    while (!work.empty()) {
+      auto pair = work.back();
+      work.pop_back();
+      auto node = pair.first;
+      auto remain = pair.second;
+      const auto next_a = node * 2 + 1;
+      const auto next_b = node * 2 + 2;
+      if (cost[node] != -1) {
+        cur_cost += cost[node];
+        cost[node] = -1;
+        --remain;
+        ctx_map[node] = cur_ctx++;
+      }
+      if (next_a < 255) {
+        check(next_b < 255);
+        size_t best_max = 0, best_index = 256;
+        for (size_t j = 0; j <= remain; ++j) {
+          auto a = std::max(total[256 * next_a + j], int64_t(0));
+          auto b = std::max(total[256 * next_b + (remain - j)], int64_t(0));
+          if (a + b >= best_max) {
+            best_max = a + b;
+            best_index = j;
+          }
+        }
+        if (best_index != 0) {
+          work.push_back(Pair(next_a, best_index));
+        }
+        if (remain - best_index != 0) {
+          work.push_back(Pair(next_b, remain - best_index));
+        }
+      }
+    }
+    check(byte_states == cur_cost);
+  }
+  for (size_t i = 1; i < 255; ++i) {
+    if (ctx_map[i] == 0) {
+      ctx_map[i] = cur_ctx++;
     }
   }
   SetStates(ctx_map);
